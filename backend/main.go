@@ -1,0 +1,544 @@
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/gorilla/mux"
+	"github.com/gorilla/sessions"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/joho/godotenv"
+	"golang.org/x/crypto/acme"
+	"golang.org/x/crypto/acme/autocert"
+	"golang.org/x/oauth2"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+// --- Utils
+func mustGet(key, fallback string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+func isHTTPS(u string) bool {
+	return strings.HasPrefix(strings.ToLower(u), "https://")
+}
+
+// --- Globals (but initialized later in main)
+var (
+	store     *sessions.CookieStore
+	oauthConf *oauth2.Config
+)
+
+// --- Logger that silences noisy TLS errors
+type quietErrorLog struct{}
+
+func (l quietErrorLog) Write(p []byte) (n int, err error) {
+	msg := string(p)
+	if strings.Contains(msg, "acme/autocert: missing server name") ||
+		strings.Contains(msg, "acme/autocert: host") ||
+		strings.Contains(msg, "client sent an HTTP request to an HTTPS server") ||
+		strings.Contains(msg, "tls:") ||
+		strings.Contains(msg, "EOF") ||
+		strings.Contains(msg, "wsarecv") {
+		return len(p), nil
+	}
+	return os.Stderr.Write(p)
+}
+
+// --- Login
+func handleLogin(w http.ResponseWriter, r *http.Request) {
+	url := oauthConf.AuthCodeURL("random-state", oauth2.AccessTypeOffline)
+	http.Redirect(w, r, url, http.StatusFound)
+}
+
+// --- Callback
+func handleCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		http.Error(w, "no code in request", http.StatusBadRequest)
+		return
+	}
+
+	token, err := oauthConf.Exchange(context.Background(), code)
+	if err != nil {
+		http.Error(w, "token exchange failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	client := oauthConf.Client(context.Background(), token)
+	resp, err := client.Get("https://discord.com/api/users/@me")
+	if err != nil {
+		http.Error(w, "failed to get user info", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	var user struct {
+		ID          string `json:"id"`
+		Username    string `json:"username"`
+		DisplayName string `json:"global_name"`
+		Avatar      string `json:"avatar"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		http.Error(w, "failed to parse user info", http.StatusInternalServerError)
+		return
+	}
+
+	// --- Save session ---
+	session, _ := store.Get(r, "session")
+	session.Values["discord_id"] = user.ID
+	session.Values["username"] = user.Username
+	session.Values["display_name"] = user.DisplayName
+	session.Values["avatar"] = user.Avatar
+	_ = session.Save(r, w)
+
+	// --- Auto-link or create player record ---
+	discordID, _ := strconv.ParseInt(user.ID, 10, 64)
+
+	var existing Player
+	err = DB.First(&existing, "id = ?", discordID).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 🆕 Create placeholder record for new user
+		newPlayer := Player{
+			ID:          discordID,
+			Username:    user.Username,
+			DisplayName: user.DisplayName,
+			Role:        "",  // not registered yet
+			Timezone:    "",  // empty until registration
+			Rating:      800, // default starting ELO
+			Wins:        0,
+			Losses:      0,
+			Matches:     0,
+		}
+		if err := DB.Create(&newPlayer).Error; err != nil {
+			log.Printf("❌ Failed to create new player record for %s (%s): %v", user.Username, user.ID, err)
+		} else {
+			log.Printf("🆕 Created new player record for %s (%s)", user.Username, user.ID)
+		}
+	} else if err == nil {
+		// ✅ Existing record — update username/display if changed
+		updates := map[string]any{}
+		if existing.Username != user.Username {
+			updates["username"] = user.Username
+		}
+		if existing.DisplayName != user.DisplayName {
+			updates["display_name"] = user.DisplayName
+		}
+		if len(updates) > 0 {
+			DB.Model(&existing).Updates(updates)
+			log.Printf("🔄 Updated player info for %s (%s)", user.Username, user.ID)
+		} else {
+			log.Printf("🔗 Linked existing player record for %s (%s)", user.Username, user.ID)
+		}
+	} else {
+		log.Printf("⚠️ Error checking player record for %s (%s): %v", user.Username, user.ID, err)
+	}
+
+	// --- Redirect to frontend ---
+	frontend := mustGet("FRONTEND_URL", "http://localhost:5173")
+	http.Redirect(w, r, frontend, http.StatusSeeOther)
+}
+
+// --- Me
+func handleMe(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "session")
+	discordIDStr, ok := session.Values["discord_id"].(string)
+	if !ok || discordIDStr == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	discordID, _ := strconv.ParseInt(discordIDStr, 10, 64)
+
+	var player Player
+	err := DB.First(&player, "id = ?", discordID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		respondJSON(w, map[string]any{
+			"registered": false,
+			"id":         discordIDStr,
+			"username":   session.Values["username"],
+			"avatar":     session.Values["avatar"],
+			"is_mod":     false,
+		})
+		return
+	}
+
+	// ❌ row exists but registration cleared
+	if player.Role == "" || player.Device == "" || player.Timezone == "" {
+		respondJSON(w, map[string]any{
+			"registered": false,
+			"id":         discordIDStr,
+			"username":   session.Values["username"],
+			"avatar":     session.Values["avatar"],
+			"is_mod":     false,
+		})
+		return
+	}
+
+	// --- ✅ Discord Role Check for League Mod ---
+	isMod := false
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	modRoleID := getEnv("DISCORD_LEAGUE_MOD_ROLE_ID", "")
+	botToken := getEnv("DISCORD_BOT_TOKEN", "")
+
+	if guildID != "" && modRoleID != "" && botToken != "" {
+		req, _ := http.NewRequest("GET",
+			fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordIDStr),
+			nil)
+		req.Header.Set("Authorization", "Bot "+botToken)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil && resp.StatusCode == 200 {
+			var member struct {
+				Roles []string `json:"roles"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&member) == nil {
+				for _, role := range member.Roles {
+					if role == modRoleID {
+						isMod = true
+						break
+					}
+				}
+			}
+			resp.Body.Close()
+		}
+	}
+
+	// ✅ active registered player + mod info
+	respondJSON(w, map[string]any{
+		"registered": true,
+		"id":         discordIDStr,
+		"username":   player.Username,
+		"role":       player.Role,
+		"device":     player.Device,
+		"timezone":   player.Timezone,
+		"avatar":     session.Values["avatar"],
+		"is_mod":     isMod, // 👈 added
+	})
+}
+
+// --- Registration
+func handleRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Role     string `json:"role"`
+		Device   string `json:"device"`
+		Timezone string `json:"timezone"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// ✅ Always get the Discord ID from session
+	session, _ := store.Get(r, "session")
+	discordIDStr, ok := session.Values["discord_id"].(string)
+	if !ok || discordIDStr == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	discordID, _ := strconv.ParseInt(discordIDStr, 10, 64)
+
+	if req.Device == "quest_native" {
+		http.Error(w, "Echo Combat is only available on PC (Rift or Quest+Link)", http.StatusForbidden)
+		return
+	}
+
+	switch strings.ToLower(req.Role) {
+	case "player":
+		req.Role = "Player"
+	case "league sub":
+		req.Role = "League Sub"
+	default:
+		http.Error(w, "Invalid role", http.StatusBadRequest)
+		return
+	}
+
+	player := Player{
+		ID:       discordID,
+		Username: req.Username,
+		Role:     req.Role,
+		Device:   req.Device,
+		Timezone: req.Timezone,
+	}
+
+	// ✅ Upsert player row
+	if err := DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"username", "role", "device", "timezone"}),
+	}).Create(&player).Error; err != nil {
+		if pgErr, ok := err.(*pgconn.PgError); ok {
+			log.Printf("❌ Postgres error: Code=%s Detail=%s Message=%s", pgErr.Code, pgErr.Detail, pgErr.Message)
+		}
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	player.Registered = true
+	respondJSON(w, player)
+}
+
+func handleUnregister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// ✅ Always get the Discord ID from session
+	session, _ := store.Get(r, "session")
+	discordIDStr, ok := session.Values["discord_id"].(string)
+	if !ok || discordIDStr == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	discordID, _ := strconv.ParseInt(discordIDStr, 10, 64)
+
+	// 🔎 Remove memberships
+	var memberships []TeamMember
+	if err := DB.Where("player_id = ?", discordID).Find(&memberships).Error; err == nil {
+		for _, m := range memberships {
+			role := m.Role
+			// log history
+			var team Team
+			DB.First(&team, m.TeamID)
+			DB.Create(&PlayerHistory{
+				PlayerID: discordID,
+				TeamID:   m.TeamID,
+				TeamName: team.Name,
+				Role:     "Unregistered (" + role + ")",
+				Season:   currentSeason,
+			})
+
+			DB.Delete(&TeamMember{}, "player_id = ? AND team_id = ?", discordID, m.TeamID)
+
+			// check if team is empty
+			var remaining []TeamMember
+			DB.Where("team_id = ?", m.TeamID).Find(&remaining)
+			if len(remaining) == 0 {
+				DB.Delete(&Team{}, m.TeamID)
+				log.Printf("🗑️ Disbanded empty team %d", m.TeamID)
+				continue
+			}
+
+			// promote if captain left
+			if role == "Captain" {
+				var next TeamMember
+				if err := DB.Where("team_id = ? AND role = ?", m.TeamID, "Co-Captain").First(&next).Error; err == nil {
+					DB.Model(&next).Update("role", "Captain")
+				} else if err := DB.Where("team_id = ?", m.TeamID).First(&next).Error; err == nil {
+					DB.Model(&next).Update("role", "Captain")
+				}
+			}
+		}
+	}
+
+	// ❌ Clear pending join requests
+	DB.Where("player_id = ?", discordID).Delete(&TeamJoinRequest{})
+
+	// ✅ Clear role/device/timezone but keep stats
+	if err := DB.Model(&Player{}).Where("id = ?", discordID).
+		Updates(map[string]any{
+			"role":     "",
+			"device":   "",
+			"timezone": "",
+		}).Error; err != nil {
+		log.Printf("❌ Failed to clear player registration: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success":    true,
+		"registered": false,
+		"message":    "Unregistered successfully (removed from teams, disbanded empty teams, reassigned captain if needed, logged history, kept stats)",
+	})
+}
+
+// --- Get current season ---
+func HandleGetSeason(w http.ResponseWriter, r *http.Request) {
+	respondJSON(w, map[string]any{
+		"season": currentSeason,
+	})
+}
+
+var currentSeason string
+
+func main() {
+	// ✅ Load .env first
+	_ = godotenv.Load()
+
+	// ✅ Set current season from env (with fallback)
+	currentSeason = os.Getenv("CURRENT_SEASON")
+	if currentSeason == "" {
+		currentSeason = "S1" // default if missing
+	}
+	log.Printf("📅 Current season: %s", currentSeason)
+
+	// ✅ Initialize session store after env
+	frontend := mustGet("FRONTEND_URL", "https://gigglesquad.mooo.com")
+	secret := mustGet("SESSION_SECRET", "supersecretkey")
+	store = sessions.NewCookieStore([]byte(secret))
+	store.Options = &sessions.Options{
+		Path:     "/",
+		MaxAge:   86400 * 7,
+		HttpOnly: true,
+		SameSite: http.SameSiteNoneMode,
+		Secure:   isHTTPS(frontend),
+	}
+
+	// ✅ Initialize OAuth config after env
+	oauthConf = &oauth2.Config{
+		RedirectURL:  mustGet("OAUTH_REDIRECT", frontend+"/callback"),
+		ClientID:     mustGet("DISCORD_CLIENT_ID", ""),
+		ClientSecret: mustGet("DISCORD_CLIENT_SECRET", ""),
+		Scopes:       []string{"identify"},
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  "https://discord.com/api/oauth2/authorize",
+			TokenURL: "https://discord.com/api/oauth2/token",
+		},
+	}
+	log.Printf("🔑 Discord ClientID=%q", oauthConf.ClientID)
+
+	// ✅ DB
+	InitDB()
+
+	r := mux.NewRouter()
+
+	// ✅ CORS Middleware
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			frontend := mustGet("FRONTEND_URL", "https://gigglesquad.mooo.com")
+			frontendDev := mustGet("FRONTEND_URL_DEV", "http://localhost:5173")
+			origin := r.Header.Get("Origin")
+			if origin == frontend || origin == frontendDev {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	// Auth routes
+	r.HandleFunc("/login", handleLogin).Methods("GET")
+	r.HandleFunc("/callback", handleCallback).Methods("GET")
+	r.HandleFunc("/logout", LogoutHandler).Methods("GET")
+	r.HandleFunc("/api/matches/generate", HandleGenerateWeeklyMatches).Methods("POST")
+	r.HandleFunc("/api/match/schedule", HandleScheduleMatch).Methods("POST")
+	r.HandleFunc("/api/match/submit-score", HandleSubmitScore).Methods("POST")
+	r.HandleFunc("/api/matches/public", HandlePublicMatches).Methods("GET")
+
+	// League Mod routes (all requireLeagueMod inside handlers)
+	r.HandleFunc("/api/mod/match/reset", ModMatchReset).Methods("POST")
+	r.HandleFunc("/api/mod/match/forfeit", ModMatchForfeit).Methods("POST")
+	r.HandleFunc("/api/mod/match/double-forfeit", ModMatchDoubleForfeit).Methods("POST")
+	r.HandleFunc("/api/mod/match", ModMatchDelete).Methods("DELETE")
+
+	r.HandleFunc("/api/mod/team/adjust-rating", ModTeamAdjustRating).Methods("POST")
+	r.HandleFunc("/api/mod/team/disband", ModTeamDisband).Methods("POST")
+
+	r.HandleFunc("/api/mod/player/kick", ModPlayerKick).Methods("POST")
+	r.HandleFunc("/api/mod/player/ban", ModPlayerBan).Methods("POST")
+	r.HandleFunc("/api/mod/player/unban", ModPlayerUnban).Methods("POST")
+
+	r.HandleFunc("/api/mod/leaderboard/reset", ModLeaderboardReset).Methods("POST")
+	r.HandleFunc("/api/mod/match/edit-score", ModMatchEditScore).Methods("POST")
+	r.HandleFunc("/api/mod/season/archive", ModSeasonArchive).Methods("POST")
+
+	// Subrouter for /api
+	api := r.PathPrefix("/api").Subrouter()
+
+	// Matches
+	api.HandleFunc("/match/schedule", HandleScheduleMatch).Methods("POST")
+	api.HandleFunc("/match/score", HandleSubmitScore).Methods("POST")
+	api.HandleFunc("/match/{id:[0-9]+}", HandleGetMatch).Methods("GET")
+	api.HandleFunc("/matches/team/{teamID:[0-9]+}", HandleGetTeamMatches).Methods("GET")
+	api.HandleFunc("/matches/player/{playerID:[0-9]+}", HandleGetPlayerMatches).Methods("GET")
+	api.HandleFunc("/matches", GetMatches).Methods("GET")
+	api.HandleFunc("/season", HandleGetSeason).Methods("GET")
+	api.HandleFunc("/matches/generate", HandleGenerateWeeklyMatches).Methods("POST")
+
+	// Teams & MyTeam
+	api.HandleFunc("/team/leave", HandleLeaveTeam).Methods("POST")
+	api.HandleFunc("/myteam", GetMyTeam).Methods("GET") // ✅ session-based only
+	api.HandleFunc("/teams", GetTeams).Methods("GET")
+	api.HandleFunc("/team/{id:[0-9]+}", GetTeam).Methods("GET")
+	api.HandleFunc("/team/request", handleRequestJoinTeam).Methods("POST")
+	api.HandleFunc("/team/create", handleCreateTeam).Methods("POST")
+	api.HandleFunc("/team/{teamID:[0-9]+}/joinrequests", GetTeamJoinRequests).Methods("GET")
+	api.HandleFunc("/team/join/decision", HandleJoinRequestDecision).Methods("POST")
+	api.HandleFunc("/team/kick", HandleKickMember).Methods("POST")
+	api.HandleFunc("/team/promote", HandlePromoteMember).Methods("POST")
+
+	// Players
+	api.HandleFunc("/register", handleRegister).Methods("POST")
+	api.HandleFunc("/unregister", handleUnregister).Methods("POST")
+	api.HandleFunc("/players", GetPlayers).Methods("GET")
+	api.HandleFunc("/me", handleMe).Methods("GET")
+	api.HandleFunc("/player/{id:[0-9]+}", GetPlayerDetail).Methods("GET")
+
+	// Leaderboards
+	api.HandleFunc("/leaderboard/players", GetPlayerLeaderboard).Methods("GET")
+	api.HandleFunc("/leaderboard/teams", GetTeamLeaderboard).Methods("GET")
+
+	// Static frontend
+	distDir := "../frontend/dist"
+	r.PathPrefix("/assets/").Handler(http.StripPrefix("/", http.FileServer(http.Dir(distDir))))
+
+	// Catch-all for SPA (non-API only)
+	r.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r) // never serve HTML for API calls
+			return
+		}
+		http.ServeFile(w, r, distDir+"/index.html")
+	}))
+
+	// TLS
+	host := "gigglesquad.mooo.com"
+	certManager := autocert.Manager{
+		Prompt:     autocert.AcceptTOS,
+		Cache:      autocert.DirCache("certs"),
+		HostPolicy: autocert.HostWhitelist(host),
+	}
+	server := &http.Server{
+		Addr:    ":443",
+		Handler: r,
+		TLSConfig: &tls.Config{
+			GetCertificate: certManager.GetCertificate,
+			NextProtos:     []string{"h2", "http/1.1", acme.ALPNProto},
+			MinVersion:     tls.VersionTLS12,
+		},
+		ErrorLog: log.New(quietErrorLog{}, "", 0),
+	}
+
+	// Redirect HTTP→HTTPS
+	go func() {
+		http.ListenAndServe(":80", certManager.HTTPHandler(nil))
+	}()
+
+	log.Println("🚀 ECGL API running at https://" + host)
+	log.Fatal(server.ListenAndServeTLS("", ""))
+}
