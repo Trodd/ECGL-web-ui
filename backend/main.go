@@ -446,6 +446,8 @@ func main() {
 	r.HandleFunc("/callback", handleCallback).Methods("GET")
 	r.HandleFunc("/logout", LogoutHandler).Methods("GET")
 	r.HandleFunc("/api/matches/generate", HandleGenerateWeeklyMatches).Methods("POST")
+	r.HandleFunc("/api/match/confirm-schedule", HandleConfirmSchedule).Methods("POST")
+	r.HandleFunc("/api/match/confirm-score", HandleConfirmScore).Methods("POST")
 	r.HandleFunc("/api/match/schedule", HandleScheduleMatch).Methods("POST")
 	r.HandleFunc("/api/match/submit-score", HandleSubmitScore).Methods("POST")
 	r.HandleFunc("/api/matches/public", HandlePublicMatches).Methods("GET")
@@ -455,6 +457,9 @@ func main() {
 	r.HandleFunc("/api/mod/match/forfeit", ModMatchForfeit).Methods("POST")
 	r.HandleFunc("/api/mod/match/double-forfeit", ModMatchDoubleForfeit).Methods("POST")
 	r.HandleFunc("/api/mod/match", ModMatchDelete).Methods("DELETE")
+	r.HandleFunc("/api/mod/match/delete", HandleModDeleteMatch).Methods("POST")
+	r.HandleFunc("/api/mod/match/schedule", ModForceSchedule).Methods("POST")
+	r.HandleFunc("/api/mod/matches/generate", HandleGenerateWeeklyMatches).Methods("POST")
 
 	r.HandleFunc("/api/mod/team/adjust-rating", ModTeamAdjustRating).Methods("POST")
 	r.HandleFunc("/api/mod/team/disband", ModTeamDisband).Methods("POST")
@@ -466,6 +471,8 @@ func main() {
 	r.HandleFunc("/api/mod/leaderboard/reset", ModLeaderboardReset).Methods("POST")
 	r.HandleFunc("/api/mod/match/edit-score", ModMatchEditScore).Methods("POST")
 	r.HandleFunc("/api/mod/season/archive", ModSeasonArchive).Methods("POST")
+	r.HandleFunc("/api/mod/matches/preview", HandlePreviewWeeklyMatches).Methods("GET")
+	r.HandleFunc("/api/mod/matches/clear-week", HandleModClearWeek).Methods("POST")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()

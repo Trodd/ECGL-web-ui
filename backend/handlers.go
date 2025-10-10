@@ -2169,3 +2169,172 @@ func resetAllLeagueStats() error {
 	}
 	return nil
 }
+
+// --- POST /api/mod/match/schedule ---
+// Allows moderators to override and force schedule any match
+func ModForceSchedule(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		MatchID uint   `json:"match_id"`
+		Date    string `json:"date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MatchID == 0 {
+		http.Error(w, "Invalid match_id", http.StatusBadRequest)
+		return
+	}
+
+	parsed, _ := time.Parse(time.RFC3339, req.Date)
+	if err := DB.Model(&Match{}).Where("id = ?", req.MatchID).
+		Updates(map[string]any{
+			"scheduled_date": parsed,
+			"status":         "Scheduled",
+		}).Error; err != nil {
+		http.Error(w, "Failed to update match", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success":  true,
+		"match_id": req.MatchID,
+		"message":  "match force-scheduled by mod",
+	})
+}
+
+// --- POST /api/mod/match/delete ---
+// Allows League Mods to permanently delete a match.
+func HandleModDeleteMatch(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		MatchID uint `json:"match_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MatchID == 0 {
+		http.Error(w, "invalid match_id", http.StatusBadRequest)
+		return
+	}
+
+	// Check if match exists
+	var match Match
+	if err := DB.First(&match, req.MatchID).Error; err != nil {
+		http.Error(w, "match not found", http.StatusNotFound)
+		return
+	}
+
+	// Delete the match and any associated data (scores, results, etc.)
+	if err := DB.Delete(&match).Error; err != nil {
+		log.Printf("❌ Failed to delete match %d: %v", req.MatchID, err)
+		http.Error(w, "failed to delete match", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("🗑️ Mod deleted match %d (%s)", match.ID, match.MatchCode)
+
+	respondJSON(w, map[string]any{
+		"success":  true,
+		"match_id": match.ID,
+		"message":  "match deleted",
+	})
+}
+
+func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLogin(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		MatchID uint `json:"match_id"`
+		TeamID  uint `json:"team_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MatchID == 0 || req.TeamID == 0 {
+		http.Error(w, "invalid data", http.StatusBadRequest)
+		return
+	}
+
+	var match Match
+	if err := DB.First(&match, req.MatchID).Error; err != nil {
+		http.Error(w, "match not found", http.StatusNotFound)
+		return
+	}
+
+	// Update confirmation
+	if match.TeamAID == req.TeamID {
+		match.TeamAScheduleConfirmed = true
+	} else if match.TeamBID == req.TeamID {
+		match.TeamBScheduleConfirmed = true
+	} else {
+		http.Error(w, "team not part of match", http.StatusForbidden)
+		return
+	}
+
+	// Both confirmed → mark scheduled
+	if match.TeamAScheduleConfirmed && match.TeamBScheduleConfirmed {
+		match.Status = "Scheduled"
+		now := time.Now()
+		match.ScheduleConfirmedAt = &now
+	}
+
+	if err := DB.Save(&match).Error; err != nil {
+		http.Error(w, "failed to update", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success":  true,
+		"match_id": match.ID,
+		"status":   match.Status,
+	})
+}
+
+func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLogin(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		MatchID uint `json:"match_id"`
+		TeamID  uint `json:"team_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MatchID == 0 || req.TeamID == 0 {
+		http.Error(w, "invalid data", http.StatusBadRequest)
+		return
+	}
+
+	var match Match
+	if err := DB.First(&match, req.MatchID).Error; err != nil {
+		http.Error(w, "match not found", http.StatusNotFound)
+		return
+	}
+
+	// Update confirmation
+	if match.TeamAID == req.TeamID {
+		match.TeamAScoreConfirmed = true
+	} else if match.TeamBID == req.TeamID {
+		match.TeamBScoreConfirmed = true
+	} else {
+		http.Error(w, "team not part of match", http.StatusForbidden)
+		return
+	}
+
+	// Both confirmed → finalize
+	if match.TeamAScoreConfirmed && match.TeamBScoreConfirmed {
+		match.Status = "Finished"
+		now := time.Now()
+		match.ScoreConfirmedAt = &now
+	}
+
+	if err := DB.Save(&match).Error; err != nil {
+		http.Error(w, "failed to update", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success":  true,
+		"match_id": match.ID,
+		"status":   match.Status,
+	})
+}
