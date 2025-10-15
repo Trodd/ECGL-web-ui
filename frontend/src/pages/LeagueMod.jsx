@@ -18,6 +18,7 @@ export default function LeagueMod() {
     const [newMatchA, setNewMatchA] = useState("");
     const [newMatchB, setNewMatchB] = useState("");
     const [previewSeason, setPreviewSeason] = useState("");
+    const [previewSeed, setPreviewSeed] = useState(null);
 
     // Search filters
     const [teamSearch, setTeamSearch] = useState("");
@@ -138,6 +139,7 @@ export default function LeagueMod() {
                 setPreviewMatches(res.data.matches);
                 setPreviewWeek(week);
                 setPreviewSeason(res.data.season || currentSeason || "1");
+                setPreviewSeed(res.data.seed || null); // ✅ save deterministic seed
                 setShowPreview(true);
                 setMsg(`✅ Preview generated for Week ${week}.`);
             } else {
@@ -150,12 +152,15 @@ export default function LeagueMod() {
     };
 
     const handlePublishWeek = async () => {
-        if (!previewWeek) return setMsg("⚠️ Preview a week first.");
+        if (!previewWeek || previewMatches.length === 0)
+            return setMsg("⚠️ Preview or edit matches before publishing.");
+
         await safePost(
             "/api/mod/matches/generate",
-            { week: parseInt(previewWeek) },
-            `Published matches for Week ${previewWeek}`
+            { week: parseInt(previewWeek), matches: previewMatches },
+            `Published ${previewMatches.length} matches for Week ${previewWeek}`
         );
+
         setShowPreview(false);
         setPreviewMatches([]);
     };
@@ -334,208 +339,222 @@ export default function LeagueMod() {
             )}
 
             <div className="accordion" id="modAccordion">
-                {/* 🏁 MATCH TOOLS */}
+                {/* 🗓️ WEEKLY MATCH MANAGEMENT */}
                 <AccordionItem
-                    id="matchTools"
-                    title="🏁 Match Tools"
+                    id="weeklyMatches"
+                    title="🗓️ Weekly Match Management"
                     children={
                         <>
-                            {/* --- Weekly Match Generation --- */}
-                            <h6 className="mb-2">📅 Generate Weekly Matches</h6>
+                            <h6 className="mb-3">📅 Generate or Clear Weekly Matchups</h6>
 
-                            {/* Week Input + Small Preview Button */}
-                            <div className="d-flex gap-2 align-items-center mb-3" style={{ maxWidth: 320 }}>
-                                <input
-                                    type="number"
-                                    className="form-control bg-dark text-light"
-                                    placeholder="Enter week..."
-                                    value={week}
-                                    onChange={(e) => setWeek(e.target.value)}
-                                />
-                                <button
-                                    className="btn btn-outline-info btn-sm"
-                                    onClick={handlePreviewWeek}
-                                    style={{ whiteSpace: "nowrap" }}
-                                >
-                                    👀 Preview
-                                </button>
-                            </div>
-
-                            {/* --- Preview Section (full width, below input) --- */}
-                            {showPreview && previewMatches.length > 0 && (
+                            {/* --- Generate Weekly Matches --- */}
+                            <div
+                                className="p-3 mb-4 rounded"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h6 className="text-success mb-2">⚙️ Generate Weekly Matches</h6>
                                 <div
-                                    className="bg-dark p-3 rounded shadow-sm mb-4"
-                                    style={{
-                                        width: "100%",
-                                        maxWidth: "1100px",
-                                        margin: "0 auto",
-                                        border: "1px solid rgba(255,255,255,0.1)",
-                                    }}
+                                    className="d-flex gap-2 align-items-center"
+                                    style={{ maxWidth: 320 }}
                                 >
-                                    <div className="d-flex justify-content-between align-items-center mb-3">
-                                        <h5 className="text-light mb-0">📋 Preview for Week {previewWeek}</h5>
-                                        <button
-                                            className="btn btn-success btn-sm"
-                                            onClick={handlePublishWeek}
-                                        >
-                                            ✅ Confirm & Publish
-                                        </button>
-                                    </div>
-
-                                    {/* 🔹 Manual Add Matchup */}
-                                    <div
-                                        className="bg-secondary bg-opacity-10 p-3 rounded mb-3"
-                                        style={{ maxWidth: "900px", margin: "0 auto" }}
+                                    <input
+                                        type="number"
+                                        className="form-control bg-dark text-light"
+                                        placeholder="Enter week..."
+                                        value={week}
+                                        onChange={(e) => setWeek(e.target.value)}
+                                    />
+                                    <button
+                                        className="btn btn-outline-info btn-sm"
+                                        onClick={handlePreviewWeek}
+                                        style={{ whiteSpace: "nowrap" }}
                                     >
-                                        <h6 className="text-info mb-2">➕ Add Custom Matchup</h6>
-                                        <div className="d-flex flex-wrap align-items-center gap-2">
-                                            <select
-                                                className="form-select bg-dark text-light"
-                                                value={newMatchA}
-                                                onChange={(e) => setNewMatchA(e.target.value)}
-                                                style={{ maxWidth: 250 }}
-                                            >
-                                                <option value="">Select Team A...</option>
-                                                {teams.map((t) => (
-                                                    <option key={t.id} value={t.name}>
-                                                        {t.name}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                            <select
-                                                className="form-select bg-dark text-light"
-                                                value={newMatchB}
-                                                onChange={(e) => setNewMatchB(e.target.value)}
-                                                style={{ maxWidth: 250 }}
-                                            >
-                                                <option value="">Select Team B...</option>
-                                                {teams.map((t) => (
-                                                    <option key={t.id} value={t.name}>
-                                                        {t.name}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                            <button
-                                                className="btn btn-outline-success btn-sm"
-                                                onClick={() => {
-                                                    if (!newMatchA || !newMatchB || newMatchA === newMatchB) {
-                                                        setMsg("⚠️ Please select two different teams.");
-                                                        return;
-                                                    }
-                                                    const exists = previewMatches.some(
-                                                        (m) =>
-                                                            (m.team_a === newMatchA && m.team_b === newMatchB) ||
-                                                            (m.team_a === newMatchB && m.team_b === newMatchA)
-                                                    );
-                                                    if (exists) {
-                                                        setMsg("⚠️ That matchup already exists.");
-                                                        return;
-                                                    }
-                                                    setPreviewMatches((prev) => {
-                                                        const nextNumber = prev.length + 1;
-                                                        const newCode = `${previewSeason || currentSeason}-Week${previewWeek}-M${String(nextNumber).padStart(3, "0")}`;
-                                                        return [
-                                                            ...prev,
-                                                            {
-                                                                team_a: newMatchA,
-                                                                team_b: newMatchB,
-                                                                match_code: newCode,
-                                                            },
-                                                        ];
-                                                    });
-                                                    setNewMatchA("");
-                                                    setNewMatchB("");
-                                                    setMsg("✅ Added custom matchup.");
-                                                }}
-                                            >
-                                                ➕ Add
-                                            </button>
-                                        </div>
-                                    </div>
+                                        👀 Preview
+                                    </button>
+                                </div>
 
-                                    {/* 🔹 Team Match Count Indicator */}
-                                    {previewMatches.length > 0 && (
-                                        <div
-                                            className="bg-secondary bg-opacity-10 p-2 rounded mb-3"
-                                            style={{ maxWidth: "900px", margin: "0 auto" }}
-                                        >
-                                            <h6 className="text-info mb-2">
-                                                ⚙️ Team Match Counts
-                                            </h6>
-                                            <ul className="list-unstyled text-light small mb-0">
-                                                {Object.entries(
-                                                    previewMatches.reduce((counts, m) => {
-                                                        counts[m.team_a] = (counts[m.team_a] || 0) + 1;
-                                                        counts[m.team_b] = (counts[m.team_b] || 0) + 1;
-                                                        return counts;
-                                                    }, {})
-                                                )
-                                                    .sort(([aName], [bName]) => aName.localeCompare(bName))
-                                                    .map(([team, count]) => (
-                                                        <li key={team}>
-                                                            <span
-                                                                className={`fw-semibold ${count > 2
-                                                                    ? "text-danger"
-                                                                    : count === 2
-                                                                        ? "text-warning"
-                                                                        : "text-success"
-                                                                    }`}
-                                                            >
-                                                                {team}
-                                                            </span>{" "}
-                                                            — {count} match{count !== 1 ? "es" : ""}
-                                                        </li>
-                                                    ))}
-                                            </ul>
-                                        </div>
-                                    )}
-
-                                    <table
-                                        className="table table-dark table-hover table-striped align-middle text-center w-100"
+                                {/* --- Preview Section (Full Editing) --- */}
+                                {showPreview && previewMatches.length > 0 && (
+                                    <div
+                                        className="bg-dark p-3 rounded shadow-sm mt-3"
                                         style={{
-                                            borderCollapse: "separate",
-                                            borderSpacing: "0 6px",
+                                            width: "100%",
+                                            maxWidth: "1100px",
+                                            margin: "0 auto",
+                                            border: "1px solid rgba(255,255,255,0.1)",
                                         }}
                                     >
-                                        <thead className="table-secondary text-dark">
-                                            <tr>
-                                                <th style={{ width: "5%" }}>#</th>
-                                                <th style={{ width: "40%" }}>Team A</th>
-                                                <th style={{ width: "40%" }}>Team B</th>
-                                                <th style={{ width: "15%" }}>Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {previewMatches.map((m, idx) => (
-                                                <tr key={idx}>
-                                                    <td>{idx + 1}</td>
-                                                    <td className="fw-semibold text-info">{m.team_a}</td>
-                                                    <td className="fw-semibold text-warning">{m.team_b}</td>
-                                                    <td>
-                                                        <div className="d-flex justify-content-center gap-2">
-                                                            <button
-                                                                className="btn btn-sm btn-outline-danger"
-                                                                onClick={() =>
-                                                                    setPreviewMatches((prev) =>
-                                                                        prev.filter((_, i) => i !== idx)
-                                                                    )
-                                                                }
-                                                            >
-                                                                🗑️ Remove
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
+                                        <div className="d-flex justify-content-between align-items-center mb-3">
+                                            <h5 className="text-light mb-0">📋 Preview for Week {previewWeek}</h5>
+                                            <button
+                                                className="btn btn-success btn-sm"
+                                                onClick={handlePublishWeek}
+                                            >
+                                                ✅ Confirm & Publish
+                                            </button>
+                                        </div>
 
-                            {/* 🧨 Clear Week Matchups */}
-                            <div className="mt-3">
-                                <h6 className="text-danger mb-2">🧨 Clear Week Matchups</h6>
-                                <div className="d-flex gap-2 align-items-center" style={{ maxWidth: 300 }}>
+                                        {/* 🔹 Add Custom Matchup */}
+                                        <div
+                                            className="bg-secondary bg-opacity-10 p-3 rounded mb-3"
+                                            style={{ maxWidth: "900px", margin: "0 auto" }}
+                                        >
+                                            <h6 className="text-info mb-2">➕ Add Custom Matchup</h6>
+                                            <div className="d-flex flex-wrap align-items-center gap-2">
+                                                <select
+                                                    className="form-select bg-dark text-light"
+                                                    value={newMatchA}
+                                                    onChange={(e) => setNewMatchA(e.target.value)}
+                                                    style={{ maxWidth: 250 }}
+                                                >
+                                                    <option value="">Select Team A...</option>
+                                                    {teams.map((t) => (
+                                                        <option key={t.id} value={t.name}>
+                                                            {t.name}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <select
+                                                    className="form-select bg-dark text-light"
+                                                    value={newMatchB}
+                                                    onChange={(e) => setNewMatchB(e.target.value)}
+                                                    style={{ maxWidth: 250 }}
+                                                >
+                                                    <option value="">Select Team B...</option>
+                                                    {teams.map((t) => (
+                                                        <option key={t.id} value={t.name}>
+                                                            {t.name}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <button
+                                                    className="btn btn-outline-success btn-sm"
+                                                    onClick={() => {
+                                                        if (!newMatchA || !newMatchB || newMatchA === newMatchB) {
+                                                            setMsg("⚠️ Please select two different teams.");
+                                                            return;
+                                                        }
+                                                        const exists = previewMatches.some(
+                                                            (m) =>
+                                                                (m.team_a === newMatchA && m.team_b === newMatchB) ||
+                                                                (m.team_a === newMatchB && m.team_b === newMatchA)
+                                                        );
+                                                        if (exists) {
+                                                            setMsg("⚠️ That matchup already exists.");
+                                                            return;
+                                                        }
+                                                        setPreviewMatches((prev) => {
+                                                            const nextNumber = prev.length + 1;
+                                                            const newCode = `${previewSeason || "1"}-Week${previewWeek}-M${String(
+                                                                nextNumber
+                                                            ).padStart(3, "0")}`;
+                                                            return [
+                                                                ...prev,
+                                                                {
+                                                                    team_a: newMatchA,
+                                                                    team_b: newMatchB,
+                                                                    match_code: newCode,
+                                                                },
+                                                            ];
+                                                        });
+                                                        setNewMatchA("");
+                                                        setNewMatchB("");
+                                                        setMsg("✅ Added custom matchup.");
+                                                    }}
+                                                >
+                                                    ➕ Add
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* 🔹 Team Match Count Indicator */}
+                                        {previewMatches.length > 0 && (
+                                            <div
+                                                className="bg-secondary bg-opacity-10 p-2 rounded mb-3"
+                                                style={{ maxWidth: "900px", margin: "0 auto" }}
+                                            >
+                                                <h6 className="text-info mb-2">⚙️ Team Match Counts</h6>
+                                                <ul className="list-unstyled text-light small mb-0">
+                                                    {Object.entries(
+                                                        previewMatches.reduce((counts, m) => {
+                                                            counts[m.team_a] = (counts[m.team_a] || 0) + 1;
+                                                            counts[m.team_b] = (counts[m.team_b] || 0) + 1;
+                                                            return counts;
+                                                        }, {})
+                                                    )
+                                                        .sort(([aName], [bName]) => aName.localeCompare(bName))
+                                                        .map(([team, count]) => (
+                                                            <li key={team}>
+                                                                <span
+                                                                    className={`fw-semibold ${count > 2
+                                                                        ? "text-danger"
+                                                                        : count === 2
+                                                                            ? "text-warning"
+                                                                            : "text-success"
+                                                                        }`}
+                                                                >
+                                                                    {team}
+                                                                </span>{" "}
+                                                                — {count} match{count !== 1 ? "es" : ""}
+                                                            </li>
+                                                        ))}
+                                                </ul>
+                                            </div>
+                                        )}
+
+                                        {/* 🔹 Editable Match Table */}
+                                        <table
+                                            className="table table-dark table-hover table-striped align-middle text-center w-100"
+                                            style={{
+                                                borderCollapse: "separate",
+                                                borderSpacing: "0 6px",
+                                            }}
+                                        >
+                                            <thead className="table-secondary text-dark">
+                                                <tr>
+                                                    <th style={{ width: "5%" }}>#</th>
+                                                    <th style={{ width: "40%" }}>Team A</th>
+                                                    <th style={{ width: "40%" }}>Team B</th>
+                                                    <th style={{ width: "15%" }}>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {previewMatches.map((m, idx) => (
+                                                    <tr key={idx}>
+                                                        <td>{idx + 1}</td>
+                                                        <td className="fw-semibold text-info">{m.team_a}</td>
+                                                        <td className="fw-semibold text-warning">{m.team_b}</td>
+                                                        <td>
+                                                            <div className="d-flex justify-content-center gap-2">
+                                                                <button
+                                                                    className="btn btn-sm btn-outline-danger"
+                                                                    onClick={() =>
+                                                                        setPreviewMatches((prev) =>
+                                                                            prev.filter((_, i) => i !== idx)
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    🗑️ Remove
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                            {/* --- Clear Week Matchups --- */}
+                            <div
+                                className="p-3 rounded"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h6 className="text-danger mb-2">🧹 Clear Week Matchups</h6>
+                                <div
+                                    className="d-flex gap-2 align-items-center"
+                                    style={{ maxWidth: 320 }}
+                                >
                                     <input
                                         type="number"
                                         className="form-control bg-dark text-light"
@@ -547,13 +566,17 @@ export default function LeagueMod() {
                                         className="btn btn-outline-danger btn-sm"
                                         onClick={async () => {
                                             if (!week) return setMsg("⚠️ Enter a week number first.");
-                                            if (!confirm(`⚠️ This will permanently delete all matches in Week ${week}. Continue?`))
+                                            if (
+                                                !confirm(
+                                                    `⚠️ This will permanently delete all matches in Week ${week}. Continue?`
+                                                )
+                                            )
                                                 return;
 
                                             try {
                                                 const res = await axios.post(
                                                     `${urlBase}/api/mod/matches/clear-week`,
-                                                    { season: "1", week: week },
+                                                    { season: "1", week },
                                                     { withCredentials: true }
                                                 );
                                                 console.log(res.data);
@@ -568,7 +591,15 @@ export default function LeagueMod() {
                                     </button>
                                 </div>
                             </div>
-
+                        </>
+                    }
+                />
+                {/* 🏁 MATCH TOOLS */}
+                <AccordionItem
+                    id="matchTools"
+                    title="🏁 Match Tools"
+                    children={
+                        <>
                             {/* --- Match Admin Tools --- */}
                             <h6>🕒 Select Match (Current Season)</h6>
                             <input
@@ -580,9 +611,12 @@ export default function LeagueMod() {
                                 style={{ maxWidth: 400 }}
                             />
                             <select
-                                className="form-select bg-dark text-light mb-2"
+                                className="form-select bg-dark text-light mb-3"
                                 value={matchID}
-                                onChange={(e) => setMatchID(e.target.value)}
+                                onChange={(e) => {
+                                    setMatchID(e.target.value);
+                                    setTeamID(""); // ✅ auto-reset winner when match changes
+                                }}
                                 style={{ maxWidth: 400 }}
                             >
                                 <option value="">Select Match...</option>
@@ -593,18 +627,80 @@ export default function LeagueMod() {
                                 ))}
                             </select>
 
+                            {/* --- Forfeit Tools --- */}
+                            <div
+                                className="p-3 mb-3 rounded"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h6 className="text-danger mb-2">🏳️ Forfeit Controls</h6>
+                                <p className="small text-light mb-2">
+                                    Select the winning team for this match, then click <b>Forfeit</b>.
+                                </p>
+
+                                <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                    {/* Winning Team Select – filtered to only the 2 teams from the chosen match */}
+                                    <select
+                                        className="form-select bg-dark text-light"
+                                        value={teamID}
+                                        onChange={(e) => setTeamID(e.target.value)}
+                                        style={{ maxWidth: 300 }}
+                                        disabled={!matchID}
+                                    >
+                                        <option value="">
+                                            {matchID ? "Select Winning Team..." : "Select a match first..."}
+                                        </option>
+                                        {(() => {
+                                            const match = matches.find((m) => m.id === parseInt(matchID));
+                                            if (!match) return null;
+
+                                            // Only show the two teams from this match
+                                            return [match.team_a, match.team_b].map((teamName) => {
+                                                const team = teams.find(
+                                                    (t) => t.name.toLowerCase() === teamName.toLowerCase()
+                                                );
+                                                if (!team) return null;
+                                                return (
+                                                    <option key={team.id} value={team.id}>
+                                                        {team.name} (#{team.id})
+                                                    </option>
+                                                );
+                                            });
+                                        })()}
+                                    </select>
+
+                                    <button
+                                        className="btn btn-outline-danger btn-sm"
+                                        disabled={!matchID || !teamID}
+                                        onClick={async () => {
+                                            if (!matchID || !teamID) {
+                                                setMsg("⚠️ Select both a match and a winning team first.");
+                                                return;
+                                            }
+
+                                            await safePost(
+                                                "/api/mod/match/forfeit",
+                                                {
+                                                    match_id: parseInt(matchID),
+                                                    winner_team_id: parseInt(teamID),
+                                                },
+                                                `Applied forfeit for ${getMatchLabel(matchID)} → Winner: ${getTeamLabel(
+                                                    teamID
+                                                )}`
+                                            );
+                                        }}
+                                    >
+                                        🏳️ Forfeit
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* --- Other Match Actions --- */}
                             <div className="d-flex flex-wrap gap-2">
                                 <button
                                     className="btn btn-outline-light btn-sm"
                                     onClick={handleForceSchedule}
                                 >
                                     Force Schedule
-                                </button>
-                                <button
-                                    className="btn btn-outline-danger btn-sm"
-                                    onClick={handleForfeit}
-                                >
-                                    Forfeit
                                 </button>
                                 <button
                                     className="btn btn-outline-warning btn-sm"

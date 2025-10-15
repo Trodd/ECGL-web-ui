@@ -39,12 +39,10 @@ export default function Teams() {
     };
   }, []);
 
-  // --- Helpers ---
   const safeLower = (v) => (typeof v === "string" ? v.toLowerCase() : "");
   const safeIncludes = (haystack, needle) =>
     safeLower(haystack).includes(safeLower(needle));
 
-  // --- Filter teams by search ---
   const filteredTeams = useMemo(() => {
     const query = safeLower(search);
     return (Array.isArray(teams) ? teams : []).filter(
@@ -53,8 +51,8 @@ export default function Teams() {
   }, [teams, search]);
 
   return (
-    <div>
-      <h2>👥 Teams</h2>
+    <div className="text-light mx-auto" style={{ maxWidth: "600px" }}>
+      <h2 className="mb-3">👥 Teams</h2>
 
       {error && <div className="alert alert-danger">{error}</div>}
 
@@ -62,7 +60,7 @@ export default function Teams() {
       <div className="d-flex mb-3">
         <input
           type="text"
-          className="form-control"
+          className="form-control bg-dark text-light"
           style={{ maxWidth: 300 }}
           placeholder="🔍 Search team name..."
           value={search}
@@ -75,10 +73,32 @@ export default function Teams() {
       ) : (
         <ul className="list-group">
           {filteredTeams.map((t) => (
-            <li key={t.id} className="list-group-item">
-              <Link to={`/teams/${t.id}`}>
-                <b>{t.name}</b>
+            <li
+              key={t.id}
+              className="list-group-item d-flex justify-content-between align-items-center px-3 py-2 mb-2"
+              style={{
+                backgroundColor: "#1c1c1c",
+                border: "1px solid #2a2a2a",
+                borderRadius: "0.5rem",
+              }}
+            >
+              <Link
+                to={`/teams/${t.id}`}
+                className="text-decoration-none text-light fw-semibold"
+              >
+                {t.name}
               </Link>
+
+              <span
+                className={`badge ${t.status === "Active"
+                    ? "bg-success"
+                    : t.status === "Disbanded"
+                      ? "bg-danger"
+                      : "bg-secondary"
+                  }`}
+              >
+                {t.status || "Unknown"}
+              </span>
             </li>
           ))}
         </ul>

@@ -13,10 +13,10 @@ import (
 	"github.com/lib/pq"
 )
 
-// --- Utility: shuffle slice ---
-func shuffle[T any](slice []T) {
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(slice), func(i, j int) { slice[i], slice[j] = slice[j], slice[i] })
+// --- Utility: deterministic shuffle ---
+func shuffle[T any](slice []T, seed int64) {
+	r := rand.New(rand.NewSource(seed))
+	r.Shuffle(len(slice), func(i, j int) { slice[i], slice[j] = slice[j], slice[i] })
 }
 
 // --- Utility: min/max ---
@@ -43,138 +43,92 @@ func pairExists(pairs [][2]uint, target [2]uint) bool {
 
 // --- POST /api/matches/generate ---
 func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
-	// 🔒 Require League Mod access first
 	if _, ok := requireLeagueMod(w, r); !ok {
-		return // stops unauthorized users
-	}
-
-	type Req struct {
-		Week int `json:"week"`
-	}
-	var req Req
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Week <= 0 {
-		http.Error(w, "Invalid week number", http.StatusBadRequest)
 		return
 	}
 
-	// Step 1: Load active teams
+	var req struct {
+		Week    int `json:"week"`
+		Matches []struct {
+			MatchCode string `json:"match_code"`
+			TeamA     string `json:"team_a"`
+			TeamB     string `json:"team_b"`
+		} `json:"matches"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Week <= 0 {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Matches) == 0 {
+		http.Error(w, "No matches provided to publish", http.StatusBadRequest)
+		return
+	}
+
+	// Step 1: Load all teams for name → ID lookup
 	var teams []Team
-	if err := DB.Where("status = ?", "Active").Find(&teams).Error; err != nil {
+	if err := DB.Find(&teams).Error; err != nil {
 		http.Error(w, "Failed to load teams", http.StatusInternalServerError)
 		return
 	}
-	if len(teams) < 2 {
-		http.Error(w, "Not enough teams to generate matchups", http.StatusBadRequest)
-		return
+	nameToID := make(map[string]uint)
+	for _, t := range teams {
+		nameToID[strings.TrimSpace(t.Name)] = t.ID
 	}
 
-	// Step 2: Load previous week's matches (avoid immediate rematches)
-	type SimpleMatch struct {
-		TeamAID uint
-		TeamBID uint
-	}
-	var previous []SimpleMatch
-	DB.Table("matches").
-		Where("match_code LIKE ?", "Week"+strconv.Itoa(req.Week-1)+"%").
-		Find(&previous)
+	// Step 2: Validate and insert each match from preview
+	now := time.Now()
+	systemID := int64(0)
+	inserted := 0
 
-	recentPairs := make(map[[2]uint]bool)
-	for _, m := range previous {
-		key := [2]uint{min(m.TeamAID, m.TeamBID), max(m.TeamAID, m.TeamBID)}
-		recentPairs[key] = true
-	}
-
-	// Step 3: Create all possible team pairs excluding recent rematches
-	var allPairs [][2]uint
-	for i := 0; i < len(teams); i++ {
-		for j := i + 1; j < len(teams); j++ {
-			key := [2]uint{teams[i].ID, teams[j].ID}
-			if !recentPairs[[2]uint{min(key[0], key[1]), max(key[0], key[1])}] {
-				allPairs = append(allPairs, key)
-			}
-		}
-	}
-	shuffle(allPairs)
-
-	// Step 4: Assign up to 2 matches per team
-	matchCount := make(map[uint]int)
-	var matchups [][2]uint
-	for _, pair := range allPairs {
-		a, b := pair[0], pair[1]
-		if matchCount[a] < 2 && matchCount[b] < 2 {
-			matchups = append(matchups, [2]uint{a, b})
-			matchCount[a]++
-			matchCount[b]++
-		}
-	}
-
-	// Step 5: Fallback fill for under-matched teams
-	for _, tA := range teams {
-		if matchCount[tA.ID] >= 2 {
+	for _, pm := range req.Matches {
+		aID, aOk := nameToID[pm.TeamA]
+		bID, bOk := nameToID[pm.TeamB]
+		if !aOk || !bOk {
+			log.Printf("⚠️ Skipping invalid matchup: %s vs %s", pm.TeamA, pm.TeamB)
 			continue
 		}
-		for _, tB := range teams {
-			if tA.ID == tB.ID || matchCount[tB.ID] >= 2 {
-				continue
-			}
-			key := [2]uint{min(tA.ID, tB.ID), max(tA.ID, tB.ID)}
-			if !pairExists(matchups, key) {
-				matchups = append(matchups, key)
-				matchCount[tA.ID]++
-				matchCount[tB.ID]++
-				break
-			}
-		}
-	}
 
-	// Step 6: Insert new matches into DB
-	now := time.Now()
-	for i, m := range matchups {
-		matchCode := fmt.Sprintf("%s-Week%d-M%03d", currentSeason, req.Week, i+1)
-		systemID := int64(0)
+		matchCode := pm.MatchCode
+		if matchCode == "" {
+			matchCode = fmt.Sprintf("%s-Week%d-M%03d", currentSeason, req.Week, inserted+1)
+		}
+
 		newMatch := Match{
 			MatchCode:     matchCode,
-			TeamAID:       m[0],
-			TeamBID:       m[1],
+			TeamAID:       aID,
+			TeamBID:       bID,
 			ProposedDate:  &now,
 			ScheduledDate: nil,
 			Status:        "Scheduled",
 			ProposerID:    &systemID,
+			Season:        currentSeason,
+			Week:          strconv.Itoa(req.Week),
 		}
 
 		if err := DB.Create(&newMatch).Error; err != nil {
-			log.Printf("❌ Failed to insert match %s: %v", matchCode, err)
+			log.Printf("❌ Failed to insert %s: %v", matchCode, err)
 		} else {
-			log.Printf("✅ Created %s → TeamA %d vs TeamB %d", matchCode, m[0], m[1])
+			inserted++
+			log.Printf("✅ Published %s → %s vs %s", matchCode, pm.TeamA, pm.TeamB)
 		}
-	}
-
-	// Step 7: Respond with summary
-	summary := make([]map[string]any, 0, len(matchups))
-	for _, m := range matchups {
-		summary = append(summary, map[string]any{
-			"team_a": m[0],
-			"team_b": m[1],
-		})
 	}
 
 	respondJSON(w, map[string]any{
 		"success": true,
-		"season":  currentSeason,
 		"week":    req.Week,
-		"matches": summary,
+		"count":   inserted,
+		"message": fmt.Sprintf("✅ Published %d matches for Week %d", inserted, req.Week),
 	})
 }
 
 // --- GET /api/mod/matches/preview?week=2 ---
-// Generates matchups preview without saving to DB
 func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
-	// 🔒 Require League Mod access first
 	if _, ok := requireLeagueMod(w, r); !ok {
 		return
 	}
 
-	// Parse week number
 	weekStr := r.URL.Query().Get("week")
 	week, err := strconv.Atoi(weekStr)
 	if err != nil || week <= 0 {
@@ -182,7 +136,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Step 0: Prevent duplicate week generation ---
+	// Prevent duplicate generation
 	var existingCount int64
 	DB.Model(&Match{}).
 		Where("match_code LIKE ?", fmt.Sprintf("%%-Week%d-%%", week)).
@@ -190,40 +144,38 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 	if existingCount > 0 {
 		respondJSON(w, map[string]any{
 			"success": false,
-			"error":   fmt.Sprintf("Week %d already has %d matches — generation aborted", week, existingCount),
+			"error":   fmt.Sprintf("Week %d already has %d matches — aborted", week, existingCount),
 		})
 		return
 	}
 
-	// Step 1: Load active teams
+	// Load teams
 	var teams []Team
 	if err := DB.Where("status = ?", "Active").Find(&teams).Error; err != nil {
 		http.Error(w, "Failed to load teams", http.StatusInternalServerError)
 		return
 	}
-
 	if len(teams) < 2 {
 		http.Error(w, "Not enough teams to generate preview", http.StatusBadRequest)
 		return
 	}
 
-	// Step 2: Load previous week's matches (avoid rematches)
+	// Avoid rematches from last week
 	type SimpleMatch struct {
 		TeamAID uint
 		TeamBID uint
 	}
 	var previous []SimpleMatch
 	DB.Table("matches").
-		Where("match_code LIKE ?", "Week"+strconv.Itoa(week-1)+"%").
+		Where("match_code LIKE ?", fmt.Sprintf("%%-Week%d-%%", week-1)).
 		Find(&previous)
-
 	recentPairs := make(map[[2]uint]bool)
 	for _, m := range previous {
 		key := [2]uint{min(m.TeamAID, m.TeamBID), max(m.TeamAID, m.TeamBID)}
 		recentPairs[key] = true
 	}
 
-	// Step 3: Build potential pairs excluding recent rematches
+	// Build pairs
 	var allPairs [][2]uint
 	for i := 0; i < len(teams); i++ {
 		for j := i + 1; j < len(teams); j++ {
@@ -233,9 +185,12 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	shuffle(allPairs)
 
-	// Step 4: Assign up to 2 matches per team (same logic as live)
+	// Deterministic shuffle
+	seed := int64(week)*12345 + int64(len(teams))*999
+	shuffle(allPairs, seed)
+
+	// Assign matches (same logic)
 	matchCount := make(map[uint]int)
 	var matchups [][2]uint
 	for _, pair := range allPairs {
@@ -247,7 +202,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 5: Fallback fill for under-matched teams
+	// Fill under-matched
 	for _, tA := range teams {
 		if matchCount[tA.ID] >= 2 {
 			continue
@@ -266,7 +221,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 6: Prepare readable summary (no DB writes)
+	// Prepare preview output
 	type Preview struct {
 		MatchCode string `json:"match_code"`
 		TeamA     string `json:"team_a"`
@@ -274,11 +229,9 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 	}
 	var results []Preview
 	for i, m := range matchups {
-		// Fetch team names
 		var teamA, teamB Team
 		DB.First(&teamA, m[0])
 		DB.First(&teamB, m[1])
-
 		results = append(results, Preview{
 			MatchCode: fmt.Sprintf("%s-Week%d-M%03d", currentSeason, week, i+1),
 			TeamA:     teamA.Name,
@@ -286,11 +239,11 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Step 7: Send preview (no DB insert)
 	respondJSON(w, map[string]any{
 		"success": true,
 		"season":  currentSeason,
 		"week":    week,
+		"seed":    seed,
 		"matches": results,
 	})
 }

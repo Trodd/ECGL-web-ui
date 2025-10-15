@@ -59,7 +59,6 @@ export default function Leaderboard() {
               <th>Rating</th>
               <th>W</th>
               <th>L</th>
-              <th>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -70,11 +69,6 @@ export default function Leaderboard() {
                 <td>{t.rating}</td>
                 <td>{t.wins}</td>
                 <td>{t.losses}</td>
-                <td>
-                  <span className={`badge ${t.status === "Active" ? "bg-success" : "bg-danger"}`}>
-                    {t.status}
-                  </span>
-                </td>
               </tr>
             ))}
           </tbody>

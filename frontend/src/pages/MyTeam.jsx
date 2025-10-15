@@ -13,13 +13,7 @@ export default function MyTeam() {
   const [loading, setLoading] = useState(true);
   const [confirmLeave, setConfirmLeave] = useState(false);
 
-  // captain tools
-  const [selectedMatch, setSelectedMatch] = useState("");
-  const [localDate, setLocalDate] = useState("");
-  const [scores, setScores] = useState({});
   const [msg, setMsg] = useState("");
-  const [submitLoading, setSubmitLoading] = useState(false);
-
   const urlBase = import.meta.env.VITE_API_URL;
 
   async function loadTeam() {
@@ -116,59 +110,6 @@ export default function MyTeam() {
     }
   }
 
-  // captain tools functions
-  async function handleScheduleMatch() {
-    if (!selectedMatch || !localDate) {
-      setMsg("⚠️ Select a match and time first.");
-      return;
-    }
-    setSubmitLoading(true);
-    try {
-      const utc = new Date(localDate).toISOString();
-      await axios.post(
-        `${urlBase}/api/match/schedule`,
-        { match_id: selectedMatch, team_id: team.id, date: utc },
-        { withCredentials: true }
-      );
-      setMsg("✅ Match scheduled successfully.");
-      await loadTeam();
-    } catch (err) {
-      console.error(err);
-      setMsg("❌ Failed to schedule match.");
-    } finally {
-      setSubmitLoading(false);
-    }
-  }
-
-  async function handleSubmitScores() {
-    if (!selectedMatch) {
-      setMsg("⚠️ Choose a match first.");
-      return;
-    }
-    setSubmitLoading(true);
-    try {
-      const maps = [1, 2, 3]
-        .filter((n) => scores[`map${n}`])
-        .map((n) => ({
-          map_number: n,
-          team_a_score: Number(scores[`map${n}`].a || 0),
-          team_b_score: Number(scores[`map${n}`].b || 0),
-        }));
-      await axios.post(
-        `${urlBase}/api/match/submit-score`,
-        { match_id: selectedMatch, team_id: team.id, maps },
-        { withCredentials: true }
-      );
-      setMsg("✅ Scores submitted successfully.");
-      await loadTeam();
-    } catch (err) {
-      console.error(err);
-      setMsg("❌ Failed to submit scores.");
-    } finally {
-      setSubmitLoading(false);
-    }
-  }
-
   return (
     <div>
       <h2>🧑 My Team: {team.name}</h2>
@@ -197,10 +138,7 @@ export default function MyTeam() {
           </button>
         ) : (
           <div className="d-flex gap-2 mb-3">
-            <button
-              className="btn btn-danger btn-sm"
-              onClick={handleLeaveTeam}
-            >
+            <button className="btn btn-danger btn-sm" onClick={handleLeaveTeam}>
               ✅ Confirm Leave
             </button>
             <button
@@ -211,6 +149,88 @@ export default function MyTeam() {
             </button>
           </div>
         ))}
+
+      {/* ⚙️ Captain Settings */}
+      {(myRole === "Captain" || myRole === "Co-Captain") && (
+        <div
+          className="p-3 mb-4 rounded"
+          style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+        >
+          <h5 className="text-light mb-3">⚙️ Team Settings</h5>
+
+          {/* 🟢 Toggle Active/Inactive */}
+          <div className="d-flex align-items-center gap-2 mb-3">
+            <span>Status:</span>
+            <select
+              className="form-select bg-dark text-light"
+              style={{ width: "auto" }}
+              value={team.status}
+              onChange={async (e) => {
+                try {
+                  await axios.post(
+                    `${urlBase}/api/team/toggle-status`,
+                    { team_id: team.id, status: e.target.value },
+                    { withCredentials: true }
+                  );
+                  await loadTeam();
+                } catch {
+                  alert("Failed to update status");
+                }
+              }}
+            >
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+          </div>
+
+          {/* 🔒 Allow Join Requests */}
+          <div className="d-flex align-items-center gap-2">
+            <span>Join Requests:</span>
+            <div className="form-check form-switch">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                checked={!!team.join_allowed}
+                onChange={async (e) => {
+                  const newAllow = e.target.checked;
+                  try {
+                    // Optimistically update local state
+                    setData((prev) => ({
+                      ...prev,
+                      team: { ...prev.team, join_allowed: newAllow },
+                    }));
+
+                    // Send to backend
+                    const res = await axios.post(
+                      `${urlBase}/api/team/toggle-join`,
+                      { team_id: team.id, allow: newAllow },
+                      { withCredentials: true }
+                    );
+
+                    // Confirm backend update & refresh
+                    if (res.data?.success) {
+                      await loadTeam();
+                    } else {
+                      throw new Error("Backend rejected");
+                    }
+                  } catch (err) {
+                    console.error("❌ Failed to toggle join:", err);
+                    alert("Failed to update join setting");
+                    // Revert if failed
+                    setData((prev) => ({
+                      ...prev,
+                      team: { ...prev.team, join_allowed: !newAllow },
+                    }));
+                  }
+                }}
+              />
+              <label className="form-check-label text-light">
+                {team.join_allowed ? "Allowed" : "Blocked"}
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
 
       <h4>👥 Roster</h4>
       <div style={{ maxWidth: "700px" }}>

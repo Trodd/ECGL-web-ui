@@ -37,13 +37,14 @@ type TeamJoinRequest struct {
 
 // --- Team ---
 type Team struct {
-	ID      uint   `gorm:"primaryKey" json:"id"`
-	Name    string `gorm:"unique" json:"name"`
-	Status  string `json:"status"`
-	Rating  int    `json:"rating"`
-	Wins    int    `json:"wins"`
-	Losses  int    `json:"losses"`
-	Matches int    `json:"matches"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"unique" json:"name"`
+	Status      string `json:"status"`
+	JoinAllowed bool   `json:"join_allowed" gorm:"default:true"`
+	Rating      int    `json:"rating"`
+	Wins        int    `json:"wins"`
+	Losses      int    `json:"losses"`
+	Matches     int    `json:"matches"`
 }
 
 // --- Team Member ---

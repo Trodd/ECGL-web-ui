@@ -1,33 +1,45 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 
 export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
     const isCaptain = myRole === "Captain" || myRole === "Co-Captain";
-    const [editing, setEditing] = useState(false);
     const [localDate, setLocalDate] = useState(
         match.date ? new Date(match.date).toISOString().slice(0, 16) : ""
     );
     const [scores, setScores] = useState({});
     const [msg, setMsg] = useState("");
+    const [editing, setEditing] = useState(false);
 
-    const bothTeamsConfirmedSchedule =
-        match.team_a_schedule_confirmed && match.team_b_schedule_confirmed;
     const bothTeamsConfirmedScores =
         match.team_a_score_confirmed && match.team_b_score_confirmed;
-
-    const myScheduleConfirmed =
-        (match.team_a_id === team.id && match.team_a_schedule_confirmed) ||
-        (match.team_b_id === team.id && match.team_b_schedule_confirmed);
 
     const myScoresConfirmed =
         (match.team_a_id === team.id && match.team_a_score_confirmed) ||
         (match.team_b_id === team.id && match.team_b_score_confirmed);
 
-    async function handleSchedule() {
-        if (!localDate) {
-            setMsg("⚠️ Please pick a date and time first.");
-            return;
+    // ✅ Load saved scores from backend
+    useEffect(() => {
+        if (match.maps && match.maps.length > 0) {
+            const preset = {};
+            match.maps.forEach((m) => {
+                preset[`map${m.map_number}`] = {
+                    mode: m.gamemode || "",
+                    // ✅ ensure 0 shows up instead of blank
+                    a: m.team_a_score !== undefined && m.team_a_score !== null ? m.team_a_score : "",
+                    b: m.team_b_score !== undefined && m.team_b_score !== null ? m.team_b_score : "",
+                };
+            });
+            setScores((prev) => {
+                // only update if changed
+                if (JSON.stringify(prev) !== JSON.stringify(preset)) return preset;
+                return prev;
+            });
         }
+    }, [match.maps]);
+
+    // --- Schedule or edit match time ---
+    async function handleSchedule() {
+        if (!localDate) return setMsg("⚠️ Please pick a date and time first.");
         try {
             const utc = new Date(localDate).toISOString();
             await axios.post(
@@ -35,45 +47,24 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                 { match_id: match.id, team_id: team.id, date: utc },
                 { withCredentials: true }
             );
-            setMsg("✅ Match schedule proposed! Waiting for confirmation.");
+            setMsg("✅ Match scheduled successfully!");
+            setEditing(false);
             await loadTeam();
         } catch {
             setMsg("❌ Failed to schedule match.");
         }
     }
 
-    async function handleConfirmSchedule() {
-        try {
-            await axios.post(
-                `${urlBase}/api/match/confirm-schedule`,
-                { match_id: match.id, team_id: team.id },
-                { withCredentials: true }
-            );
-            setMsg("✅ You confirmed the match time!");
-            await loadTeam();
-        } catch {
-            setMsg("❌ Failed to confirm schedule.");
-        }
-    }
-
-    async function handleSubmitScores() {
+    // --- Submit & confirm scores ---
+    async function handleConfirmScores() {
         const maps = [1, 2, 3]
             .filter((n) => scores[`map${n}`])
             .map((n) => ({
                 map_number: n,
-                gamemode: scores[`map${n}`].mode,
+                gamemode: scores[`map${n}`].mode || "",
                 team_a_score: Number(scores[`map${n}`].a || 0),
                 team_b_score: Number(scores[`map${n}`].b || 0),
             }));
-
-        const modeCount = maps.reduce((a, m) => {
-            a[m.gamemode] = (a[m.gamemode] || 0) + 1;
-            return a;
-        }, {});
-        if (Object.values(modeCount).some((c) => c > 2)) {
-            setMsg("⚠️ Each gamemode can only be used twice.");
-            return;
-        }
 
         try {
             await axios.post(
@@ -81,23 +72,16 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                 { match_id: match.id, team_id: team.id, maps },
                 { withCredentials: true }
             );
-            setMsg("✅ Scores submitted! Waiting for opponent confirmation.");
-            await loadTeam();
-        } catch {
-            setMsg("❌ Failed to submit scores.");
-        }
-    }
-
-    async function handleConfirmScores() {
-        try {
             await axios.post(
                 `${urlBase}/api/match/confirm-score`,
                 { match_id: match.id, team_id: team.id },
                 { withCredentials: true }
             );
-            setMsg("✅ You confirmed the final scores!");
-            await loadTeam();
-        } catch {
+            setMsg("✅ Scores confirmed — waiting for opponent.");
+            // optional light refresh after confirm (not blocking UI)
+            setTimeout(() => loadTeam(), 2000);
+        } catch (err) {
+            console.error(err);
             setMsg("❌ Failed to confirm scores.");
         }
     }
@@ -111,7 +95,12 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
     return (
         <div
             className="p-3 border rounded bg-dark shadow-sm"
-            style={{ width: "100%", maxWidth: 680, margin: "0 auto", borderColor: "#444" }}
+            style={{
+                width: "100%",
+                maxWidth: 680,
+                margin: "0 auto",
+                borderColor: "#444",
+            }}
         >
             <div className="d-flex justify-content-between align-items-center mb-2">
                 <h5 className="mb-0">
@@ -124,12 +113,11 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                 Status: <strong>{match.status || "Pending"}</strong>
             </p>
 
-            {/* STEP 1: Scheduling (only until both confirmed) */}
-            {!bothTeamsConfirmedSchedule && isCaptain && (
+            {/* 🗓️ Step 1: Schedule / Edit */}
+            {isCaptain && (
                 <div>
-                    <h6 className="text-light mb-2">🗓️ Schedule Match</h6>
-
-                    {(!match.date || editing) ? (
+                    <h6 className="text-light mb-2">🗓️ Schedule / Edit Match Time</h6>
+                    {!match.date || editing ? (
                         <div className="d-flex align-items-center gap-2 mb-2">
                             <input
                                 type="datetime-local"
@@ -138,8 +126,11 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                                 value={localDate}
                                 onChange={(e) => setLocalDate(e.target.value)}
                             />
-                            <button className="btn btn-primary btn-sm" onClick={handleSchedule}>
-                                {editing ? "Update" : "Schedule"}
+                            <button
+                                className="btn btn-primary btn-sm"
+                                onClick={handleSchedule}
+                            >
+                                {match.date ? "Save Changes" : "Schedule"}
                             </button>
                             {editing && (
                                 <button
@@ -153,7 +144,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                     ) : (
                         <>
                             <p className="text-light small mb-2">
-                                Proposed time:{" "}
+                                Scheduled time:{" "}
                                 <strong>
                                     {new Date(match.date).toLocaleString([], {
                                         dateStyle: "medium",
@@ -161,28 +152,21 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                                     })}
                                 </strong>
                             </p>
-
-                            {!myScheduleConfirmed ? (
-                                <button
-                                    className="btn btn-outline-success btn-sm"
-                                    onClick={handleConfirmSchedule}
-                                >
-                                    ✅ Confirm Match Time
-                                </button>
-                            ) : (
-                                <p className="text-warning small mb-0">
-                                    ⏳ Waiting for opponent to confirm...
-                                </p>
-                            )}
+                            <button
+                                className="btn btn-outline-warning btn-sm"
+                                onClick={() => setEditing(true)}
+                            >
+                                ✏️ Edit Date / Time
+                            </button>
                         </>
                     )}
                 </div>
             )}
 
-            {/* STEP 2: Scoring (only after both teams confirm schedule) */}
-            {bothTeamsConfirmedSchedule && !bothTeamsConfirmedScores && isCaptain && (
+            {/* 🎯 Step 2: Scoring */}
+            {match.date && isCaptain && (
                 <div className="mt-3">
-                    <h6 className="text-light mb-2">🎯 Submit Scores</h6>
+                    <h6 className="text-light mb-2">🎯 Confirm Scores</h6>
                     <div className="row g-3">
                         {[1, 2, 3].map((n) => (
                             <div className="col-md-4" key={n}>
@@ -202,6 +186,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                                         onChange={(e) =>
                                             updateScore(`map${n}`, "mode", e.target.value)
                                         }
+                                        disabled={myScoresConfirmed}
                                     >
                                         <option value="">Gamemode...</option>
                                         <option value="Capture Point">Capture Point</option>
@@ -218,6 +203,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                                             onChange={(e) =>
                                                 updateScore(`map${n}`, "a", e.target.value)
                                             }
+                                            disabled={myScoresConfirmed}
                                         />
                                     </div>
                                     <div>
@@ -230,6 +216,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                                             onChange={(e) =>
                                                 updateScore(`map${n}`, "b", e.target.value)
                                             }
+                                            disabled={myScoresConfirmed}
                                         />
                                     </div>
                                 </div>
@@ -238,32 +225,28 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                     </div>
 
                     <div className="d-flex gap-2 mt-3 align-items-center">
-                        <button className="btn btn-success btn-sm" onClick={handleSubmitScores}>
-                            Submit Final Scores
+                        <button
+                            className="btn btn-success btn-sm"
+                            onClick={handleConfirmScores}
+                            disabled={bothTeamsConfirmedScores || myScoresConfirmed}
+                        >
+                            ✅ Confirm Scores
                         </button>
 
-                        {!myScoresConfirmed && (
-                            <button
-                                className="btn btn-outline-success btn-sm"
-                                onClick={handleConfirmScores}
-                            >
-                                ✅ Confirm Scores
-                            </button>
-                        )}
                         {myScoresConfirmed && !bothTeamsConfirmedScores && (
                             <p className="text-warning small mb-0">
-                                ⏳ Waiting for opponent to confirm...
+                                ⏳ Waiting for opponent to confirm (editing resets confirmation)...
                             </p>
                         )}
                     </div>
                 </div>
             )}
 
-            {/* STEP 3: Finalized */}
-            {bothTeamsConfirmedSchedule && bothTeamsConfirmedScores && (
+            {/* ✅ Step 3: Finalized */}
+            {bothTeamsConfirmedScores && (
                 <div className="mt-3">
                     <p className="text-success mb-0 fw-semibold">
-                        ✅ Both teams confirmed — match finalized!
+                        ✅ Both teams confirmed — match completed!
                     </p>
                 </div>
             )}
@@ -271,10 +254,10 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
             {msg && (
                 <p
                     className={`small mt-2 mb-0 ${msg.startsWith("✅")
-                            ? "text-success"
-                            : msg.startsWith("⚠️")
-                                ? "text-warning"
-                                : "text-danger"
+                        ? "text-success"
+                        : msg.startsWith("⚠️")
+                            ? "text-warning"
+                            : "text-danger"
                         }`}
                 >
                     {msg}

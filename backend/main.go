@@ -473,6 +473,8 @@ func main() {
 	r.HandleFunc("/api/mod/season/archive", ModSeasonArchive).Methods("POST")
 	r.HandleFunc("/api/mod/matches/preview", HandlePreviewWeeklyMatches).Methods("GET")
 	r.HandleFunc("/api/mod/matches/clear-week", HandleModClearWeek).Methods("POST")
+	r.HandleFunc("/api/team/toggle-status", HandleToggleTeamStatus).Methods("POST")
+	r.HandleFunc("/api/team/toggle-join", HandleToggleTeamJoinAllowed).Methods("POST")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()
