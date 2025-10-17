@@ -854,7 +854,9 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 	type MatchRow struct {
 		ID            uint       `json:"id"`
 		MatchCode     string     `json:"match_code"`
+		TeamAID       uint       `json:"team_a_id"`
 		TeamA         string     `json:"team_a"`
+		TeamBID       uint       `json:"team_b_id"`
 		TeamB         string     `json:"team_b"`
 		ScheduledDate *time.Time `json:"scheduled_date"`
 		Status        string     `json:"status"`
@@ -864,20 +866,22 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 
 	var rows []MatchRow
 	if err := DB.Raw(`
-		SELECT 
-			m.id,
-			m.match_code,
-			t1.name AS team_a,
-			t2.name AS team_b,
-			m.scheduled_date,
-			m.status,
-			m.winner_id,
-			m.loser_id
-		FROM matches m
-		JOIN teams t1 ON t1.id = m.team_a_id
-		JOIN teams t2 ON t2.id = m.team_b_id
-		ORDER BY m.created_at DESC
-	`).Scan(&rows).Error; err != nil {
+	SELECT 
+		m.id,
+		m.match_code,
+		m.team_a_id,
+		t1.name AS team_a,
+		m.team_b_id,
+		t2.name AS team_b,
+		m.scheduled_date,
+		m.status,
+		m.winner_id,
+		m.loser_id
+	FROM matches m
+	JOIN teams t1 ON t1.id = m.team_a_id
+	JOIN teams t2 ON t2.id = m.team_b_id
+	ORDER BY m.created_at DESC
+`).Scan(&rows).Error; err != nil {
 		log.Printf("❌ HandlePublicMatches query failed: %v", err)
 		http.Error(w, "failed to fetch matches", http.StatusInternalServerError)
 		return
@@ -889,7 +893,9 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 		MatchCode     string     `json:"match_code"`
 		Season        string     `json:"season"`
 		Week          string     `json:"week"`
+		TeamAID       uint       `json:"team_a_id"`
 		TeamA         string     `json:"team_a"`
+		TeamBID       uint       `json:"team_b_id"`
 		TeamB         string     `json:"team_b"`
 		ScheduledDate *time.Time `json:"scheduled_date"`
 		Status        string     `json:"status"`
@@ -914,7 +920,9 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 			MatchCode:     m.MatchCode,
 			Season:        fmt.Sprintf("%v", seasonLabel),
 			Week:          fmt.Sprintf("%v", weekLabel),
+			TeamAID:       m.TeamAID,
 			TeamA:         m.TeamA,
+			TeamBID:       m.TeamBID,
 			TeamB:         m.TeamB,
 			ScheduledDate: m.ScheduledDate,
 			Status:        m.Status,
@@ -1307,7 +1315,7 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- Get match with map scores ---
+// --- Get match with unified map_scores (legacy + JSONB) ---
 func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	matchID, err := strconv.Atoi(vars["id"])
@@ -1316,7 +1324,6 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// fetch match
 	var match Match
 	if err := DB.First(&match, matchID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1327,19 +1334,49 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// fetch map scores
-	var maps []MatchScore
-	if err := DB.Where("match_id = ?", match.ID).Find(&maps).Error; err != nil {
-		http.Error(w, "Failed to load map scores", http.StatusInternalServerError)
-		return
+	// --- Attempt to read JSONB field ---
+	var jsonMaps []map[string]any
+	var rawJSON sql.NullString
+	if err := DB.Raw("SELECT map_scores FROM matches WHERE id = ?", match.ID).Scan(&rawJSON).Error; err == nil {
+		if rawJSON.Valid && strings.TrimSpace(rawJSON.String) != "" {
+			if err := json.Unmarshal([]byte(rawJSON.String), &jsonMaps); err != nil {
+				log.Printf("⚠️ Failed to parse JSONB map_scores for match %d: %v", match.ID, err)
+			}
+		}
 	}
 
-	// fetch team names
+	// --- Fallback: legacy table rows ---
+	if len(jsonMaps) == 0 {
+		var legacyMaps []MatchScore
+		if err := DB.Where("match_id = ?", match.ID).Find(&legacyMaps).Error; err == nil {
+			for _, m := range legacyMaps {
+				jsonMaps = append(jsonMaps, map[string]any{
+					"map":          m.MapNumber,
+					"mode":         m.Gamemode,
+					"team_a_score": m.TeamAScore,
+					"team_b_score": m.TeamBScore,
+				})
+			}
+		}
+	}
+
+	// --- Filter out 0–0 maps ---
+	filtered := make([]map[string]any, 0)
+	for _, m := range jsonMaps {
+		a := int(toFloat(m["team_a_score"]))
+		b := int(toFloat(m["team_b_score"]))
+		if a == 0 && b == 0 {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+
+	// --- Load teams ---
 	var teamA, teamB Team
 	DB.First(&teamA, match.TeamAID)
 	DB.First(&teamB, match.TeamBID)
 
-	// --- Fetch historical rosters from player_history ---
+	// --- Load historical rosters ---
 	type HistoryPlayer struct {
 		PlayerID    int64  `json:"player_id"`
 		DisplayName string `json:"display_name"`
@@ -1347,14 +1384,12 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 		Role        string `json:"role"`
 	}
 	var rosterA, rosterB []HistoryPlayer
-
 	DB.Raw(`
 		SELECT p.id AS player_id, p.display_name, p.username, ph.role
 		FROM player_history ph
 		JOIN players p ON p.id = ph.player_id
 		WHERE ph.team_id = ? AND ph.season = COALESCE(?, 'Preseason')
 	`, match.TeamAID, "Preseason").Scan(&rosterA)
-
 	DB.Raw(`
 		SELECT p.id AS player_id, p.display_name, p.username, ph.role
 		FROM player_history ph
@@ -1362,13 +1397,29 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 		WHERE ph.team_id = ? AND ph.season = COALESCE(?, 'Preseason')
 	`, match.TeamBID, "Preseason").Scan(&rosterB)
 
-	// ✅ Return clean JSON, even if arrays are empty
 	respondJSON(w, map[string]any{
-		"match":  match,
-		"teams":  map[string]any{"a": teamA, "b": teamB},
-		"maps":   maps,
-		"roster": map[string]any{"a": rosterA, "b": rosterB},
+		"match":      match,
+		"teams":      map[string]any{"a": teamA, "b": teamB},
+		"map_scores": filtered, // ✅ unified for both systems
+		"roster":     map[string]any{"a": rosterA, "b": rosterB},
 	})
+}
+
+// helper to safely coerce numbers
+func toFloat(v any) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case int:
+		return float64(x)
+	case int64:
+		return float64(x)
+	case json.Number:
+		f, _ := x.Float64()
+		return f
+	default:
+		return 0
+	}
 }
 
 // --- Get all matches for a team (with map scores) ---

@@ -1,6 +1,10 @@
 package main
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/datatypes"
+)
 
 // --- Player ---
 type Player struct {
@@ -57,26 +61,29 @@ type TeamMember struct {
 
 // --- Match ---
 type Match struct {
-	ID                     uint       `gorm:"primaryKey" json:"id"`
-	MatchCode              string     `gorm:"unique" json:"match_code"`
-	TeamAID                uint       `json:"team_a_id"`
-	TeamBID                uint       `json:"team_b_id"`
-	ProposedDate           *time.Time `json:"proposed_date"`
-	ScheduledDate          *time.Time `json:"scheduled_date"`
-	Status                 string     `json:"status"`
-	WinnerID               *uint      `json:"winner_id"`
-	LoserID                *uint      `json:"loser_id"`
-	ProposerID             *int64     `json:"proposer_id"`
-	CreatedAt              time.Time  `json:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at"`
-	Season                 string     `json:"season"`
-	Week                   string     `json:"week"`
-	TeamAScheduleConfirmed bool       `json:"team_a_schedule_confirmed"`
-	TeamBScheduleConfirmed bool       `json:"team_b_schedule_confirmed"`
-	TeamAScoreConfirmed    bool       `json:"team_a_score_confirmed"`
-	TeamBScoreConfirmed    bool       `json:"team_b_score_confirmed"`
-	ScheduleConfirmedAt    *time.Time `json:"schedule_confirmed_at"`
-	ScoreConfirmedAt       *time.Time `json:"score_confirmed_at"`
+	ID                     uint           `gorm:"primaryKey" json:"id"`
+	MatchCode              string         `gorm:"unique" json:"match_code"`
+	TeamAID                uint           `json:"team_a_id"`
+	TeamBID                uint           `json:"team_b_id"`
+	ProposedDate           *time.Time     `json:"proposed_date"`
+	ScheduledDate          *time.Time     `json:"scheduled_date"`
+	Status                 string         `json:"status"`
+	WinnerID               *uint          `json:"winner_id"`
+	LoserID                *uint          `json:"loser_id"`
+	ProposerID             *int64         `json:"proposer_id"`
+	CreatedAt              time.Time      `json:"created_at"`
+	UpdatedAt              time.Time      `json:"updated_at"`
+	Season                 string         `json:"season"`
+	Week                   string         `json:"week"`
+	TeamAScheduleConfirmed bool           `json:"team_a_schedule_confirmed"`
+	TeamBScheduleConfirmed bool           `json:"team_b_schedule_confirmed"`
+	TeamAScoreConfirmed    bool           `json:"team_a_score_confirmed"`
+	TeamBScoreConfirmed    bool           `json:"team_b_score_confirmed"`
+	ScheduleConfirmedAt    *time.Time     `json:"schedule_confirmed_at"`
+	ScoreConfirmedAt       *time.Time     `json:"score_confirmed_at"`
+	TeamAScore             int            `json:"team_a_score" gorm:"default:0"`
+	TeamBScore             int            `json:"team_b_score" gorm:"default:0"`
+	MapScores              datatypes.JSON `json:"map_scores" gorm:"type:jsonb;default:'[]'"`
 }
 
 // --- Match Score ---

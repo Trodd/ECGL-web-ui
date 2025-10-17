@@ -82,50 +82,97 @@ export default function MatchDetail() {
 
             {/* --- Map Scores --- */}
             <h4 className="text-light mb-3">🗺️ Map Scores</h4>
-            {maps && maps.length > 0 ? (
-                (() => {
-                    // filter out empty / unused maps (no mode or both scores are zero)
-                    const validMaps = maps.filter(
-                        (m) =>
-                            m.gamemode &&
-                            m.gamemode.trim() !== "" &&
-                            !(m.team_a_score === 0 && m.team_b_score === 0)
-                    );
 
-                    if (validMaps.length === 0) {
-                        return <p className="text-light">No map scores recorded yet.</p>;
-                    }
+            {(() => {
+                const mapData = Array.isArray(matchData.map_scores)
+                    ? matchData.map_scores
+                    : [];
 
-                    return (
+                // Filter out unplayed (0–0) maps
+                const validMaps = mapData.filter(
+                    (m) =>
+                        !(
+                            (m.team_a_score === null || m.team_a_score === 0) &&
+                            (m.team_b_score === null || m.team_b_score === 0)
+                        )
+                );
+
+                if (validMaps.length === 0)
+                    return <p className="text-light">No map scores recorded yet.</p>;
+
+                // Compute totals for overall winner
+                const totalA = validMaps.filter((m) => m.team_a_score > m.team_b_score).length;
+                const totalB = validMaps.filter((m) => m.team_b_score > m.team_a_score).length;
+                const winner =
+                    totalA > totalB ? teamA.name : totalB > totalA ? teamB.name : null;
+
+                return (
+                    <>
+                        <p className="text-info fw-bold mb-2">
+                            {teamA.name}: {totalA} – {totalB} : {teamB.name}{" "}
+                            {winner && (
+                                <span className="ms-2 text-success">
+                                    🏆 Winner: {winner}
+                                </span>
+                            )}
+                        </p>
+
                         <div className="table-responsive">
                             <table className="table table-dark table-striped align-middle text-center">
-                                <thead className="table-secondary">
+                                <thead className="table-secondary text-dark">
                                     <tr>
-                                        <th>#</th>
+                                        <th>Map</th>
                                         <th>Gamemode</th>
-                                        <th>{teamA?.name || "Team A"}</th>
-                                        <th>{teamB?.name || "Team B"}</th>
+                                        <th>{teamA.name}</th>
+                                        <th>{teamB.name}</th>
+                                        <th>Winner</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {validMaps.map((m, i) => {
                                         const aWin = m.team_a_score > m.team_b_score;
                                         const bWin = m.team_b_score > m.team_a_score;
+                                        const mode =
+                                            m.mode && m.mode.trim() !== ""
+                                                ? m.mode
+                                                : "Unknown";
+
                                         return (
-                                            <tr key={m.id || i}>
-                                                <td>{m.map_number}</td>
-                                                <td>{m.gamemode}</td>
+                                            <tr key={i}>
+                                                <td>Map {m.map ?? i + 1}</td>
+                                                <td>{mode}</td>
                                                 <td
-                                                    className={`fw-bold ${aWin ? "text-success" : bWin ? "text-danger" : "text-light"
+                                                    className={`fw-bold ${aWin
+                                                            ? "text-success"
+                                                            : bWin
+                                                                ? "text-danger"
+                                                                : "text-light"
                                                         }`}
                                                 >
                                                     {m.team_a_score}
                                                 </td>
                                                 <td
-                                                    className={`fw-bold ${bWin ? "text-success" : aWin ? "text-danger" : "text-light"
+                                                    className={`fw-bold ${bWin
+                                                            ? "text-success"
+                                                            : aWin
+                                                                ? "text-danger"
+                                                                : "text-light"
                                                         }`}
                                                 >
                                                     {m.team_b_score}
+                                                </td>
+                                                <td>
+                                                    {aWin ? (
+                                                        <span className="text-success fw-semibold">
+                                                            ✅ {teamA.name}
+                                                        </span>
+                                                    ) : bWin ? (
+                                                        <span className="text-success fw-semibold">
+                                                            ✅ {teamB.name}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-secondary">Tie</span>
+                                                    )}
                                                 </td>
                                             </tr>
                                         );
@@ -133,11 +180,9 @@ export default function MatchDetail() {
                                 </tbody>
                             </table>
                         </div>
-                    );
-                })()
-            ) : (
-                <p className="text-light">No map scores recorded yet.</p>
-            )}
+                    </>
+                );
+            })()}
 
             {/* --- Rosters --- */}
             <h4 className="text-light mt-4 mb-3">👥 Rosters at Time of Match</h4>

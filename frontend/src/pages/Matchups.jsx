@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { Link } from "react-router-dom";
 
 export default function Matchups() {
     const [matches, setMatches] = useState({});
@@ -107,82 +108,97 @@ export default function Matchups() {
                         </h5>
 
                         {list.map((m) => {
-                            const winner =
-                                m.winner_id === null
-                                    ? null
-                                    : m.winner_id === m.team_a_id
-                                        ? "A"
-                                        : "B";
-                            return (
-                                <div
-                                    key={m.id}
-                                    className="p-2 mb-2 rounded"
-                                    style={{
-                                        background: "#181a1b", // darker card tone
-                                        border: "1px solid #2a2d2f",
-                                        transition: "background 0.2s, border-color 0.2s",
-                                    }}
-                                    onMouseEnter={(e) => {
-                                        e.currentTarget.style.background = "#202325";
-                                        e.currentTarget.style.borderColor = "#3a3f42";
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        e.currentTarget.style.background = "#181a1b";
-                                        e.currentTarget.style.borderColor = "#2a2d2f";
-                                    }}
-                                >
+                            // ✅ Normalize winner detection
+                            const winnerId = Number(m.winner_id);
+                            const teamAId = Number(m.team_a_id);
+                            const teamBId = Number(m.team_b_id);
 
-                                    <div className="d-flex justify-content-between align-items-center">
-                                        <div>
+                            let winner = null;
+                            if (winnerId && (winnerId === teamAId || winnerId === teamBId)) {
+                                winner = winnerId === teamAId ? "A" : "B";
+                            } else if (m.team_a_score != null && m.team_b_score != null) {
+                                if (m.team_a_score > m.team_b_score) winner = "A";
+                                else if (m.team_b_score > m.team_a_score) winner = "B";
+                            }
+
+                            return (
+                                <Link
+                                    to={`/match/${m.id}`}
+                                    key={m.id}
+                                    className="text-decoration-none"
+                                    style={{ color: "inherit" }}
+                                >
+                                    <div
+                                        className="p-2 mb-2 rounded"
+                                        style={{
+                                            background: "#181a1b",
+                                            border: "1px solid #2a2d2f",
+                                            cursor: "pointer",
+                                            transition: "background 0.2s, border-color 0.2s",
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = "#202325";
+                                            e.currentTarget.style.borderColor = "#3a3f42";
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = "#181a1b";
+                                            e.currentTarget.style.borderColor = "#2a2d2f";
+                                        }}
+                                    >
+                                        <div className="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                {/* ✅ Winner = green, Loser = red */}
+                                                <span
+                                                    className={`fw-bold ${winner === "A"
+                                                            ? "text-success"
+                                                            : winner === "B"
+                                                                ? "text-danger"
+                                                                : "text-light"
+                                                        }`}
+                                                >
+                                                    {m.team_a}
+                                                    {winner === "A" && " 🏆"}
+                                                </span>{" "}
+                                                vs{" "}
+                                                <span
+                                                    className={`fw-bold ${winner === "B"
+                                                            ? "text-success"
+                                                            : winner === "A"
+                                                                ? "text-danger"
+                                                                : "text-light"
+                                                        }`}
+                                                >
+                                                    {m.team_b}
+                                                    {winner === "B" && " 🏆"}
+                                                </span>
+                                            </div>
+
+                                            <div className="text-end small text-light">
+                                                {m.scheduled_date
+                                                    ? new Date(m.scheduled_date).toLocaleString([], {
+                                                        dateStyle: "short",
+                                                        timeStyle: "short",
+                                                    })
+                                                    : "TBD"}
+                                            </div>
+                                        </div>
+
+                                        <div className="small text-secondary">
+                                            Match ID: <b>{m.match_code}</b> | Status:{" "}
                                             <span
                                                 className={
-                                                    winner === "A"
-                                                        ? "text-success fw-bold"
-                                                        : winner === "B"
-                                                            ? "text-danger fw-bold"
+                                                    ["Completed", "Finished"].includes(m.status)
+                                                        ? "text-success"
+                                                        : m.status === "Scheduled"
+                                                            ? "text-warning"
                                                             : "text-light"
                                                 }
                                             >
-                                                {m.team_a}
-                                            </span>{" "}
-                                            vs{" "}
-                                            <span
-                                                className={
-                                                    winner === "B"
-                                                        ? "text-success fw-bold"
-                                                        : winner === "A"
-                                                            ? "text-danger fw-bold"
-                                                            : "text-light"
-                                                }
-                                            >
-                                                {m.team_b}
+                                                {m.status}
                                             </span>
                                         </div>
-                                        <div className="text-end small text-light">
-                                            {m.scheduled_date
-                                                ? new Date(m.scheduled_date).toLocaleString([], {
-                                                    dateStyle: "short",
-                                                    timeStyle: "short",
-                                                })
-                                                : "TBD"}
-                                        </div>
                                     </div>
-
-                                    <div className="small text-secondary">
-                                        Match ID: <b>{m.match_code}</b> | Status:{" "}
-                                        <span
-                                            className={
-                                                m.status === "Completed"
-                                                    ? "text-success"
-                                                    : m.status === "Scheduled"
-                                                        ? "text-warning"
-                                                        : "text-light"
-                                            }
-                                        >
-                                            {m.status}
-                                        </span>
-                                    </div>
-                                </div>
+                                </Link>
                             );
                         })}
                     </div>

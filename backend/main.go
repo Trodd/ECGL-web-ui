@@ -457,6 +457,8 @@ func main() {
 	r.HandleFunc("/api/mod/match/forfeit", ModMatchForfeit).Methods("POST")
 	r.HandleFunc("/api/mod/match/double-forfeit", ModMatchDoubleForfeit).Methods("POST")
 	r.HandleFunc("/api/mod/match", ModMatchDelete).Methods("DELETE")
+	r.HandleFunc("/api/mod/match/add", HandleModAddMatch).Methods("POST")
+	r.HandleFunc("/api/mod/match/set-maps", HandleModSetMaps).Methods("POST")
 	r.HandleFunc("/api/mod/match/delete", HandleModDeleteMatch).Methods("POST")
 	r.HandleFunc("/api/mod/match/schedule", ModForceSchedule).Methods("POST")
 	r.HandleFunc("/api/mod/matches/generate", HandleGenerateWeeklyMatches).Methods("POST")

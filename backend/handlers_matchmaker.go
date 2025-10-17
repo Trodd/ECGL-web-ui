@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+	"gorm.io/datatypes"
 )
 
 // --- Utility: deterministic shuffle ---
@@ -75,6 +76,47 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 	nameToID := make(map[string]uint)
 	for _, t := range teams {
 		nameToID[strings.TrimSpace(t.Name)] = t.ID
+	}
+
+	// --- Step 1.5: Auto double-forfeit unfinished matches for involved teams ---
+	var teamNames []string
+	for _, m := range req.Matches {
+		teamNames = append(teamNames, m.TeamA, m.TeamB)
+	}
+
+	// Find all matching teams
+	var involvedTeams []Team
+	if err := DB.Where("name IN ?", teamNames).Find(&involvedTeams).Error; err != nil {
+		log.Printf("❌ Failed to load teams for auto-forfeit cleanup: %v", err)
+	} else {
+		for _, team := range involvedTeams {
+			var oldMatches []Match
+			// any active match not already completed/forfeit/cancelled
+			if err := DB.
+				Where("(team_a_id = ? OR team_b_id = ?) AND status NOT IN ?", team.ID, team.ID,
+					[]string{"Completed", "Forfeit", "Cancelled"}).
+				Find(&oldMatches).Error; err != nil {
+				log.Printf("⚠️ Could not load old matches for team %s: %v", team.Name, err)
+				continue
+			}
+
+			for _, old := range oldMatches {
+				// Double-forfeit: both teams lose
+				old.Status = "Forfeit"
+				old.WinnerID = nil
+				old.LoserID = nil
+
+				// Clear any map scores
+				_ = DB.Where("match_id = ?", old.ID).Delete(&MatchScore{}).Error
+
+				if err := DB.Save(&old).Error; err != nil {
+					log.Printf("⚠️ Failed to mark match #%d as forfeit: %v", old.ID, err)
+				} else {
+					log.Printf("🏳️ Auto double-forfeited unfinished match #%d: %d vs %d",
+						old.ID, old.TeamAID, old.TeamBID)
+				}
+			}
+		}
 	}
 
 	// Step 2: Validate and insert each match from preview
@@ -149,14 +191,24 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load teams
-	var teams []Team
-	if err := DB.Where("status = ?", "Active").Find(&teams).Error; err != nil {
+	// Load ALL teams and filter to active only
+	var allTeams []Team
+	if err := DB.Find(&allTeams).Error; err != nil {
 		http.Error(w, "Failed to load teams", http.StatusInternalServerError)
 		return
 	}
+
+	var teams []Team
+	for _, t := range allTeams {
+		if strings.EqualFold(t.Status, "Active") {
+			teams = append(teams, t)
+		} else {
+			log.Printf("⏭️ Skipping %s (status: %s)", t.Name, t.Status)
+		}
+	}
+
 	if len(teams) < 2 {
-		http.Error(w, "Not enough teams to generate preview", http.StatusBadRequest)
+		http.Error(w, "Not enough ACTIVE teams to generate preview", http.StatusBadRequest)
 		return
 	}
 
@@ -165,9 +217,10 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		TeamAID uint
 		TeamBID uint
 	}
+	// Avoid rematches within the last 3 weeks
 	var previous []SimpleMatch
 	DB.Table("matches").
-		Where("match_code LIKE ?", fmt.Sprintf("%%-Week%d-%%", week-1)).
+		Where("season = ? AND CAST(week AS INTEGER) >= ?", currentSeason, week-3).
 		Find(&previous)
 	recentPairs := make(map[[2]uint]bool)
 	for _, m := range previous {
@@ -175,7 +228,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		recentPairs[key] = true
 	}
 
-	// Build pairs
+	// Build all possible pairs (only active teams)
 	var allPairs [][2]uint
 	for i := 0; i < len(teams); i++ {
 		for j := i + 1; j < len(teams); j++ {
@@ -190,7 +243,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 	seed := int64(week)*12345 + int64(len(teams))*999
 	shuffle(allPairs, seed)
 
-	// Assign matches (same logic)
+	// Assign matches (each team max 2)
 	matchCount := make(map[uint]int)
 	var matchups [][2]uint
 	for _, pair := range allPairs {
@@ -202,7 +255,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fill under-matched
+	// Fill under-matched teams
 	for _, tA := range teams {
 		if matchCount[tA.ID] >= 2 {
 			continue
@@ -320,5 +373,177 @@ func HandleModClearWeek(w http.ResponseWriter, r *http.Request) {
 		"deleted": result.RowsAffected,
 		"week":    req.Week,
 		"message": fmt.Sprintf("Cleared %d matches for Week %s", result.RowsAffected, req.Week),
+	})
+}
+
+// POST /api/mod/match/add
+func HandleModAddMatch(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		TeamA string `json:"team_a"`
+		TeamB string `json:"team_b"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.TeamA == "" || req.TeamB == "" || strings.EqualFold(req.TeamA, req.TeamB) {
+		http.Error(w, "invalid team selection", http.StatusBadRequest)
+		return
+	}
+
+	var aTeam, bTeam Team
+	if err := DB.Where("LOWER(name)=LOWER(?)", req.TeamA).First(&aTeam).Error; err != nil {
+		http.Error(w, "Team A not found", http.StatusBadRequest)
+		return
+	}
+	if err := DB.Where("LOWER(name)=LOWER(?)", req.TeamB).First(&bTeam).Error; err != nil {
+		http.Error(w, "Team B not found", http.StatusBadRequest)
+		return
+	}
+
+	// Find current active week (highest numeric week)
+	var lastMatch Match
+	DB.Where("season = ?", currentSeason).Order("CAST(week AS INTEGER) DESC").First(&lastMatch)
+	currentWeek := lastMatch.Week
+	if currentWeek == "" {
+		currentWeek = "1"
+	}
+
+	var count int64
+	DB.Model(&Match{}).
+		Where("season = ? AND week = ?", currentSeason, currentWeek).
+		Count(&count)
+
+	matchCode := fmt.Sprintf("%s-Week%s-M%03d", currentSeason, currentWeek, count+1)
+	now := time.Now()
+
+	newMatch := Match{
+		MatchCode:    matchCode,
+		TeamAID:      aTeam.ID,
+		TeamBID:      bTeam.ID,
+		ProposedDate: &now,
+		Status:       "Scheduled",
+		Season:       currentSeason,
+		Week:         currentWeek,
+	}
+
+	if err := DB.Create(&newMatch).Error; err != nil {
+		http.Error(w, "failed to create match", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success":    true,
+		"match_code": matchCode,
+		"match_id":   newMatch.ID,
+		"week":       currentWeek,
+		"message":    fmt.Sprintf("Added %s: %s vs %s", matchCode, aTeam.Name, bTeam.Name),
+	})
+}
+
+// --- Moderator: Set map scores manually ---
+func HandleModSetMaps(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		MatchID int              `json:"match_id"`
+		Maps    []map[string]any `json:"maps"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.MatchID == 0 || len(req.Maps) == 0 {
+		http.Error(w, "Missing match_id or maps", http.StatusBadRequest)
+		return
+	}
+
+	var match Match
+	if err := DB.First(&match, req.MatchID).Error; err != nil {
+		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
+	// Normalize and filter out empty maps
+	filtered := make([]map[string]any, 0)
+	for _, m := range req.Maps {
+		a := int(toFloat(m["team_a_score"]))
+		b := int(toFloat(m["team_b_score"]))
+
+		// ✅ Safe mode extraction
+		var mode string
+		if raw, ok := m["mode"]; ok && raw != nil {
+			if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
+				mode = strings.TrimSpace(s)
+			} else {
+				mode = "Unknown"
+			}
+		} else {
+			mode = "Unknown"
+		}
+
+		if a == 0 && b == 0 {
+			continue
+		}
+
+		filtered = append(filtered, map[string]any{
+			"map":          int(toFloat(m["map"])),
+			"mode":         mode,
+			"team_a_score": a,
+			"team_b_score": b,
+		})
+	}
+
+	// Serialize JSONB
+	jsonBytes, err := json.Marshal(filtered)
+	if err != nil {
+		http.Error(w, "Failed to encode map scores", http.StatusInternalServerError)
+		return
+	}
+
+	// Save to match
+	if err := DB.Model(&match).Update("map_scores", datatypes.JSON(jsonBytes)).Error; err != nil {
+		http.Error(w, "Failed to update match scores", http.StatusInternalServerError)
+		return
+	}
+
+	// Update overall winner + status
+	var teamA, teamB Team
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+
+	totalA := 0
+	totalB := 0
+	for _, m := range filtered {
+		if int(toFloat(m["team_a_score"])) > int(toFloat(m["team_b_score"])) {
+			totalA++
+		} else if int(toFloat(m["team_b_score"])) > int(toFloat(m["team_a_score"])) {
+			totalB++
+		}
+	}
+
+	if totalA > totalB {
+		match.WinnerID = &teamA.ID
+		match.LoserID = &teamB.ID
+	} else if totalB > totalA {
+		match.WinnerID = &teamB.ID
+		match.LoserID = &teamA.ID
+	}
+	match.Status = "Finished"
+
+	DB.Save(&match)
+
+	respondJSON(w, map[string]any{
+		"ok":         true,
+		"match_id":   match.ID,
+		"map_scores": filtered,
+		"winner":     match.WinnerID,
 	})
 }

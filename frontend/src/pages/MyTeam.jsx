@@ -290,8 +290,42 @@ export default function MyTeam() {
 
       <h4 className="mt-4 mb-3">📅 Matches</h4>
       <div className="d-flex flex-column align-items-start gap-3">
-        {(matches ?? []).length > 0 ? (
-          matches.map((m) => (
+        {(() => {
+          // filter out forfeited, finished, or completed matches
+          const activeMatches = (matches ?? []).filter(
+            (m) =>
+              m.status &&
+              !["Finished", "Forfeit", "Completed", "Cancelled"].includes(
+                m.status.trim()
+              )
+          );
+
+          return activeMatches.length > 0 ? (
+            activeMatches.map((m) => (
+              <MatchCard
+                key={m.id}
+                match={m}
+                team={team}
+                urlBase={urlBase}
+                loadTeam={loadTeam}
+                myRole={myRole}
+              />
+            ))
+          ) : (
+            <p className="text-light">No active matches.</p>
+          );
+        })()}
+      </div>
+
+      <h5 className="mt-4">🏁 Past Matches</h5>
+      <div className="d-flex flex-column align-items-start gap-3">
+        {(matches ?? [])
+          .filter((m) =>
+            ["Finished", "Completed", "Forfeit", "Cancelled"].includes(
+              m.status?.trim()
+            )
+          )
+          .map((m) => (
             <MatchCard
               key={m.id}
               match={m}
@@ -299,11 +333,9 @@ export default function MyTeam() {
               urlBase={urlBase}
               loadTeam={loadTeam}
               myRole={myRole}
+              readOnly={true}
             />
-          ))
-        ) : (
-          <p className="text-light">No matches yet.</p>
-        )}
+          ))}
       </div>
 
       {(myRole === "Captain" || myRole === "Co-Captain") &&

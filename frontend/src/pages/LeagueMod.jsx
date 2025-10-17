@@ -19,6 +19,17 @@ export default function LeagueMod() {
     const [newMatchB, setNewMatchB] = useState("");
     const [previewSeason, setPreviewSeason] = useState("");
     const [previewSeed, setPreviewSeed] = useState(null);
+    const [mapScores, setMapScores] = useState({
+        map1a: "",
+        map1b: "",
+        map2a: "",
+        map2b: "",
+        map3a: "",
+        map3b: "",
+        mode1: "",
+        mode2: "",
+        mode3: "",
+    });
 
     // Search filters
     const [teamSearch, setTeamSearch] = useState("");
@@ -721,6 +732,95 @@ export default function LeagueMod() {
                                     Delete Match
                                 </button>
                             </div>
+                            {/* --- Add Additional Matchup (Current Week) --- */}
+                            <div
+                                className="p-3 mt-4 rounded"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h6 className="text-info mb-2">➕ Add Additional Matchup (Current Week)</h6>
+                                <p className="small text-light mb-2">
+                                    Select two teams to add a new matchup for the active week.
+                                </p>
+
+                                <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                    <select
+                                        className="form-select bg-dark text-light"
+                                        value={newMatchA}
+                                        onChange={(e) => setNewMatchA(e.target.value)}
+                                        style={{ maxWidth: 220 }}
+                                    >
+                                        <option value="">Select Team A...</option>
+                                        {teams.map((t) => (
+                                            <option key={t.id} value={t.name}>
+                                                {t.name}
+                                            </option>
+                                        ))}
+                                    </select>
+
+                                    <select
+                                        className="form-select bg-dark text-light"
+                                        value={newMatchB}
+                                        onChange={(e) => setNewMatchB(e.target.value)}
+                                        style={{ maxWidth: 220 }}
+                                    >
+                                        <option value="">Select Team B...</option>
+                                        {teams.map((t) => (
+                                            <option key={t.id} value={t.name}>
+                                                {t.name}
+                                            </option>
+                                        ))}
+                                    </select>
+
+                                    <button
+                                        className="btn btn-outline-success btn-sm"
+                                        disabled={!newMatchA || !newMatchB || newMatchA === newMatchB}
+                                        onClick={async () => {
+                                            if (!newMatchA || !newMatchB || newMatchA === newMatchB) {
+                                                setMsg("⚠️ Please select two different teams.");
+                                                return;
+                                            }
+
+                                            try {
+                                                const res = await axios.post(
+                                                    `${urlBase}/api/mod/match/add`,
+                                                    { team_a: newMatchA, team_b: newMatchB },
+                                                    { withCredentials: true }
+                                                );
+                                                setMsg(`✅ Added ${res.data.match_code} successfully.`);
+                                                setNewMatchA("");
+                                                setNewMatchB("");
+
+                                                // Refresh matches list
+                                                const matchRes = await axios.get(`${urlBase}/api/matches/public`, {
+                                                    withCredentials: true,
+                                                });
+                                                const matchList = [];
+                                                if (matchRes.data?.matches) {
+                                                    Object.entries(matchRes.data.matches).forEach(([seasonKey, weeks]) => {
+                                                        if (season && seasonKey !== season) return;
+                                                        Object.values(weeks).forEach((list) =>
+                                                            list.forEach((m) =>
+                                                                matchList.push({
+                                                                    id: m.id,
+                                                                    match_code: m.match_code,
+                                                                    team_a: m.team_a,
+                                                                    team_b: m.team_b,
+                                                                })
+                                                            )
+                                                        );
+                                                    });
+                                                }
+                                                setMatches(matchList);
+                                            } catch (err) {
+                                                console.error("❌ Failed to add match:", err);
+                                                setMsg("❌ Failed to add additional match.");
+                                            }
+                                        }}
+                                    >
+                                        ➕ Add Match
+                                    </button>
+                                </div>
+                            </div>
                         </>
                     }
                 />
@@ -740,9 +840,12 @@ export default function LeagueMod() {
                                 style={{ maxWidth: 400 }}
                             />
                             <select
-                                className="form-select bg-dark text-light mb-2"
+                                className="form-select bg-dark text-light mb-3"
                                 value={matchID}
-                                onChange={(e) => setMatchID(e.target.value)}
+                                onChange={(e) => {
+                                    setMatchID(e.target.value);
+                                    setMapScores({ map1a: "", map1b: "", map2a: "", map2b: "", map3a: "", map3b: "" });
+                                }}
                                 style={{ maxWidth: 400 }}
                             >
                                 <option value="">Select Match...</option>
@@ -753,11 +856,135 @@ export default function LeagueMod() {
                                 ))}
                             </select>
 
-                            <div className="d-flex flex-wrap gap-2">
-                                <button className="btn btn-outline-primary btn-sm" onClick={handleForceSubmitScores}>Force Submit</button>
-                                <button className="btn btn-outline-warning btn-sm" onClick={handleEditScores}>Edit Scores</button>
-                                <button className="btn btn-outline-info btn-sm" onClick={handleAdjustRating}>Adjust Rating</button>
-                            </div>
+                            {(() => {
+                                const match = matches.find((m) => m.id === parseInt(matchID));
+                                if (!match) return null;
+
+                                return (
+                                    <div
+                                        className="p-3 mb-3 rounded"
+                                        style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                                    >
+                                        <h6 className="text-info mb-3">🧾 Enter Map Scores</h6>
+
+                                        <table className="table table-dark table-striped align-middle text-center mb-3" style={{ maxWidth: 500 }}>
+                                            <thead>
+                                                <tr>
+                                                    <th>Map</th>
+                                                    <th>Gamemode</th>
+                                                    <th>{match.team_a}</th>
+                                                    <th>{match.team_b}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {[1, 2, 3].map((mapNum) => (
+                                                    <tr key={mapNum}>
+                                                        <td className="text-secondary">Map {mapNum}</td>
+                                                        <td>
+                                                            <select
+                                                                className="form-select bg-dark text-light"
+                                                                value={mapScores[`mode${mapNum}`] || ""}
+                                                                onChange={(e) =>
+                                                                    setMapScores((prev) => ({ ...prev, [`mode${mapNum}`]: e.target.value }))
+                                                                }
+                                                            >
+                                                                <option value="">Gamemode...</option>
+                                                                <option value="Payload">Payload</option>
+                                                                <option value="Capture Point">Capture Point</option>
+                                                            </select>
+                                                        </td>
+                                                        <td>
+                                                            <input
+                                                                type="number"
+                                                                className="form-control bg-dark text-light text-center"
+                                                                value={mapScores[`map${mapNum}a`] || ""}
+                                                                onChange={(e) =>
+                                                                    setMapScores((prev) => ({ ...prev, [`map${mapNum}a`]: e.target.value }))
+                                                                }
+                                                            />
+                                                        </td>
+                                                        <td>
+                                                            <input
+                                                                type="number"
+                                                                className="form-control bg-dark text-light text-center"
+                                                                value={mapScores[`map${mapNum}b`] || ""}
+                                                                onChange={(e) =>
+                                                                    setMapScores((prev) => ({ ...prev, [`map${mapNum}b`]: e.target.value }))
+                                                                }
+                                                            />
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+
+                                        <div className="d-flex flex-wrap gap-2">
+                                            <button
+                                                className="btn btn-outline-success btn-sm"
+                                                disabled={
+                                                    !Object.values(mapScores).some((v) => v && v !== "")
+                                                }
+                                                onClick={async () => {
+                                                    try {
+                                                        const payload = {
+                                                            match_id: parseInt(matchID),
+                                                            maps: [
+                                                                {
+                                                                    map: 1,
+                                                                    mode: mapScores.mode1 || "",
+                                                                    team_a_score: parseInt(mapScores.map1a || 0),
+                                                                    team_b_score: parseInt(mapScores.map1b || 0),
+                                                                },
+                                                                {
+                                                                    map: 2,
+                                                                    mode: mapScores.mode2 || "",
+                                                                    team_a_score: parseInt(mapScores.map2a || 0),
+                                                                    team_b_score: parseInt(mapScores.map2b || 0),
+                                                                },
+                                                                {
+                                                                    map: 3,
+                                                                    mode: mapScores.mode3 || "",
+                                                                    team_a_score: parseInt(mapScores.map3a || 0),
+                                                                    team_b_score: parseInt(mapScores.map3b || 0),
+                                                                },
+                                                            ],
+                                                        };
+
+
+                                                        await axios.post(`${urlBase}/api/mod/match/set-maps`, payload, { withCredentials: true });
+
+                                                        setMsg(
+                                                            `✅ Saved map scores for ${match.match_code}: ${match.team_a} vs ${match.team_b}`
+                                                        );
+                                                        setMapScores({ map1a: "", map1b: "", map2a: "", map2b: "", map3a: "", map3b: "" });
+                                                    } catch (err) {
+                                                        console.error("❌ Failed to save map scores:", err);
+                                                        setMsg("❌ Failed to save map scores.");
+                                                    }
+                                                }}
+                                            >
+                                                💾 Save Map Scores
+                                            </button>
+
+                                            <button
+                                                className="btn btn-outline-warning btn-sm"
+                                                disabled={!matchID}
+                                                onClick={handleEditScores}
+                                            >
+                                                ✏️ Edit Scores
+                                            </button>
+
+                                            <button
+                                                className="btn btn-outline-info btn-sm"
+                                                disabled={!matchID}
+                                                onClick={handleAdjustRating}
+                                            >
+                                                ⚖️ Adjust Rating
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
                         </>
                     }
                 />
