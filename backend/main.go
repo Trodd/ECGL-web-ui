@@ -462,6 +462,8 @@ func main() {
 	r.HandleFunc("/api/mod/match/delete", HandleModDeleteMatch).Methods("POST")
 	r.HandleFunc("/api/mod/match/schedule", ModForceSchedule).Methods("POST")
 	r.HandleFunc("/api/mod/matches/generate", HandleGenerateWeeklyMatches).Methods("POST")
+	r.HandleFunc("/api/mod/team/set-inactive", HandleModSetTeamInactive).Methods("POST")
+	r.HandleFunc("/api/mod/teams/set-all-inactive", HandleModSetAllTeamsInactive).Methods("POST")
 
 	r.HandleFunc("/api/mod/team/adjust-rating", ModTeamAdjustRating).Methods("POST")
 	r.HandleFunc("/api/mod/team/disband", ModTeamDisband).Methods("POST")

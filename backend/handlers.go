@@ -2497,3 +2497,52 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		"status":  match.Status,
 	})
 }
+
+// --- POST /api/mod/team/set-inactive ---
+// Sets a single team to Inactive (League Mod only)
+func HandleModSetTeamInactive(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		TeamID uint `json:"team_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TeamID == 0 {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if err := DB.Model(&Team{}).
+		Where("id = ?", req.TeamID).
+		Update("status", "Inactive").Error; err != nil {
+		http.Error(w, "failed to update team", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Set team #%d inactive", req.TeamID),
+	})
+}
+
+// --- POST /api/mod/teams/set-all-inactive ---
+// Sets all Active teams to Inactive (League Mod only)
+func HandleModSetAllTeamsInactive(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	result := DB.Model(&Team{}).
+		Where("status = ?", "Active").
+		Update("status", "Inactive")
+	if result.Error != nil {
+		http.Error(w, "failed to update teams", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Set %d teams inactive", result.RowsAffected),
+	})
+}

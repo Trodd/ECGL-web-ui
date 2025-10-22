@@ -1017,10 +1017,58 @@ export default function LeagueMod() {
                                 ))}
                             </select>
 
-                            <div className="d-flex flex-wrap gap-2">
-                                <button className="btn btn-outline-info btn-sm" onClick={handleRenameTeam}>Rename</button>
-                                <button className="btn btn-outline-danger btn-sm" onClick={handleDisbandTeam}>Disband</button>
-                                <button className="btn btn-outline-secondary btn-sm" onClick={handleLockTeam}>Lock / Unlock</button>
+                            <div className="d-flex flex-wrap gap-2 mb-3">
+                                <button className="btn btn-outline-info btn-sm" onClick={handleRenameTeam}>
+                                    Rename
+                                </button>
+                                <button className="btn btn-outline-danger btn-sm" onClick={handleDisbandTeam}>
+                                    Disband
+                                </button>
+                                <button className="btn btn-outline-secondary btn-sm" onClick={handleLockTeam}>
+                                    Lock / Unlock
+                                </button>
+                            </div>
+
+                            {/* ⚙️ NEW: Set Single Team or All Teams Inactive */}
+                            <div
+                                className="p-3 rounded"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h6 className="text-warning mb-2">⚙️ Inactive Controls</h6>
+                                <div className="d-flex flex-wrap gap-2 mb-2">
+                                    {/* Single Team Inactive */}
+                                    <button
+                                        className="btn btn-outline-warning btn-sm"
+                                        onClick={async () => {
+                                            if (!teamID) return setMsg("⚠️ Select a team first.");
+                                            await safePost(
+                                                "/api/mod/team/set-inactive",
+                                                { team_id: parseInt(teamID) },
+                                                `Set ${getTeamLabel(teamID)} to Inactive`
+                                            );
+                                        }}
+                                    >
+                                        ⚠️ Set Selected Team Inactive
+                                    </button>
+
+                                    {/* All Teams Inactive */}
+                                    <button
+                                        className="btn btn-outline-danger btn-sm"
+                                        onClick={async () => {
+                                            if (
+                                                !confirm("⚠️ This will mark ALL teams as Inactive. Continue?")
+                                            )
+                                                return;
+                                            await safePost(
+                                                "/api/mod/teams/set-all-inactive",
+                                                {},
+                                                "Set all teams to Inactive"
+                                            );
+                                        }}
+                                    >
+                                        🧨 Set ALL Teams Inactive
+                                    </button>
+                                </div>
                             </div>
                         </>
                     }
