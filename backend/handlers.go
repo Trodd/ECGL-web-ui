@@ -536,20 +536,26 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//  Prevent join requests if disabled
+	// 🚫 Prevent join if roster globally locked
+	if rosterLocked {
+		http.Error(w, "Roster is currently locked. Joining teams is disabled.", http.StatusForbidden)
+		return
+	}
+
+	// 🚫 Prevent joining if player already belongs to any team
+	var membership TeamMember
+	if err := DB.Where("player_id = ?", playerID).Take(&membership).Error; err == nil {
+		http.Error(w, "You are already on a team. Leave your current team before joining another.", http.StatusForbidden)
+		return
+	}
+
+	// 🚫 Prevent join requests if disabled
 	if !team.JoinAllowed {
 		http.Error(w, "This team is not accepting join requests right now.", http.StatusForbidden)
 		return
 	}
 
-	// already in a team?
-	var membership TeamMember
-	if err := DB.Where("player_id = ?", playerID).Take(&membership).Error; err == nil {
-		http.Error(w, "Player already belongs to a team", http.StatusBadRequest)
-		return
-	}
-
-	// duplicate request?
+	// 🚫 Prevent duplicate pending requests to same team
 	var existingReq TeamJoinRequest
 	if err := DB.Where("player_id = ? AND team_id = ? AND status = ?", playerID, req.TeamID, "pending").
 		First(&existingReq).Error; err == nil {
@@ -557,7 +563,7 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// create join request
+	// ✅ Create new join request
 	join := TeamJoinRequest{
 		PlayerID: playerID,
 		TeamID:   req.TeamID,
@@ -568,7 +574,10 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, map[string]any{"success": true, "message": "Join request submitted"})
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "Join request submitted",
+	})
 }
 
 // --- Create Team ---
@@ -593,6 +602,13 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	var player Player
 	if err := DB.First(&player, playerID).Error; err != nil {
 		http.Error(w, "Player not found", http.StatusNotFound)
+		return
+	}
+
+	// 🚫 Prevent creating a team if already on one
+	var existingMembership TeamMember
+	if err := DB.Where("player_id = ?", playerID).First(&existingMembership).Error; err == nil {
+		http.Error(w, "You are already on a team. Leave your current team first.", http.StatusForbidden)
 		return
 	}
 
@@ -2544,5 +2560,85 @@ func HandleModSetAllTeamsInactive(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{
 		"success": true,
 		"message": fmt.Sprintf("Set %d teams inactive", result.RowsAffected),
+	})
+}
+
+// --- POST /api/mod/team/delete ---
+// Permanently deletes a team (League Mod only)
+func HandleModDeleteTeam(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		TeamID uint `json:"team_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TeamID == 0 {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Step 1️⃣ – Ensure team exists
+	var team Team
+	if err := DB.First(&team, req.TeamID).Error; err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	// Step 2️⃣ – Delete memberships and join requests
+	DB.Where("team_id = ?", req.TeamID).Delete(&TeamMember{})
+	DB.Where("team_id = ?", req.TeamID).Delete(&TeamJoinRequest{})
+
+	// Step 3️⃣ – Delete matches referencing this team (safe cleanup)
+	DB.Where("team_a_id = ? OR team_b_id = ?", req.TeamID, req.TeamID).Delete(&Match{})
+
+	// Step 4️⃣ – Delete the team itself
+	if err := DB.Delete(&Team{}, req.TeamID).Error; err != nil {
+		http.Error(w, "Failed to delete team", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("🗑️ League Mod deleted team #%d (%s)", team.ID, team.Name)
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Deleted team #%d (%s)", team.ID, team.Name),
+	})
+}
+
+// --- POST /api/mod/team/rename ---
+// Allows League Mods to rename a team safely
+func HandleModRenameTeam(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		TeamID  uint   `json:"team_id"`
+		NewName string `json:"new_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TeamID == 0 || strings.TrimSpace(req.NewName) == "" {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Prevent duplicate names
+	var existing Team
+	if err := DB.Where("LOWER(name) = LOWER(?)", req.NewName).First(&existing).Error; err == nil {
+		http.Error(w, "A team with that name already exists.", http.StatusConflict)
+		return
+	}
+
+	// Rename
+	if err := DB.Model(&Team{}).Where("id = ?", req.TeamID).Update("name", req.NewName).Error; err != nil {
+		http.Error(w, "Failed to rename team", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("✏️ League Mod renamed team #%d to '%s'", req.TeamID, req.NewName)
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Renamed team #%d to '%s'", req.TeamID, req.NewName),
 	})
 }

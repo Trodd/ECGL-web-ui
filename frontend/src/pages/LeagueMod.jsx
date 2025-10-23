@@ -30,6 +30,7 @@ export default function LeagueMod() {
         mode2: "",
         mode3: "",
     });
+    const [newTeamName, setNewTeamName] = useState("");
 
     // Search filters
     const [teamSearch, setTeamSearch] = useState("");
@@ -99,6 +100,18 @@ export default function LeagueMod() {
     if (!me.is_mod)
         return <p>🚫 You do not have permission to view this panel.</p>;
 
+    // --- Load Teams (reusable) ---
+    async function loadTeams() {
+        try {
+            const res = await axios.get(`${urlBase}/api/teams`, { withCredentials: true });
+            setTeams(Array.isArray(res.data) ? res.data : []);
+            console.log("✅ Refreshed team list");
+        } catch (err) {
+            console.error("❌ Failed to load teams:", err);
+            setMsg("⚠️ Failed to refresh teams.");
+        }
+    }
+
     // --- Helpers ---
     const getTeamLabel = (id) => {
         const t = teams.find((x) => x.id === parseInt(id));
@@ -110,13 +123,16 @@ export default function LeagueMod() {
         return m ? `${m.match_code}: ${m.team_a} vs ${m.team_b}` : `Match #${id}`;
     };
 
-    async function safePost(endpoint, payload, successMsg) {
+    async function safePost(endpoint, payload, successMsg, shouldReload = false) {
         try {
             const res = await axios.post(`${urlBase}${endpoint}`, payload, {
                 withCredentials: true,
             });
             setMsg(`✅ ${successMsg}`);
             console.log(res.data);
+
+            // 🔁 Refresh team list after certain mod actions
+            if (shouldReload) await loadTeams();
         } catch (err) {
             console.error("❌ API error:", err.response?.data || err.message);
             setMsg("❌ Request failed — check console for details.");
@@ -266,8 +282,9 @@ export default function LeagueMod() {
         if (!newName) return;
         await safePost(
             "/api/mod/team/rename",
-            { team_id: parseInt(teamID), new_name: newName },
-            `Renamed ${getTeamLabel(teamID)} to ${newName}`
+            { team_id: parseInt(teamID), new_name: newTeamName.trim() },
+            `Renamed ${getTeamLabel(teamID)} to ${newTeamName.trim()}`,
+            true
         );
     };
 
@@ -276,7 +293,8 @@ export default function LeagueMod() {
         await safePost(
             "/api/mod/team/disband",
             { team_id: parseInt(teamID) },
-            `Disbanded ${getTeamLabel(teamID)}`
+            `Disbanded ${getTeamLabel(teamID)}`,
+            true
         );
     };
 
@@ -285,7 +303,8 @@ export default function LeagueMod() {
         await safePost(
             "/api/mod/team/lock",
             { team_id: parseInt(teamID) },
-            `Toggled lock for ${getTeamLabel(teamID)}`
+            `Toggled lock for ${getTeamLabel(teamID)}`,
+            true
         );
     };
 
@@ -995,16 +1014,25 @@ export default function LeagueMod() {
                     title="👥 Team Tools"
                     children={
                         <>
+                            {/* 🔍 Search for a team */}
+                            <label className="form-label text-light small mb-1">
+                                🔍 Search for Team
+                            </label>
                             <input
                                 type="text"
-                                placeholder="Search team..."
+                                placeholder="Type to search teams..."
                                 className="form-control bg-dark text-light mb-2"
                                 value={teamSearch}
                                 onChange={(e) => setTeamSearch(e.target.value)}
                                 style={{ maxWidth: 300 }}
                             />
+
+                            {/* 🧩 Select Team */}
+                            <label className="form-label text-light small mb-1">
+                                🧩 Select Team
+                            </label>
                             <select
-                                className="form-select bg-dark text-light mb-2"
+                                className="form-select bg-dark text-light mb-3"
                                 value={teamID}
                                 onChange={(e) => setTeamID(e.target.value)}
                                 style={{ maxWidth: 300 }}
@@ -1017,26 +1045,108 @@ export default function LeagueMod() {
                                 ))}
                             </select>
 
+                            {/* ✏️ Rename Team */}
+                            <label className="form-label text-light small mb-1">
+                                ✏️ New Team Name
+                            </label>
+                            <input
+                                type="text"
+                                placeholder="Enter new team name..."
+                                className="form-control bg-dark text-light mb-3"
+                                value={newTeamName}
+                                onChange={(e) => setNewTeamName(e.target.value)}
+                                style={{ maxWidth: 300 }}
+                            />
+
+                            {/* 🧰 Team Management Buttons */}
                             <div className="d-flex flex-wrap gap-2 mb-3">
-                                <button className="btn btn-outline-info btn-sm" onClick={handleRenameTeam}>
-                                    Rename
+                                <button
+                                    className="btn btn-outline-info btn-sm"
+                                    onClick={async () => {
+                                        if (!teamID) return setMsg("⚠️ Select a team first.");
+                                        if (!newTeamName.trim())
+                                            return setMsg("⚠️ Enter a new name before renaming.");
+                                        await safePost(
+                                            "/api/mod/team/rename",
+                                            { team_id: parseInt(teamID), new_name: newTeamName.trim() },
+                                            `Renamed ${getTeamLabel(teamID)} to ${newTeamName.trim()}`,
+                                            true
+                                        );
+                                    }}
+                                >
+                                    ✏️ Rename
                                 </button>
-                                <button className="btn btn-outline-danger btn-sm" onClick={handleDisbandTeam}>
-                                    Disband
+
+                                <button
+                                    className="btn btn-outline-danger btn-sm"
+                                    onClick={async () => {
+                                        if (!teamID) return setMsg("⚠️ Select a team first.");
+                                        if (
+                                            !confirm(
+                                                `⚠️ Are you sure you want to disband ${getTeamLabel(teamID)}?`
+                                            )
+                                        )
+                                            return;
+                                        await safePost(
+                                            "/api/mod/team/disband",
+                                            { team_id: parseInt(teamID) },
+                                            `Disbanded ${getTeamLabel(teamID)}`,
+                                            true
+                                        );
+                                    }}
+                                >
+                                    🚫 Disband
                                 </button>
-                                <button className="btn btn-outline-secondary btn-sm" onClick={handleLockTeam}>
-                                    Lock / Unlock
+
+                                <button
+                                    className="btn btn-outline-secondary btn-sm"
+                                    onClick={async () => {
+                                        if (!teamID) return setMsg("⚠️ Select a team first.");
+                                        await safePost(
+                                            "/api/mod/team/lock",
+                                            { team_id: parseInt(teamID) },
+                                            `Toggled lock for ${getTeamLabel(teamID)}`,
+                                            true
+                                        );
+                                    }}
+                                >
+                                    🔒 Lock / Unlock
+                                </button>
+
+                                <button
+                                    className="btn btn-outline-danger btn-sm"
+                                    onClick={async () => {
+                                        if (!teamID) return setMsg("⚠️ Select a team first.");
+                                        if (
+                                            !confirm(
+                                                `⚠️ This will permanently delete ${getTeamLabel(
+                                                    teamID
+                                                )} and all related matches. Continue?`
+                                            )
+                                        )
+                                            return;
+                                        await safePost(
+                                            "/api/mod/team/delete",
+                                            { team_id: parseInt(teamID) },
+                                            `Deleted ${getTeamLabel(teamID)}`,
+                                            true
+                                        );
+                                    }}
+                                >
+                                    🗑️ Delete Team
                                 </button>
                             </div>
 
-                            {/* ⚙️ NEW: Set Single Team or All Teams Inactive */}
+                            {/* ⚙️ Inactive Controls */}
                             <div
                                 className="p-3 rounded"
                                 style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
                             >
                                 <h6 className="text-warning mb-2">⚙️ Inactive Controls</h6>
+                                <p className="text-light small mb-2">
+                                    Mark one or all teams as inactive for the current season.
+                                </p>
                                 <div className="d-flex flex-wrap gap-2 mb-2">
-                                    {/* Single Team Inactive */}
                                     <button
                                         className="btn btn-outline-warning btn-sm"
                                         onClick={async () => {
@@ -1044,14 +1154,14 @@ export default function LeagueMod() {
                                             await safePost(
                                                 "/api/mod/team/set-inactive",
                                                 { team_id: parseInt(teamID) },
-                                                `Set ${getTeamLabel(teamID)} to Inactive`
+                                                `Set ${getTeamLabel(teamID)} to Inactive`,
+                                                true
                                             );
                                         }}
                                     >
                                         ⚠️ Set Selected Team Inactive
                                     </button>
 
-                                    {/* All Teams Inactive */}
                                     <button
                                         className="btn btn-outline-danger btn-sm"
                                         onClick={async () => {
@@ -1062,7 +1172,8 @@ export default function LeagueMod() {
                                             await safePost(
                                                 "/api/mod/teams/set-all-inactive",
                                                 {},
-                                                "Set all teams to Inactive"
+                                                "Set all teams to Inactive",
+                                                true
                                             );
                                         }}
                                     >

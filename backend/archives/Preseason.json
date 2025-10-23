@@ -11,6 +11,56 @@
             "matches": 0
         },
         {
+            "id": 258,
+            "name": "Pioneer",
+            "status": "Legacy",
+            "join_allowed": true,
+            "rating": 0,
+            "wins": 0,
+            "losses": 0,
+            "matches": 0
+        },
+        {
+            "id": 260,
+            "name": "Novaitis",
+            "status": "Legacy",
+            "join_allowed": true,
+            "rating": 0,
+            "wins": 0,
+            "losses": 0,
+            "matches": 0
+        },
+        {
+            "id": 261,
+            "name": "BurgerKing Douglas",
+            "status": "Legacy",
+            "join_allowed": true,
+            "rating": 0,
+            "wins": 0,
+            "losses": 0,
+            "matches": 0
+        },
+        {
+            "id": 149,
+            "name": "Bisccuits",
+            "status": "Disbanded",
+            "join_allowed": true,
+            "rating": 0,
+            "wins": 0,
+            "losses": 0,
+            "matches": 0
+        },
+        {
+            "id": 11,
+            "name": "Combat Frogs",
+            "status": "Active",
+            "join_allowed": true,
+            "rating": 0,
+            "wins": 0,
+            "losses": 0,
+            "matches": 0
+        },
+        {
             "id": 6,
             "name": "The WARRIORS!",
             "status": "Active",
@@ -25,16 +75,6 @@
             "name": "Pacerlings",
             "status": "Active",
             "join_allowed": true,
-            "rating": 0,
-            "wins": 0,
-            "losses": 0,
-            "matches": 0
-        },
-        {
-            "id": 123,
-            "name": "Biscuits",
-            "status": "Active",
-            "join_allowed": false,
             "rating": 0,
             "wins": 0,
             "losses": 0,
@@ -111,6 +151,16 @@
             "matches": 5
         },
         {
+            "id": 259,
+            "name": "Ace",
+            "status": "Legacy",
+            "join_allowed": true,
+            "rating": 775,
+            "wins": 0,
+            "losses": 3,
+            "matches": 3
+        },
+        {
             "id": 10,
             "name": "Vanguard",
             "status": "Active",
@@ -131,18 +181,8 @@
             "matches": 2
         },
         {
-            "id": 11,
-            "name": "Combat Frogs",
-            "status": "Active",
-            "join_allowed": true,
-            "rating": 0,
-            "wins": 0,
-            "losses": 0,
-            "matches": 0
-        },
-        {
-            "id": 149,
-            "name": "Bisccuits",
+            "id": 123,
+            "name": "Biscuits",
             "status": "Active",
             "join_allowed": true,
             "rating": 0,
@@ -219,6 +259,19 @@
         },
         {
             "id": "",
+            "username": "CrabbyCroo",
+            "display_name": "CrabbyCroo",
+            "role": "Player",
+            "timezone": "Europe/Paris",
+            "device": "",
+            "rating": 1200,
+            "wins": 8,
+            "losses": 0,
+            "matches": 8,
+            "registered": false
+        },
+        {
+            "id": "",
             "username": "Lynt",
             "display_name": "Lynt",
             "role": "Player",
@@ -280,19 +333,6 @@
             "wins": 0,
             "losses": 0,
             "matches": 0,
-            "registered": false
-        },
-        {
-            "id": "",
-            "username": "CrabbyCroo",
-            "display_name": "CrabbyCroo",
-            "role": "Player",
-            "timezone": "Europe/Paris",
-            "device": "",
-            "rating": 1200,
-            "wins": 8,
-            "losses": 0,
-            "matches": 8,
             "registered": false
         },
         {
@@ -609,6 +649,19 @@
         },
         {
             "id": "",
+            "username": "Trodd-",
+            "display_name": "Trodd-",
+            "role": "Player",
+            "timezone": "US/Central",
+            "device": "quest_link",
+            "rating": 700,
+            "wins": 0,
+            "losses": 4,
+            "matches": 4,
+            "registered": false
+        },
+        {
+            "id": "",
             "username": "Moneymattersbtw",
             "display_name": "Moneymattersbtw",
             "role": "Player",
@@ -739,19 +792,6 @@
         },
         {
             "id": "",
-            "username": "t_rodd",
-            "display_name": "Trodd-",
-            "role": "Player",
-            "timezone": "US/Central",
-            "device": "quest_link",
-            "rating": 700,
-            "wins": 0,
-            "losses": 4,
-            "matches": 4,
-            "registered": false
-        },
-        {
-            "id": "",
             "username": "lewis_hamilton",
             "display_name": "lewis_hamilton",
             "role": "Player",
@@ -817,19 +857,6 @@
         },
         {
             "id": "",
-            "username": "Shush",
-            "display_name": "Shush",
-            "role": "Player",
-            "timezone": "US/Eastern",
-            "device": "",
-            "rating": 725,
-            "wins": 1,
-            "losses": 5,
-            "matches": 6,
-            "registered": false
-        },
-        {
-            "id": "",
             "username": "Bobby",
             "display_name": "Bobby",
             "role": "Player",
@@ -839,6 +866,19 @@
             "wins": 0,
             "losses": 0,
             "matches": 0,
+            "registered": false
+        },
+        {
+            "id": "",
+            "username": "Shush",
+            "display_name": "Shush",
+            "role": "Player",
+            "timezone": "US/Eastern",
+            "device": "",
+            "rating": 725,
+            "wins": 1,
+            "losses": 5,
+            "matches": 6,
             "registered": false
         },
         {
@@ -1339,256 +1379,6 @@
     "matches": [
         {
             "match": {
-                "id": 459,
-                "match_code": "Week1-M001",
-                "team_a_id": 0,
-                "team_b_id": 0,
-                "proposed_date": null,
-                "scheduled_date": null,
-                "status": "Forfeited",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
-                "season": "",
-                "week": "",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
-                "id": 1,
-                "match_code": "Week1-M002",
-                "team_a_id": 0,
-                "team_b_id": 1,
-                "proposed_date": null,
-                "scheduled_date": "2025-07-09T02:00:00-05:00",
-                "status": "Finished",
-                "winner_id": 1,
-                "loser_id": null,
-                "proposer_id": null,
-                "created_at": "0000-12-31T18:00:00-06:00",
-                "updated_at": "2025-10-09T15:42:58.827061-05:00",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": [
-                {
-                    "id": 262,
-                    "match_id": 1,
-                    "map_number": 1,
-                    "gamemode": "Payload",
-                    "team_a_score": 1,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 263,
-                    "match_id": 1,
-                    "map_number": 2,
-                    "gamemode": "Capture Point",
-                    "team_a_score": 1,
-                    "team_b_score": 2
-                },
-                {
-                    "id": 264,
-                    "match_id": 1,
-                    "map_number": 3,
-                    "gamemode": "Payload",
-                    "team_a_score": 1,
-                    "team_b_score": 0
-                }
-            ]
-        },
-        {
-            "match": {
-                "id": 2,
-                "match_code": "Week1-M003",
-                "team_a_id": 1,
-                "team_b_id": 0,
-                "proposed_date": null,
-                "scheduled_date": "2025-07-13T02:30:00-05:00",
-                "status": "Finished",
-                "winner_id": 1,
-                "loser_id": null,
-                "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": [
-                {
-                    "id": 5,
-                    "match_id": 2,
-                    "map_number": 1,
-                    "gamemode": "Payload",
-                    "team_a_score": 1,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 77,
-                    "match_id": 2,
-                    "map_number": 2,
-                    "gamemode": "Payload",
-                    "team_a_score": 1,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 78,
-                    "match_id": 2,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
-                }
-            ]
-        },
-        {
-            "match": {
-                "id": 3,
-                "match_code": "Week1-M004",
-                "team_a_id": 0,
-                "team_b_id": 133,
-                "proposed_date": null,
-                "scheduled_date": "2025-07-09T20:00:00-05:00",
-                "status": "Finished",
-                "winner_id": 133,
-                "loser_id": null,
-                "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": [
-                {
-                    "id": 2,
-                    "match_id": 3,
-                    "map_number": 1,
-                    "gamemode": "Capture Point",
-                    "team_a_score": 2,
-                    "team_b_score": 1
-                },
-                {
-                    "id": 68,
-                    "match_id": 3,
-                    "map_number": 2,
-                    "gamemode": "Capture Point",
-                    "team_a_score": 2,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 69,
-                    "match_id": 3,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
-                }
-            ]
-        },
-        {
-            "match": {
-                "id": 4,
-                "match_code": "Week1-M005",
-                "team_a_id": 133,
-                "team_b_id": 0,
-                "proposed_date": null,
-                "scheduled_date": "2025-07-10T22:00:00-05:00",
-                "status": "Finished",
-                "winner_id": 133,
-                "loser_id": null,
-                "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": [
-                {
-                    "id": 4,
-                    "match_id": 4,
-                    "map_number": 1,
-                    "gamemode": "Payload",
-                    "team_a_score": 1,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 74,
-                    "match_id": 4,
-                    "map_number": 2,
-                    "gamemode": "Capture Point",
-                    "team_a_score": 2,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 75,
-                    "match_id": 4,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
-                }
-            ]
-        },
-        {
-            "match": {
-                "id": 464,
-                "match_code": "Week1-M006",
-                "team_a_id": 0,
-                "team_b_id": 0,
-                "proposed_date": null,
-                "scheduled_date": null,
-                "status": "Forfeited",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
-                "season": "",
-                "week": "",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
                 "id": 5,
                 "match_code": "Week1-M007",
                 "team_a_id": 2,
@@ -1599,8 +1389,8 @@
                 "winner_id": null,
                 "loser_id": null,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.310218-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -1608,7 +1398,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -1624,8 +1417,8 @@
                 "winner_id": 4,
                 "loser_id": 5,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.3063-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -1633,11 +1426,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 3,
+                    "id": 506,
                     "match_id": 6,
                     "map_number": 1,
                     "gamemode": "Payload",
@@ -1645,19 +1441,11 @@
                     "team_b_score": 0
                 },
                 {
-                    "id": 71,
+                    "id": 507,
                     "match_id": 6,
                     "map_number": 2,
                     "gamemode": "Capture Point",
                     "team_a_score": 2,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 72,
-                    "match_id": 6,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
                     "team_b_score": 0
                 }
             ]
@@ -1674,8 +1462,8 @@
                 "winner_id": null,
                 "loser_id": null,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.306951-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -1683,7 +1471,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -1692,15 +1483,15 @@
                 "id": 8,
                 "match_code": "Week2-M001",
                 "team_a_id": 1,
-                "team_b_id": 0,
+                "team_b_id": 258,
                 "proposed_date": null,
                 "scheduled_date": "2025-07-20T22:00:00-05:00",
                 "status": "Finished",
                 "winner_id": 1,
-                "loser_id": null,
+                "loser_id": 258,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.293644-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -1708,19 +1499,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 90,
-                    "match_id": 8,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 9,
+                    "id": 519,
                     "match_id": 8,
                     "map_number": 1,
                     "gamemode": "Capture Point",
@@ -1728,7 +1514,7 @@
                     "team_b_score": 0
                 },
                 {
-                    "id": 89,
+                    "id": 520,
                     "match_id": 8,
                     "map_number": 2,
                     "gamemode": "Payload",
@@ -1749,8 +1535,8 @@
                 "winner_id": null,
                 "loser_id": null,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.310735-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -1758,7 +1544,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -1774,8 +1563,8 @@
                 "winner_id": 2,
                 "loser_id": 3,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.311792-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -1783,11 +1572,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 7,
+                    "id": 515,
                     "match_id": 10,
                     "map_number": 1,
                     "gamemode": "Capture Point",
@@ -1795,47 +1587,14 @@
                     "team_b_score": 0
                 },
                 {
-                    "id": 83,
+                    "id": 516,
                     "match_id": 10,
                     "map_number": 2,
                     "gamemode": "Payload",
                     "team_a_score": 1,
                     "team_b_score": 0
-                },
-                {
-                    "id": 84,
-                    "match_id": 10,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
                 }
             ]
-        },
-        {
-            "match": {
-                "id": 39,
-                "match_code": "Week6-M002",
-                "team_a_id": 9,
-                "team_b_id": 1,
-                "proposed_date": null,
-                "scheduled_date": null,
-                "status": "Auto proposed",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
         },
         {
             "match": {
@@ -1849,8 +1608,8 @@
                 "winner_id": null,
                 "loser_id": null,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.309142-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -1858,7 +1617,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -1867,7 +1629,7 @@
                 "id": 12,
                 "match_code": "Week2-M005",
                 "team_a_id": 8,
-                "team_b_id": 0,
+                "team_b_id": 258,
                 "proposed_date": null,
                 "scheduled_date": null,
                 "status": "Forfeited",
@@ -1883,7 +1645,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -1891,13 +1656,13 @@
             "match": {
                 "id": 13,
                 "match_code": "Week2-M006",
-                "team_a_id": 0,
+                "team_a_id": 259,
                 "team_b_id": 8,
                 "proposed_date": null,
                 "scheduled_date": null,
                 "status": "Forfeited",
                 "winner_id": 8,
-                "loser_id": null,
+                "loser_id": 259,
                 "proposer_id": null,
                 "created_at": "0001-01-01T00:00:00Z",
                 "updated_at": "0001-01-01T00:00:00Z",
@@ -1908,7 +1673,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -1916,13 +1684,13 @@
             "match": {
                 "id": 474,
                 "match_code": "Week2-M007",
-                "team_a_id": 0,
-                "team_b_id": 0,
+                "team_a_id": 261,
+                "team_b_id": 259,
                 "proposed_date": null,
                 "scheduled_date": null,
                 "status": "Forfeited",
-                "winner_id": null,
-                "loser_id": null,
+                "winner_id": 259,
+                "loser_id": 261,
                 "proposer_id": null,
                 "created_at": "0001-01-01T00:00:00Z",
                 "updated_at": "0001-01-01T00:00:00Z",
@@ -1933,7 +1701,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -1942,15 +1713,15 @@
                 "id": 14,
                 "match_code": "Week2-M008",
                 "team_a_id": 5,
-                "team_b_id": 0,
+                "team_b_id": 261,
                 "proposed_date": null,
                 "scheduled_date": null,
                 "status": "Forfeited",
                 "winner_id": 5,
-                "loser_id": null,
+                "loser_id": 261,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.298407-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -1958,7 +1729,282 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
+            },
+            "maps": []
+        },
+        {
+            "match": {
+                "id": 459,
+                "match_code": "Week1-M001",
+                "team_a_id": 258,
+                "team_b_id": 259,
+                "proposed_date": null,
+                "scheduled_date": null,
+                "status": "Forfeited",
+                "winner_id": 258,
+                "loser_id": 259,
+                "proposer_id": null,
+                "created_at": "0001-01-01T00:00:00Z",
+                "updated_at": "0001-01-01T00:00:00Z",
+                "season": "",
+                "week": "",
+                "team_a_schedule_confirmed": false,
+                "team_b_schedule_confirmed": false,
+                "team_a_score_confirmed": false,
+                "team_b_score_confirmed": false,
+                "schedule_confirmed_at": null,
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
+            },
+            "maps": []
+        },
+        {
+            "match": {
+                "id": 1,
+                "match_code": "Week1-M002",
+                "team_a_id": 259,
+                "team_b_id": 1,
+                "proposed_date": null,
+                "scheduled_date": "2025-07-09T02:00:00-05:00",
+                "status": "Finished",
+                "winner_id": 1,
+                "loser_id": 259,
+                "proposer_id": null,
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.291527-05:00",
+                "season": "1",
+                "week": "1",
+                "team_a_schedule_confirmed": false,
+                "team_b_schedule_confirmed": false,
+                "team_a_score_confirmed": false,
+                "team_b_score_confirmed": false,
+                "schedule_confirmed_at": null,
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
+            },
+            "maps": [
+                {
+                    "id": 501,
+                    "match_id": 1,
+                    "map_number": 1,
+                    "gamemode": "Payload",
+                    "team_a_score": 0,
+                    "team_b_score": 1
+                },
+                {
+                    "id": 502,
+                    "match_id": 1,
+                    "map_number": 2,
+                    "gamemode": "Capture Point",
+                    "team_a_score": 2,
+                    "team_b_score": 1
+                },
+                {
+                    "id": 503,
+                    "match_id": 1,
+                    "map_number": 3,
+                    "gamemode": "Payload",
+                    "team_a_score": 0,
+                    "team_b_score": 1
+                }
+            ]
+        },
+        {
+            "match": {
+                "id": 2,
+                "match_code": "Week1-M003",
+                "team_a_id": 1,
+                "team_b_id": 258,
+                "proposed_date": null,
+                "scheduled_date": "2025-07-13T02:30:00-05:00",
+                "status": "Finished",
+                "winner_id": 1,
+                "loser_id": 258,
+                "proposer_id": null,
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.292586-05:00",
+                "season": "1",
+                "week": "1",
+                "team_a_schedule_confirmed": false,
+                "team_b_schedule_confirmed": false,
+                "team_a_score_confirmed": false,
+                "team_b_score_confirmed": false,
+                "schedule_confirmed_at": null,
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
+            },
+            "maps": [
+                {
+                    "id": 510,
+                    "match_id": 2,
+                    "map_number": 1,
+                    "gamemode": "Payload",
+                    "team_a_score": 1,
+                    "team_b_score": 0
+                },
+                {
+                    "id": 511,
+                    "match_id": 2,
+                    "map_number": 2,
+                    "gamemode": "Payload",
+                    "team_a_score": 1,
+                    "team_b_score": 0
+                }
+            ]
+        },
+        {
+            "match": {
+                "id": 3,
+                "match_code": "Week1-M004",
+                "team_a_id": 260,
+                "team_b_id": 133,
+                "proposed_date": null,
+                "scheduled_date": "2025-07-09T20:00:00-05:00",
+                "status": "Finished",
+                "winner_id": 133,
+                "loser_id": 260,
+                "proposer_id": null,
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.281021-05:00",
+                "season": "1",
+                "week": "1",
+                "team_a_schedule_confirmed": false,
+                "team_b_schedule_confirmed": false,
+                "team_a_score_confirmed": false,
+                "team_b_score_confirmed": false,
+                "schedule_confirmed_at": null,
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
+            },
+            "maps": [
+                {
+                    "id": 504,
+                    "match_id": 3,
+                    "map_number": 1,
+                    "gamemode": "Capture Point",
+                    "team_a_score": 1,
+                    "team_b_score": 2
+                },
+                {
+                    "id": 505,
+                    "match_id": 3,
+                    "map_number": 2,
+                    "gamemode": "Capture Point",
+                    "team_a_score": 0,
+                    "team_b_score": 2
+                }
+            ]
+        },
+        {
+            "match": {
+                "id": 4,
+                "match_code": "Week1-M005",
+                "team_a_id": 133,
+                "team_b_id": 261,
+                "proposed_date": null,
+                "scheduled_date": "2025-07-10T22:00:00-05:00",
+                "status": "Finished",
+                "winner_id": 133,
+                "loser_id": 261,
+                "proposer_id": null,
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.281614-05:00",
+                "season": "1",
+                "week": "1",
+                "team_a_schedule_confirmed": false,
+                "team_b_schedule_confirmed": false,
+                "team_a_score_confirmed": false,
+                "team_b_score_confirmed": false,
+                "schedule_confirmed_at": null,
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
+            },
+            "maps": [
+                {
+                    "id": 508,
+                    "match_id": 4,
+                    "map_number": 1,
+                    "gamemode": "Payload",
+                    "team_a_score": 1,
+                    "team_b_score": 0
+                },
+                {
+                    "id": 509,
+                    "match_id": 4,
+                    "map_number": 2,
+                    "gamemode": "Capture Point",
+                    "team_a_score": 2,
+                    "team_b_score": 0
+                }
+            ]
+        },
+        {
+            "match": {
+                "id": 39,
+                "match_code": "Week6-M002",
+                "team_a_id": 9,
+                "team_b_id": 1,
+                "proposed_date": null,
+                "scheduled_date": null,
+                "status": "Forfeit",
+                "winner_id": null,
+                "loser_id": null,
+                "proposer_id": null,
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.290446-05:00",
+                "season": "1",
+                "week": "1",
+                "team_a_schedule_confirmed": false,
+                "team_b_schedule_confirmed": false,
+                "team_a_score_confirmed": false,
+                "team_b_score_confirmed": false,
+                "schedule_confirmed_at": null,
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
+            },
+            "maps": []
+        },
+        {
+            "match": {
+                "id": 464,
+                "match_code": "Week1-M006",
+                "team_a_id": 261,
+                "team_b_id": 260,
+                "proposed_date": null,
+                "scheduled_date": null,
+                "status": "Forfeited",
+                "winner_id": 261,
+                "loser_id": 260,
+                "proposer_id": null,
+                "created_at": "0001-01-01T00:00:00Z",
+                "updated_at": "0001-01-01T00:00:00Z",
+                "season": "",
+                "week": "",
+                "team_a_schedule_confirmed": false,
+                "team_b_schedule_confirmed": false,
+                "team_a_score_confirmed": false,
+                "team_b_score_confirmed": false,
+                "schedule_confirmed_at": null,
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -1974,8 +2020,8 @@
                 "winner_id": 133,
                 "loser_id": 5,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.277472-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -1983,11 +2029,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 6,
+                    "id": 512,
                     "match_id": 15,
                     "map_number": 1,
                     "gamemode": "Payload",
@@ -1995,7 +2044,7 @@
                     "team_b_score": 1
                 },
                 {
-                    "id": 80,
+                    "id": 513,
                     "match_id": 15,
                     "map_number": 2,
                     "gamemode": "Capture Point",
@@ -2003,7 +2052,7 @@
                     "team_b_score": 0
                 },
                 {
-                    "id": 81,
+                    "id": 514,
                     "match_id": 15,
                     "map_number": 3,
                     "gamemode": "Payload",
@@ -2024,8 +2073,8 @@
                 "winner_id": 133,
                 "loser_id": 1,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.279243-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2033,11 +2082,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 8,
+                    "id": 517,
                     "match_id": 16,
                     "map_number": 1,
                     "gamemode": "Payload",
@@ -2045,19 +2097,11 @@
                     "team_b_score": 0
                 },
                 {
-                    "id": 86,
+                    "id": 518,
                     "match_id": 16,
                     "map_number": 2,
                     "gamemode": "Payload",
                     "team_a_score": 1,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 87,
-                    "match_id": 16,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
                     "team_b_score": 0
                 }
             ]
@@ -2074,8 +2118,8 @@
                 "winner_id": 1,
                 "loser_id": 4,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.289361-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2083,19 +2127,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 96,
-                    "match_id": 17,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 11,
+                    "id": 523,
                     "match_id": 17,
                     "map_number": 1,
                     "gamemode": "Capture Point",
@@ -2103,7 +2142,7 @@
                     "team_b_score": 0
                 },
                 {
-                    "id": 95,
+                    "id": 524,
                     "match_id": 17,
                     "map_number": 2,
                     "gamemode": "Payload",
@@ -2117,12 +2156,12 @@
                 "id": 18,
                 "match_code": "Week3-M002",
                 "team_a_id": 8,
-                "team_b_id": 0,
+                "team_b_id": 259,
                 "proposed_date": null,
                 "scheduled_date": null,
                 "status": "Forfeited",
                 "winner_id": 8,
-                "loser_id": null,
+                "loser_id": 259,
                 "proposer_id": null,
                 "created_at": "0001-01-01T00:00:00Z",
                 "updated_at": "0001-01-01T00:00:00Z",
@@ -2133,7 +2172,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -2149,8 +2191,8 @@
                 "winner_id": 3,
                 "loser_id": 2,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.312302-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2158,19 +2200,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 102,
-                    "match_id": 19,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 13,
+                    "id": 527,
                     "match_id": 19,
                     "map_number": 1,
                     "gamemode": "Payload",
@@ -2178,7 +2215,7 @@
                     "team_b_score": 1
                 },
                 {
-                    "id": 101,
+                    "id": 528,
                     "match_id": 19,
                     "map_number": 2,
                     "gamemode": "Capture Point",
@@ -2192,15 +2229,15 @@
                 "id": 20,
                 "match_code": "Week3-M004",
                 "team_a_id": 5,
-                "team_b_id": 0,
+                "team_b_id": 258,
                 "proposed_date": null,
                 "scheduled_date": "2025-07-25T01:30:00-05:00",
                 "status": "Forfeited",
                 "winner_id": 5,
-                "loser_id": null,
+                "loser_id": 258,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.303608-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2208,7 +2245,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -2224,8 +2264,8 @@
                 "winner_id": 133,
                 "loser_id": 1,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.279881-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2233,19 +2273,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 93,
-                    "match_id": 21,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 10,
+                    "id": 521,
                     "match_id": 21,
                     "map_number": 1,
                     "gamemode": "Payload",
@@ -2253,7 +2288,7 @@
                     "team_b_score": 0
                 },
                 {
-                    "id": 92,
+                    "id": 522,
                     "match_id": 21,
                     "map_number": 2,
                     "gamemode": "Capture Point",
@@ -2274,8 +2309,8 @@
                 "winner_id": null,
                 "loser_id": null,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.309672-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2283,7 +2318,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -2299,8 +2337,8 @@
                 "winner_id": 5,
                 "loser_id": 2,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.305149-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2308,19 +2346,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 99,
-                    "match_id": 23,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 12,
+                    "id": 525,
                     "match_id": 23,
                     "map_number": 1,
                     "gamemode": "Capture Point",
@@ -2328,7 +2361,7 @@
                     "team_b_score": 2
                 },
                 {
-                    "id": 98,
+                    "id": 526,
                     "match_id": 23,
                     "map_number": 2,
                     "gamemode": "Payload",
@@ -2341,16 +2374,16 @@
             "match": {
                 "id": 24,
                 "match_code": "Week3-M008",
-                "team_a_id": 0,
+                "team_a_id": 259,
                 "team_b_id": 133,
                 "proposed_date": null,
                 "scheduled_date": null,
                 "status": "Forfeited",
                 "winner_id": 133,
-                "loser_id": null,
+                "loser_id": 259,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.280504-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2358,7 +2391,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -2366,12 +2402,12 @@
             "match": {
                 "id": 25,
                 "match_code": "Week3-M009",
-                "team_a_id": 0,
+                "team_a_id": 258,
                 "team_b_id": 3,
                 "proposed_date": null,
                 "scheduled_date": "2025-07-27T22:00:00-05:00",
                 "status": "Finished",
-                "winner_id": null,
+                "winner_id": 258,
                 "loser_id": 3,
                 "proposer_id": null,
                 "created_at": "0001-01-01T00:00:00Z",
@@ -2383,17 +2419,12 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
-                {
-                    "id": 105,
-                    "match_id": 25,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
-                },
                 {
                     "id": 14,
                     "match_id": 25,
@@ -2409,98 +2440,59 @@
                     "gamemode": "Capture Point",
                     "team_a_score": 2,
                     "team_b_score": 0
+                },
+                {
+                    "id": 105,
+                    "match_id": 25,
+                    "map_number": 3,
+                    "gamemode": "Unknown",
+                    "team_a_score": 0,
+                    "team_b_score": 0
                 }
             ]
         },
         {
             "match": {
-                "id": 446,
-                "match_code": "Week4-M001",
-                "team_a_id": 3,
-                "team_b_id": 2,
+                "id": 38,
+                "match_code": "Week5-M006",
+                "team_a_id": 4,
+                "team_b_id": 133,
                 "proposed_date": null,
-                "scheduled_date": null,
-                "status": "Forfeited",
+                "scheduled_date": "2025-08-07T22:00:00-05:00",
+                "status": "Forfeit",
                 "winner_id": null,
                 "loser_id": null,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
-                "season": "",
-                "week": "",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.282651-05:00",
+                "season": "1",
+                "week": "1",
                 "team_a_schedule_confirmed": false,
                 "team_b_schedule_confirmed": false,
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
-                "id": 447,
-                "match_code": "Week4-M002",
-                "team_a_id": 5,
-                "team_b_id": 4,
-                "proposed_date": null,
-                "scheduled_date": null,
-                "status": "Forfeited",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
-                "season": "",
-                "week": "",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
-                "id": 448,
-                "match_code": "Week4-M003",
-                "team_a_id": 1,
-                "team_b_id": 2,
-                "proposed_date": null,
-                "scheduled_date": "2025-08-03T19:00:00-05:00",
-                "status": "Finished",
-                "winner_id": 1,
-                "loser_id": 2,
-                "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
-                "season": "",
-                "week": "",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 296,
-                    "match_id": 448,
+                    "id": 539,
+                    "match_id": 38,
                     "map_number": 1,
                     "gamemode": "Capture Point",
-                    "team_a_score": 2,
-                    "team_b_score": 0
+                    "team_a_score": 0,
+                    "team_b_score": 2
                 },
                 {
-                    "id": 297,
-                    "match_id": 448,
+                    "id": 540,
+                    "match_id": 38,
                     "map_number": 2,
                     "gamemode": "Payload",
-                    "team_a_score": 1,
-                    "team_b_score": 0
+                    "team_a_score": 0,
+                    "team_b_score": 1
                 }
             ]
         },
@@ -2516,8 +2508,8 @@
                 "winner_id": 1,
                 "loser_id": 3,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.295282-05:00",
                 "season": "",
                 "week": "",
                 "team_a_schedule_confirmed": false,
@@ -2525,7 +2517,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -2541,8 +2536,8 @@
                 "winner_id": 133,
                 "loser_id": 5,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.285102-05:00",
                 "season": "",
                 "week": "",
                 "team_a_schedule_confirmed": false,
@@ -2550,11 +2545,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 292,
+                    "id": 531,
                     "match_id": 450,
                     "map_number": 1,
                     "gamemode": "Payload",
@@ -2562,7 +2560,7 @@
                     "team_b_score": 0
                 },
                 {
-                    "id": 293,
+                    "id": 532,
                     "match_id": 450,
                     "map_number": 2,
                     "gamemode": "Capture Point",
@@ -2575,16 +2573,16 @@
             "match": {
                 "id": 451,
                 "match_code": "Week4-M006",
-                "team_a_id": 0,
+                "team_a_id": 258,
                 "team_b_id": 4,
                 "proposed_date": null,
                 "scheduled_date": null,
                 "status": "Forfeited",
                 "winner_id": 4,
-                "loser_id": null,
+                "loser_id": 258,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.311248-05:00",
                 "season": "",
                 "week": "",
                 "team_a_schedule_confirmed": false,
@@ -2592,7 +2590,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -2600,16 +2601,16 @@
             "match": {
                 "id": 452,
                 "match_code": "Week4-M007",
-                "team_a_id": 0,
+                "team_a_id": 258,
                 "team_b_id": 133,
                 "proposed_date": null,
                 "scheduled_date": "2025-08-03T20:00:00-05:00",
                 "status": "Finished",
                 "winner_id": 133,
-                "loser_id": null,
+                "loser_id": 258,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.286972-05:00",
                 "season": "",
                 "week": "",
                 "team_a_schedule_confirmed": false,
@@ -2617,11 +2618,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 294,
+                    "id": 533,
                     "match_id": 452,
                     "map_number": 1,
                     "gamemode": "Capture Point",
@@ -2629,7 +2633,7 @@
                     "team_b_score": 2
                 },
                 {
-                    "id": 295,
+                    "id": 534,
                     "match_id": 452,
                     "map_number": 2,
                     "gamemode": "Payload",
@@ -2643,15 +2647,15 @@
                 "id": 33,
                 "match_code": "Week5-M001",
                 "team_a_id": 5,
-                "team_b_id": 0,
+                "team_b_id": 258,
                 "proposed_date": null,
                 "scheduled_date": "2025-08-07T22:00:00-05:00",
                 "status": "Finished",
                 "winner_id": 5,
-                "loser_id": null,
+                "loser_id": 258,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.307988-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2659,32 +2663,27 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 117,
-                    "match_id": 33,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 18,
+                    "id": 537,
                     "match_id": 33,
                     "map_number": 1,
                     "gamemode": "Capture Point",
-                    "team_a_score": 0,
-                    "team_b_score": 2
+                    "team_a_score": 2,
+                    "team_b_score": 0
                 },
                 {
-                    "id": 116,
+                    "id": 538,
                     "match_id": 33,
                     "map_number": 2,
                     "gamemode": "Payload",
-                    "team_a_score": 0,
-                    "team_b_score": 1
+                    "team_a_score": 1,
+                    "team_b_score": 0
                 }
             ]
         },
@@ -2700,8 +2699,8 @@
                 "winner_id": 1,
                 "loser_id": 4,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.296617-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2709,11 +2708,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 20,
+                    "id": 541,
                     "match_id": 34,
                     "map_number": 1,
                     "gamemode": "Capture Point",
@@ -2721,7 +2723,7 @@
                     "team_b_score": 2
                 },
                 {
-                    "id": 122,
+                    "id": 542,
                     "match_id": 34,
                     "map_number": 2,
                     "gamemode": "Payload",
@@ -2729,7 +2731,7 @@
                     "team_b_score": 0
                 },
                 {
-                    "id": 123,
+                    "id": 543,
                     "match_id": 34,
                     "map_number": 3,
                     "gamemode": "Capture Point",
@@ -2750,8 +2752,8 @@
                 "winner_id": 133,
                 "loser_id": 2,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.28805-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2759,19 +2761,14 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 126,
-                    "match_id": 35,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
-                    "team_b_score": 0
-                },
-                {
-                    "id": 21,
+                    "id": 544,
                     "match_id": 35,
                     "map_number": 1,
                     "gamemode": "Payload",
@@ -2779,7 +2776,7 @@
                     "team_b_score": 0
                 },
                 {
-                    "id": 125,
+                    "id": 545,
                     "match_id": 35,
                     "map_number": 2,
                     "gamemode": "Capture Point",
@@ -2793,15 +2790,15 @@
                 "id": 36,
                 "match_code": "Week5-M004",
                 "team_a_id": 1,
-                "team_b_id": 0,
+                "team_b_id": 258,
                 "proposed_date": null,
                 "scheduled_date": null,
                 "status": "Forfeited",
                 "winner_id": null,
                 "loser_id": null,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.29713-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2809,7 +2806,10 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
@@ -2825,8 +2825,8 @@
                 "winner_id": null,
                 "loser_id": null,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.308626-05:00",
                 "season": "1",
                 "week": "1",
                 "team_a_schedule_confirmed": false,
@@ -2834,284 +2834,113 @@
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": []
         },
         {
             "match": {
-                "id": 38,
-                "match_code": "Week5-M006",
-                "team_a_id": 4,
-                "team_b_id": 133,
+                "id": 446,
+                "match_code": "Week4-M001",
+                "team_a_id": 3,
+                "team_b_id": 2,
                 "proposed_date": null,
-                "scheduled_date": "2025-08-07T22:00:00-05:00",
-                "status": "Finished",
-                "winner_id": 133,
-                "loser_id": 4,
+                "scheduled_date": null,
+                "status": "Forfeited",
+                "winner_id": null,
+                "loser_id": null,
                 "proposer_id": null,
-                "created_at": "0001-01-01T00:00:00Z",
-                "updated_at": "0001-01-01T00:00:00Z",
-                "season": "1",
-                "week": "1",
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.312821-05:00",
+                "season": "",
+                "week": "",
                 "team_a_schedule_confirmed": false,
                 "team_b_schedule_confirmed": false,
                 "team_a_score_confirmed": false,
                 "team_b_score_confirmed": false,
                 "schedule_confirmed_at": null,
-                "score_confirmed_at": null
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
+            },
+            "maps": []
+        },
+        {
+            "match": {
+                "id": 447,
+                "match_code": "Week4-M002",
+                "team_a_id": 5,
+                "team_b_id": 4,
+                "proposed_date": null,
+                "scheduled_date": null,
+                "status": "Forfeited",
+                "winner_id": null,
+                "loser_id": null,
+                "proposer_id": null,
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.307466-05:00",
+                "season": "",
+                "week": "",
+                "team_a_schedule_confirmed": false,
+                "team_b_schedule_confirmed": false,
+                "team_a_score_confirmed": false,
+                "team_b_score_confirmed": false,
+                "schedule_confirmed_at": null,
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
+            },
+            "maps": []
+        },
+        {
+            "match": {
+                "id": 448,
+                "match_code": "Week4-M003",
+                "team_a_id": 1,
+                "team_b_id": 2,
+                "proposed_date": null,
+                "scheduled_date": "2025-08-03T19:00:00-05:00",
+                "status": "Finished",
+                "winner_id": 1,
+                "loser_id": 2,
+                "proposer_id": null,
+                "created_at": "0000-12-31T18:00:00-06:00",
+                "updated_at": "2025-10-17T00:46:01.294714-05:00",
+                "season": "",
+                "week": "",
+                "team_a_schedule_confirmed": false,
+                "team_b_schedule_confirmed": false,
+                "team_a_score_confirmed": false,
+                "team_b_score_confirmed": false,
+                "schedule_confirmed_at": null,
+                "score_confirmed_at": null,
+                "team_a_score": 0,
+                "team_b_score": 0,
+                "map_scores": []
             },
             "maps": [
                 {
-                    "id": 120,
-                    "match_id": 38,
-                    "map_number": 3,
-                    "gamemode": "Unknown",
-                    "team_a_score": 0,
+                    "id": 535,
+                    "match_id": 448,
+                    "map_number": 1,
+                    "gamemode": "Capture Point",
+                    "team_a_score": 2,
                     "team_b_score": 0
                 },
                 {
-                    "id": 19,
-                    "match_id": 38,
-                    "map_number": 1,
-                    "gamemode": "Capture Point",
-                    "team_a_score": 0,
-                    "team_b_score": 2
-                },
-                {
-                    "id": 119,
-                    "match_id": 38,
+                    "id": 536,
+                    "match_id": 448,
                     "map_number": 2,
                     "gamemode": "Payload",
-                    "team_a_score": 0,
-                    "team_b_score": 1
+                    "team_a_score": 1,
+                    "team_b_score": 0
                 }
             ]
-        },
-        {
-            "match": {
-                "id": 585,
-                "match_code": "1-Week1-M001",
-                "team_a_id": 1,
-                "team_b_id": 10,
-                "proposed_date": "2025-10-15T02:07:52.65736-05:00",
-                "scheduled_date": null,
-                "status": "Scheduled",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": 0,
-                "created_at": "2025-10-15T02:07:52.65736-05:00",
-                "updated_at": "2025-10-15T02:07:52.65736-05:00",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
-                "id": 586,
-                "match_code": "1-Week1-M002",
-                "team_a_id": 6,
-                "team_b_id": 2,
-                "proposed_date": "2025-10-15T02:07:52.65736-05:00",
-                "scheduled_date": null,
-                "status": "Scheduled",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": 0,
-                "created_at": "2025-10-15T02:07:52.657919-05:00",
-                "updated_at": "2025-10-15T02:07:52.657919-05:00",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
-                "id": 587,
-                "match_code": "1-Week1-M003",
-                "team_a_id": 11,
-                "team_b_id": 10,
-                "proposed_date": "2025-10-15T02:07:52.65736-05:00",
-                "scheduled_date": null,
-                "status": "Scheduled",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": 0,
-                "created_at": "2025-10-15T02:07:52.658641-05:00",
-                "updated_at": "2025-10-15T02:07:52.658641-05:00",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
-                "id": 588,
-                "match_code": "1-Week1-M004",
-                "team_a_id": 6,
-                "team_b_id": 4,
-                "proposed_date": "2025-10-15T02:07:52.65736-05:00",
-                "scheduled_date": null,
-                "status": "Scheduled",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": 0,
-                "created_at": "2025-10-15T02:07:52.659284-05:00",
-                "updated_at": "2025-10-15T02:07:52.659284-05:00",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
-                "id": 589,
-                "match_code": "1-Week1-M005",
-                "team_a_id": 133,
-                "team_b_id": 1,
-                "proposed_date": "2025-10-15T02:07:52.65736-05:00",
-                "scheduled_date": null,
-                "status": "Scheduled",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": 0,
-                "created_at": "2025-10-15T02:07:52.659868-05:00",
-                "updated_at": "2025-10-15T02:07:52.659868-05:00",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
-                "id": 592,
-                "match_code": "1-Week1-M008",
-                "team_a_id": 5,
-                "team_b_id": 2,
-                "proposed_date": "2025-10-15T02:07:52.65736-05:00",
-                "scheduled_date": null,
-                "status": "Scheduled",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": 0,
-                "created_at": "2025-10-15T02:07:52.661585-05:00",
-                "updated_at": "2025-10-15T02:07:52.661585-05:00",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
-                "id": 593,
-                "match_code": "1-Week1-M009",
-                "team_a_id": 133,
-                "team_b_id": 5,
-                "proposed_date": "2025-10-15T02:07:52.65736-05:00",
-                "scheduled_date": null,
-                "status": "Scheduled",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": 0,
-                "created_at": "2025-10-15T02:07:52.662094-05:00",
-                "updated_at": "2025-10-15T02:07:52.662094-05:00",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
-                "id": 591,
-                "match_code": "1-Week1-M007",
-                "team_a_id": 7,
-                "team_b_id": 11,
-                "proposed_date": "2025-10-15T02:07:52.65736-05:00",
-                "scheduled_date": null,
-                "status": "Scheduled",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": 0,
-                "created_at": "2025-10-15T02:07:52.661019-05:00",
-                "updated_at": "2025-10-15T02:23:35.853084-05:00",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
-        },
-        {
-            "match": {
-                "id": 590,
-                "match_code": "1-Week1-M006",
-                "team_a_id": 7,
-                "team_b_id": 4,
-                "proposed_date": "2025-10-15T02:07:52.65736-05:00",
-                "scheduled_date": null,
-                "status": "Completed",
-                "winner_id": null,
-                "loser_id": null,
-                "proposer_id": 0,
-                "created_at": "2025-10-15T02:07:52.66044-05:00",
-                "updated_at": "2025-10-15T20:41:53.643727-05:00",
-                "season": "1",
-                "week": "1",
-                "team_a_schedule_confirmed": false,
-                "team_b_schedule_confirmed": false,
-                "team_a_score_confirmed": false,
-                "team_b_score_confirmed": false,
-                "schedule_confirmed_at": null,
-                "score_confirmed_at": null
-            },
-            "maps": []
         }
     ]
 }

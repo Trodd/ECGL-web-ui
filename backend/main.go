@@ -378,6 +378,7 @@ func HandleGetSeason(w http.ResponseWriter, r *http.Request) {
 }
 
 var currentSeason string
+var rosterLocked bool = false
 
 func main() {
 	// ✅ Load .env first
@@ -471,6 +472,7 @@ func main() {
 	r.HandleFunc("/api/mod/player/kick", ModPlayerKick).Methods("POST")
 	r.HandleFunc("/api/mod/player/ban", ModPlayerBan).Methods("POST")
 	r.HandleFunc("/api/mod/player/unban", ModPlayerUnban).Methods("POST")
+	r.HandleFunc("/api/mod/team/delete", HandleModDeleteTeam).Methods("POST")
 
 	r.HandleFunc("/api/mod/leaderboard/reset", ModLeaderboardReset).Methods("POST")
 	r.HandleFunc("/api/mod/match/edit-score", ModMatchEditScore).Methods("POST")
