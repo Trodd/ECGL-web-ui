@@ -1717,13 +1717,13 @@ func requireLeagueMod(w http.ResponseWriter, r *http.Request) (string, bool) {
 		return "", false
 	}
 
-	log.Printf("👤 Discord member: %s (%s)", member.User.Username, member.User.ID)
-	log.Printf("🎭 Roles returned: %+v", member.Roles)
-	log.Printf("🔎 Expecting League Mod role ID: %s", modRoleID)
+	//log.Printf("👤 Discord member: %s (%s)", member.User.Username, member.User.ID)
+	//log.Printf("🎭 Roles returned: %+v", member.Roles)
+	//log.Printf("🔎 Expecting League Mod role ID: %s", modRoleID)
 
 	for _, role := range member.Roles {
 		if role == modRoleID {
-			log.Printf("✅ League Mod verified for %s", discordID)
+			//log.Printf("✅ League Mod verified for %s", discordID)
 			return discordID, true
 		}
 	}
