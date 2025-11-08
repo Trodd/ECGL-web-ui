@@ -98,16 +98,17 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 // --- Players ---
 func GetPlayers(w http.ResponseWriter, r *http.Request) {
 	type raw struct {
-		ID       int64
-		Username string
-		Role     string
-		Device   string
-		Timezone string
+		ID          int64
+		Username    string
+		DisplayName string
+		Role        string
+		Device      string
+		Timezone    string
 	}
 
 	var rows []raw
 	if err := DB.Table("players").
-		Select("id, username, role, device, timezone").
+		Select("id, username, display_name, role, device, timezone").
 		Where("username <> ''").
 		Scan(&rows).Error; err != nil {
 
@@ -123,11 +124,12 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 	players := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
 		players = append(players, map[string]any{
-			"id":       strconv.FormatInt(r.ID, 10),
-			"username": r.Username,
-			"role":     r.Role,
-			"device":   r.Device,
-			"timezone": r.Timezone,
+			"id":           strconv.FormatInt(r.ID, 10),
+			"username":     r.Username,
+			"display_name": r.DisplayName,
+			"role":         r.Role,
+			"device":       r.Device,
+			"timezone":     r.Timezone,
 		})
 	}
 
@@ -691,6 +693,15 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🚫 Prevent accepting if player is already on another team
+	if req.Action == "accept" {
+		var existing TeamMember
+		if err := DB.Where("player_id = ?", jr.PlayerID).First(&existing).Error; err == nil {
+			http.Error(w, "Player already belongs to a team. Must leave before joining another.", http.StatusForbidden)
+			return
+		}
+	}
+
 	switch req.Action {
 	case "accept":
 		// ✅ Add player to team_members safely
@@ -723,6 +734,11 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 		}
 
 		jr.Status = "accepted"
+
+		// 🧹 Cleanup: remove all other pending join requests from this player
+		DB.Where("player_id = ? AND status = ?", jr.PlayerID, "pending").
+			Where("id <> ?", jr.ID).
+			Delete(&TeamJoinRequest{})
 
 	case "deny":
 		jr.Status = "denied"

@@ -86,21 +86,43 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	var user struct {
-		ID          string `json:"id"`
-		Username    string `json:"username"`
-		DisplayName string `json:"global_name"`
-		Avatar      string `json:"avatar"`
+		ID         string `json:"id"`
+		Username   string `json:"username"`
+		GlobalName string `json:"global_name"`
+		Avatar     string `json:"avatar"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
 		http.Error(w, "failed to parse user info", http.StatusInternalServerError)
 		return
 	}
 
+	// ✅ Fetch guild member info to get the nickname / display name used in the ECGL Discord
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	botToken := getEnv("DISCORD_BOT_TOKEN", "")
+	serverDisplay := user.GlobalName // fallback
+
+	if guildID != "" && botToken != "" {
+		req, _ := http.NewRequest("GET",
+			fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, user.ID),
+			nil)
+		req.Header.Set("Authorization", "Bot "+botToken)
+
+		if resp2, err := http.DefaultClient.Do(req); err == nil && resp2.StatusCode == 200 {
+			var member struct {
+				Nick string `json:"nick"`
+			}
+			if json.NewDecoder(resp2.Body).Decode(&member) == nil && member.Nick != "" {
+				serverDisplay = member.Nick
+			}
+			resp2.Body.Close()
+		}
+	}
+
 	// --- Save session ---
 	session, _ := store.Get(r, "session")
 	session.Values["discord_id"] = user.ID
 	session.Values["username"] = user.Username
-	session.Values["display_name"] = user.DisplayName
+	session.Values["display_name"] = serverDisplay // ✅ now stores the guild nickname
 	session.Values["avatar"] = user.Avatar
 	_ = session.Save(r, w)
 
@@ -115,7 +137,7 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		newPlayer := Player{
 			ID:          discordID,
 			Username:    user.Username,
-			DisplayName: user.DisplayName,
+			DisplayName: serverDisplay,
 			Role:        "",  // not registered yet
 			Timezone:    "",  // empty until registration
 			Rating:      800, // default starting ELO
@@ -134,8 +156,8 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		if existing.Username != user.Username {
 			updates["username"] = user.Username
 		}
-		if existing.DisplayName != user.DisplayName {
-			updates["display_name"] = user.DisplayName
+		if existing.DisplayName != serverDisplay {
+			updates["display_name"] = serverDisplay
 		}
 		if len(updates) > 0 {
 			DB.Model(&existing).Updates(updates)
@@ -272,11 +294,12 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	player := Player{
-		ID:       discordID,
-		Username: req.Username,
-		Role:     req.Role,
-		Device:   req.Device,
-		Timezone: req.Timezone,
+		ID:          discordID,
+		Username:    req.Username,
+		DisplayName: session.Values["display_name"].(string),
+		Role:        req.Role,
+		Device:      req.Device,
+		Timezone:    req.Timezone,
 	}
 
 	// ✅ Upsert player row

@@ -31,7 +31,7 @@ export default function PlayerDetail() {
 
   return (
     <div>
-      <h2>🎮 {player.display_name || player.username}</h2>
+      <h2>🎮 {player.display_name || "Unknown Player"}</h2>
       <p>
         <b>Username:</b> {player.username} <br />
         <b>Role:</b> {player.role || "-"} <br />
@@ -62,29 +62,29 @@ export default function PlayerDetail() {
         <table className="table table-dark table-striped">
           <thead>
             <tr>
-                <th>Season</th>
-                <th>Team</th>
+              <th>Season</th>
+              <th>Team</th>
             </tr>
-            </thead>
+          </thead>
           <tbody>
             {player.history.map((h, i) => (
-                <tr key={i}>
+              <tr key={i}>
                 <td>{h.season}</td>
                 <td>
-                    {h.team_id ? (
+                  {h.team_id ? (
                     <Link
-                        to={`/teams/${h.team_id}`}
-                        className="text-info text-decoration-none"
+                      to={`/teams/${h.team_id}`}
+                      className="text-info text-decoration-none"
                     >
-                        {h.team}
+                      {h.team}
                     </Link>
-                    ) : (
+                  ) : (
                     h.team
-                    )}
+                  )}
                 </td>
-                </tr>
+              </tr>
             ))}
-            </tbody>
+          </tbody>
         </table>
       ) : (
         <p>No history found.</p>
