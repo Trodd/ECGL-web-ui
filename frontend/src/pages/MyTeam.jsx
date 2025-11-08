@@ -154,16 +154,20 @@ export default function MyTeam() {
       {(myRole === "Captain" || myRole === "Co-Captain") && (
         <div
           className="p-3 mb-4 rounded"
-          style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+          style={{
+            backgroundColor: "#1a1a1a",
+            border: "1px solid #333",
+            maxWidth: "400px", // ✅ Keeps it narrow
+          }}
         >
           <h5 className="text-light mb-3">⚙️ Team Settings</h5>
 
           {/* 🟢 Toggle Active/Inactive */}
-          <div className="d-flex align-items-center gap-2 mb-3">
-            <span>Status:</span>
+          <div className="d-flex align-items-center justify-content-between mb-3">
+            <label className="text-light me-2 mb-0 fw-light">Status</label>
             <select
-              className="form-select bg-dark text-light"
-              style={{ width: "auto" }}
+              className="form-select form-select-sm bg-dark text-light w-auto"
+              style={{ minWidth: "120px" }}
               value={team.status}
               onChange={async (e) => {
                 try {
@@ -184,9 +188,9 @@ export default function MyTeam() {
           </div>
 
           {/* 🔒 Allow Join Requests */}
-          <div className="d-flex align-items-center gap-2">
-            <span>Join Requests:</span>
-            <div className="form-check form-switch">
+          <div className="d-flex align-items-center justify-content-between">
+            <label className="text-light me-2 mb-0 fw-light">Join Requests</label>
+            <div className="form-check form-switch m-0">
               <input
                 className="form-check-input"
                 type="checkbox"
@@ -194,29 +198,23 @@ export default function MyTeam() {
                 onChange={async (e) => {
                   const newAllow = e.target.checked;
                   try {
-                    // Optimistically update local state
                     setData((prev) => ({
                       ...prev,
                       team: { ...prev.team, join_allowed: newAllow },
                     }));
 
-                    // Send to backend
                     const res = await axios.post(
                       `${urlBase}/api/team/toggle-join`,
                       { team_id: team.id, allow: newAllow },
                       { withCredentials: true }
                     );
 
-                    // Confirm backend update & refresh
                     if (res.data?.success) {
                       await loadTeam();
-                    } else {
-                      throw new Error("Backend rejected");
-                    }
+                    } else throw new Error("Backend rejected");
                   } catch (err) {
                     console.error("❌ Failed to toggle join:", err);
                     alert("Failed to update join setting");
-                    // Revert if failed
                     setData((prev) => ({
                       ...prev,
                       team: { ...prev.team, join_allowed: !newAllow },
@@ -224,7 +222,7 @@ export default function MyTeam() {
                   }
                 }}
               />
-              <label className="form-check-label text-light">
+              <label className="form-check-label text-light small ms-2">
                 {team.join_allowed ? "Allowed" : "Blocked"}
               </label>
             </div>
