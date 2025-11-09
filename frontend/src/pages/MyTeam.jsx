@@ -12,8 +12,10 @@ export default function MyTeam() {
   });
   const [loading, setLoading] = useState(true);
   const [confirmLeave, setConfirmLeave] = useState(false);
-
   const [msg, setMsg] = useState("");
+  const [selectedSeason, setSelectedSeason] = useState("All");
+  const [currentSeason, setCurrentSeason] = useState("Preseason");
+
   const urlBase = import.meta.env.VITE_API_URL;
 
   async function loadTeam() {
@@ -24,11 +26,11 @@ export default function MyTeam() {
       });
 
       setData({
-        team: res.data.team || {},
-        roster: res.data.roster ?? [],
-        matches: res.data.matches ?? [],
-        requests: res.data.requests ?? [],
-        myRole: res.data.myRole || "",
+        team: res.data?.team || {},
+        roster: Array.isArray(res.data?.roster) ? res.data.roster : [],
+        matches: Array.isArray(res.data?.matches) ? res.data.matches : [],
+        requests: Array.isArray(res.data?.requests) ? res.data.requests : [],
+        myRole: res.data?.myRole || "",
       });
     } catch (err) {
       console.error("❌ Failed to load MyTeam:", err);
@@ -39,6 +41,7 @@ export default function MyTeam() {
         requests: [],
         myRole: "",
       });
+      setMsg("⚠️ Failed to load team data.");
     } finally {
       setLoading(false);
     }
@@ -46,14 +49,62 @@ export default function MyTeam() {
 
   useEffect(() => {
     loadTeam();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const { team, roster, matches, requests, myRole } = data;
 
+  // 🔄 Load current season label (from backend)
+  useEffect(() => {
+    axios
+      .get(`${urlBase}/api/season`)
+      .then((res) => {
+        if (res.data?.season) {
+          let s = res.data.season.toString().trim();
+          if (/^\d+$/.test(s)) s = `Season ${s}`;
+          setCurrentSeason(s);
+        }
+      })
+      .catch(() => setCurrentSeason("Preseason"));
+  }, []);
+
+
   if (loading) return <p>⏳ Fetching team data…</p>;
   if (!team?.id) return <p>❌ You are not in a team.</p>;
 
+  // Build list of season options
+  const allSeasons = ["All", "Preseason"];
+  if (currentSeason && !allSeasons.includes(currentSeason))
+    allSeasons.push(currentSeason);
+
+  // Filter matches by season
+  const pastMatches = (matches ?? []).filter((m) =>
+    ["Finished", "Completed", "Forfeit", "Cancelled"].includes(m.status?.trim())
+  );
+
+  // season filter based on match_code prefix
+  const filteredPastMatches = pastMatches.filter((m) => {
+    if (selectedSeason === "All") return true;
+
+    const code = m.match_code || "";
+    const prefix = code.split("-")[0]?.trim();
+
+    // detect season number prefix (e.g. "1", "2", "3")
+    const seasonNum = /^\d+$/.test(prefix) ? Number(prefix) : null;
+
+    if (selectedSeason === "Preseason") {
+      return !seasonNum; // no number → preseason
+    }
+
+    // extract number from "Season X"
+    const seasonNumSelected = parseInt(selectedSeason.replace(/\D/g, ""), 10);
+    return seasonNum === seasonNumSelected;
+  });
+
+  // --- Actions (with basic crash prevention) ---
+
   async function handleDecision(requestID, action) {
+    if (!requestID || !action) return;
     try {
       await axios.post(
         `${urlBase}/api/team/join/decision`,
@@ -61,12 +112,14 @@ export default function MyTeam() {
         { withCredentials: true }
       );
       await loadTeam();
-    } catch {
+    } catch (err) {
+      console.error("❌ Failed to update request:", err);
       alert("Failed to update request");
     }
   }
 
   async function handleKick(playerId) {
+    if (!playerId || !team?.id) return;
     try {
       await axios.post(
         `${urlBase}/api/team/kick`,
@@ -81,6 +134,7 @@ export default function MyTeam() {
   }
 
   async function handleLeaveTeam() {
+    if (!team?.id) return;
     try {
       await axios.post(
         `${urlBase}/api/team/leave`,
@@ -97,6 +151,7 @@ export default function MyTeam() {
   }
 
   async function handlePromote(playerId, role) {
+    if (!playerId || !role || !team?.id) return;
     try {
       await axios.post(
         `${urlBase}/api/team/promote`,
@@ -150,14 +205,14 @@ export default function MyTeam() {
           </div>
         ))}
 
-      {/* ⚙️ Captain Settings */}
+      {/* ⚙️ Captain Settings - compact card */}
       {(myRole === "Captain" || myRole === "Co-Captain") && (
         <div
-          className="p-3 mb-4 rounded"
+          className="p-3 mb-3 rounded"
           style={{
             backgroundColor: "#1a1a1a",
             border: "1px solid #333",
-            maxWidth: "400px", // ✅ Keeps it narrow
+            maxWidth: "420px", // ✅ no full-width stretch
           }}
         >
           <h5 className="text-light mb-3">⚙️ Team Settings</h5>
@@ -170,14 +225,17 @@ export default function MyTeam() {
               style={{ minWidth: "120px" }}
               value={team.status}
               onChange={async (e) => {
+                const nextStatus = e.target.value;
+                if (!nextStatus) return;
                 try {
                   await axios.post(
                     `${urlBase}/api/team/toggle-status`,
-                    { team_id: team.id, status: e.target.value },
+                    { team_id: team.id, status: nextStatus },
                     { withCredentials: true }
                   );
                   await loadTeam();
-                } catch {
+                } catch (err) {
+                  console.error("❌ Failed to update status:", err);
                   alert("Failed to update status");
                 }
               }}
@@ -197,7 +255,10 @@ export default function MyTeam() {
                 checked={!!team.join_allowed}
                 onChange={async (e) => {
                   const newAllow = e.target.checked;
+                  if (!team?.id) return;
+
                   try {
+                    // optimistic local update
                     setData((prev) => ({
                       ...prev,
                       team: { ...prev.team, join_allowed: newAllow },
@@ -209,12 +270,16 @@ export default function MyTeam() {
                       { withCredentials: true }
                     );
 
-                    if (res.data?.success) {
-                      await loadTeam();
-                    } else throw new Error("Backend rejected");
+                    if (!res.data?.success) {
+                      throw new Error("Backend rejected");
+                    }
+
+                    await loadTeam();
                   } catch (err) {
                     console.error("❌ Failed to toggle join:", err);
                     alert("Failed to update join setting");
+
+                    // revert on failure
                     setData((prev) => ({
                       ...prev,
                       team: { ...prev.team, join_allowed: !newAllow },
@@ -230,6 +295,7 @@ export default function MyTeam() {
         </div>
       )}
 
+      {/* 👥 Roster - bounded width */}
       <h4>👥 Roster</h4>
       <div style={{ maxWidth: "700px" }}>
         <ul className="list-group">
@@ -246,7 +312,9 @@ export default function MyTeam() {
               >
                 <span>
                   <strong>{m.display_name || m.username || "Unknown"}</strong>{" "}
-                  <span className={`roster-role ${m.role?.toLowerCase() || ""}`}>
+                  <span
+                    className={`roster-role ${m.role?.toLowerCase() || ""}`}
+                  >
                     {m.role || "-"}
                   </span>
                 </span>
@@ -258,9 +326,9 @@ export default function MyTeam() {
                       style={{ width: 160 }}
                       defaultValue=""
                       onChange={async (e) => {
-                        const role = e.target.value;
-                        if (!role) return;
-                        await handlePromote(m.id, role);
+                        const newRole = e.target.value;
+                        if (!newRole) return;
+                        await handlePromote(m.id, newRole);
                         e.target.value = "";
                       }}
                     >
@@ -286,13 +354,13 @@ export default function MyTeam() {
         </ul>
       </div>
 
+      {/* 📅 Active Matches */}
       <h4 className="mt-4 mb-3">📅 Matches</h4>
       <div className="d-flex flex-column align-items-start gap-3">
         {(() => {
-          // filter out forfeited, finished, or completed matches
           const activeMatches = (matches ?? []).filter(
             (m) =>
-              m.status &&
+              m?.status &&
               !["Finished", "Forfeit", "Completed", "Cancelled"].includes(
                 m.status.trim()
               )
@@ -315,57 +383,148 @@ export default function MyTeam() {
         })()}
       </div>
 
-      <h5 className="mt-4">🏁 Past Matches</h5>
-      <div className="d-flex flex-column align-items-start gap-3">
-        {(matches ?? [])
-          .filter((m) =>
-            ["Finished", "Completed", "Forfeit", "Cancelled"].includes(
-              m.status?.trim()
-            )
-          )
-          .map((m) => (
-            <MatchCard
-              key={m.id}
-              match={m}
-              team={team}
-              urlBase={urlBase}
-              loadTeam={loadTeam}
-              myRole={myRole}
-              readOnly={true}
-            />
-          ))}
-      </div>
+      {/* 🏁 Past Matches */}
+      <section className="mt-4 mb-5">
+        <div
+          className="d-flex justify-content-between align-items-center mb-2"
+          style={{ maxWidth: "720px" }}
+        >
+          <h5 className="text-light mb-0">🏁 Past Matches</h5>
 
+          {/* 🔽 Season Filter */}
+          <select
+            className="form-select form-select-sm bg-dark text-light"
+            style={{ maxWidth: 200 }}
+            value={selectedSeason}
+            onChange={(e) => setSelectedSeason(e.target.value)}
+          >
+            {allSeasons.map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+
+        <div
+          className="table-responsive rounded shadow-sm"
+          style={{
+            maxWidth: "720px",
+            border: "1px solid rgba(255,255,255,0.1)",
+            backgroundColor: "#151515",
+          }}
+        >
+          <table className="table table-dark table-striped align-middle text-center table-hover mb-0">
+            <thead
+              className="table-secondary"
+              style={{
+                borderTopLeftRadius: "8px",
+                borderTopRightRadius: "8px",
+              }}
+            >
+              <tr>
+                <th style={{ width: "5%" }}>#</th>
+                <th style={{ width: "25%" }}>Opponent</th>
+                <th style={{ width: "20%" }}>Date</th>
+                <th style={{ width: "15%" }}>Result</th>
+                <th style={{ width: "15%" }}>Status</th>
+                <th style={{ width: "20%" }}>Match ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredPastMatches.length > 0 ? (
+                filteredPastMatches.map((m, idx) => (
+                  <tr
+                    key={m.id || idx}
+                    className="match-row"
+                    style={{
+                      cursor: "pointer",
+                      transition: "background 0.2s ease",
+                    }}
+                    onClick={() => (window.location.href = `/match/${m.id}`)}
+                    title="View match details"
+                  >
+                    <td>{idx + 1}</td>
+                    <td className="fw-semibold">{m.opponent || "Unknown"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      {m.date ? new Date(m.date).toLocaleDateString() : "-"}
+                    </td>
+                    <td
+                      className={`fw-bold ${m.result === "Win"
+                        ? "text-success"
+                        : m.result === "Loss"
+                          ? "text-danger"
+                          : "text-warning"
+                        }`}
+                    >
+                      {m.result || "Pending"}
+                    </td>
+                    <td className="text-light">
+                      {m.status || "Unknown"}
+                    </td>
+                    <td className="text-light">{m.match_code || m.id}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="6" className="text-light py-3">
+                    No matches found for {selectedSeason}.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* 📥 Join Requests - compact + aligned with settings */}
       {(myRole === "Captain" || myRole === "Co-Captain") &&
         (requests ?? []).length > 0 && (
-          <>
-            <h4 className="mt-4">📥 Join Requests</h4>
+          <div
+            className="mt-4 p-3 rounded"
+            style={{
+              backgroundColor: "#1a1a1a",
+              border: "1px solid #333",
+              maxWidth: "420px", // ✅ same width as settings
+            }}
+          >
+            <h4 className="mb-3 text-light">📥 Join Requests</h4>
             <ul className="list-group">
               {requests.map((req) => (
                 <li
                   key={req.id}
-                  className="list-group-item d-flex justify-content-between align-items-center"
+                  className="list-group-item d-flex justify-content-between align-items-center px-2 py-2"
+                  style={{
+                    backgroundColor: "#111",
+                    color: "#f8f9fa",
+                    borderRadius: "0.35rem",
+                    marginBottom: "4px",
+                  }}
                 >
-                  {req.username} ({req.status})
-                  <div>
+                  <span>
+                    <strong>{req.username}</strong>{" "}
+                    <span className="text-muted small">
+                      ({req.status || "pending"})
+                    </span>
+                  </span>
+                  <div className="d-flex gap-1">
                     <button
-                      className="btn btn-success btn-sm me-2"
+                      className="btn btn-success btn-sm"
                       onClick={() => handleDecision(req.id, "accept")}
                     >
-                      Accept
+                      ✓
                     </button>
                     <button
                       className="btn btn-danger btn-sm"
                       onClick={() => handleDecision(req.id, "deny")}
                     >
-                      Deny
+                      ✕
                     </button>
                   </div>
                 </li>
               ))}
             </ul>
-          </>
+          </div>
         )}
     </div>
   );
 }
+

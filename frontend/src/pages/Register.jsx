@@ -119,7 +119,7 @@ export default function Register() {
       alert(`✅ Join request submitted to "${team.name}"!`);
       setTeamQuery("");
     } catch {
-      alert("Failed to request join");
+      alert("Team is not accepting join requests at this moment");
     }
   }
 

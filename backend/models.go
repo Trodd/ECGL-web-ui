@@ -84,6 +84,8 @@ type Match struct {
 	TeamAScore             int            `json:"team_a_score" gorm:"default:0"`
 	TeamBScore             int            `json:"team_b_score" gorm:"default:0"`
 	MapScores              datatypes.JSON `json:"map_scores" gorm:"type:jsonb;default:'[]'"`
+	LeagueSubA             *int64         `json:"league_sub_a"`
+	LeagueSubB             *int64         `json:"league_sub_b"`
 }
 
 // --- Match Score ---

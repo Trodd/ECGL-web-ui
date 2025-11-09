@@ -621,6 +621,95 @@ export default function LeagueMod() {
                                     </button>
                                 </div>
                             </div>
+                            {/* --- Add Additional Matchup (Current Week) --- */}
+                            <div
+                                className="p-3 mt-4 rounded"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h6 className="text-info mb-2">➕ Add Additional Matchup (Current Week)</h6>
+                                <p className="small text-light mb-2">
+                                    Select two teams to add a new matchup for the active week.
+                                </p>
+
+                                <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                    <select
+                                        className="form-select bg-dark text-light"
+                                        value={newMatchA}
+                                        onChange={(e) => setNewMatchA(e.target.value)}
+                                        style={{ maxWidth: 220 }}
+                                    >
+                                        <option value="">Select Team A...</option>
+                                        {teams.map((t) => (
+                                            <option key={t.id} value={t.name}>
+                                                {t.name}
+                                            </option>
+                                        ))}
+                                    </select>
+
+                                    <select
+                                        className="form-select bg-dark text-light"
+                                        value={newMatchB}
+                                        onChange={(e) => setNewMatchB(e.target.value)}
+                                        style={{ maxWidth: 220 }}
+                                    >
+                                        <option value="">Select Team B...</option>
+                                        {teams.map((t) => (
+                                            <option key={t.id} value={t.name}>
+                                                {t.name}
+                                            </option>
+                                        ))}
+                                    </select>
+
+                                    <button
+                                        className="btn btn-outline-success btn-sm"
+                                        disabled={!newMatchA || !newMatchB || newMatchA === newMatchB}
+                                        onClick={async () => {
+                                            if (!newMatchA || !newMatchB || newMatchA === newMatchB) {
+                                                setMsg("⚠️ Please select two different teams.");
+                                                return;
+                                            }
+
+                                            try {
+                                                const res = await axios.post(
+                                                    `${urlBase}/api/mod/match/add`,
+                                                    { team_a: newMatchA, team_b: newMatchB },
+                                                    { withCredentials: true }
+                                                );
+                                                setMsg(`✅ Added ${res.data.match_code} successfully.`);
+                                                setNewMatchA("");
+                                                setNewMatchB("");
+
+                                                // Refresh matches list
+                                                const matchRes = await axios.get(`${urlBase}/api/matches/public`, {
+                                                    withCredentials: true,
+                                                });
+                                                const matchList = [];
+                                                if (matchRes.data?.matches) {
+                                                    Object.entries(matchRes.data.matches).forEach(([seasonKey, weeks]) => {
+                                                        if (season && seasonKey !== season) return;
+                                                        Object.values(weeks).forEach((list) =>
+                                                            list.forEach((m) =>
+                                                                matchList.push({
+                                                                    id: m.id,
+                                                                    match_code: m.match_code,
+                                                                    team_a: m.team_a,
+                                                                    team_b: m.team_b,
+                                                                })
+                                                            )
+                                                        );
+                                                    });
+                                                }
+                                                setMatches(matchList);
+                                            } catch (err) {
+                                                console.error("❌ Failed to add match:", err);
+                                                setMsg("❌ Failed to add additional match.");
+                                            }
+                                        }}
+                                    >
+                                        ➕ Add Match
+                                    </button>
+                                </div>
+                            </div>
                         </>
                     }
                 />
@@ -750,95 +839,6 @@ export default function LeagueMod() {
                                 >
                                     Delete Match
                                 </button>
-                            </div>
-                            {/* --- Add Additional Matchup (Current Week) --- */}
-                            <div
-                                className="p-3 mt-4 rounded"
-                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
-                            >
-                                <h6 className="text-info mb-2">➕ Add Additional Matchup (Current Week)</h6>
-                                <p className="small text-light mb-2">
-                                    Select two teams to add a new matchup for the active week.
-                                </p>
-
-                                <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-                                    <select
-                                        className="form-select bg-dark text-light"
-                                        value={newMatchA}
-                                        onChange={(e) => setNewMatchA(e.target.value)}
-                                        style={{ maxWidth: 220 }}
-                                    >
-                                        <option value="">Select Team A...</option>
-                                        {teams.map((t) => (
-                                            <option key={t.id} value={t.name}>
-                                                {t.name}
-                                            </option>
-                                        ))}
-                                    </select>
-
-                                    <select
-                                        className="form-select bg-dark text-light"
-                                        value={newMatchB}
-                                        onChange={(e) => setNewMatchB(e.target.value)}
-                                        style={{ maxWidth: 220 }}
-                                    >
-                                        <option value="">Select Team B...</option>
-                                        {teams.map((t) => (
-                                            <option key={t.id} value={t.name}>
-                                                {t.name}
-                                            </option>
-                                        ))}
-                                    </select>
-
-                                    <button
-                                        className="btn btn-outline-success btn-sm"
-                                        disabled={!newMatchA || !newMatchB || newMatchA === newMatchB}
-                                        onClick={async () => {
-                                            if (!newMatchA || !newMatchB || newMatchA === newMatchB) {
-                                                setMsg("⚠️ Please select two different teams.");
-                                                return;
-                                            }
-
-                                            try {
-                                                const res = await axios.post(
-                                                    `${urlBase}/api/mod/match/add`,
-                                                    { team_a: newMatchA, team_b: newMatchB },
-                                                    { withCredentials: true }
-                                                );
-                                                setMsg(`✅ Added ${res.data.match_code} successfully.`);
-                                                setNewMatchA("");
-                                                setNewMatchB("");
-
-                                                // Refresh matches list
-                                                const matchRes = await axios.get(`${urlBase}/api/matches/public`, {
-                                                    withCredentials: true,
-                                                });
-                                                const matchList = [];
-                                                if (matchRes.data?.matches) {
-                                                    Object.entries(matchRes.data.matches).forEach(([seasonKey, weeks]) => {
-                                                        if (season && seasonKey !== season) return;
-                                                        Object.values(weeks).forEach((list) =>
-                                                            list.forEach((m) =>
-                                                                matchList.push({
-                                                                    id: m.id,
-                                                                    match_code: m.match_code,
-                                                                    team_a: m.team_a,
-                                                                    team_b: m.team_b,
-                                                                })
-                                                            )
-                                                        );
-                                                    });
-                                                }
-                                                setMatches(matchList);
-                                            } catch (err) {
-                                                console.error("❌ Failed to add match:", err);
-                                                setMsg("❌ Failed to add additional match.");
-                                            }
-                                        }}
-                                    >
-                                        ➕ Add Match
-                                    </button>
-                                </div>
                             </div>
                         </>
                     }

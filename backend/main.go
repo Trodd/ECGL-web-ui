@@ -302,6 +302,11 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		Timezone:    req.Timezone,
 	}
 
+	// ✅ Ensure baseline ELO rating from .env
+	if player.Rating == 0 {
+		player.Rating = getEnvInt("DEFAULT_PLAYER_RATING", 800)
+	}
+
 	// ✅ Upsert player row
 	if err := DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "id"}},

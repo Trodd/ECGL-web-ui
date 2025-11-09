@@ -18,6 +18,18 @@ import (
 	"gorm.io/gorm"
 )
 
+func getEnvInt(key string, def int) int {
+	val := os.Getenv(key)
+	if val == "" {
+		return def
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
 // --- Require Login ---
 func requireLogin(w http.ResponseWriter, r *http.Request) (*sessions.Session, bool) {
 	session, _ := store.Get(r, "session")
@@ -106,12 +118,19 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 		Timezone    string
 	}
 
-	var rows []raw
-	if err := DB.Table("players").
-		Select("id, username, display_name, role, device, timezone").
-		Where("username <> ''").
-		Scan(&rows).Error; err != nil {
+	roleFilter := strings.TrimSpace(r.URL.Query().Get("role"))
 
+	query := DB.Table("players").
+		Select("id, username, display_name, role, device, timezone").
+		Where("username <> ''")
+
+	// ✅ Apply role filter if provided (case-insensitive)
+	if roleFilter != "" {
+		query = query.Where("LOWER(role) = LOWER(?)", roleFilter)
+	}
+
+	var rows []raw
+	if err := query.Scan(&rows).Error; err != nil {
 		// Always return JSON, even on error
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -432,8 +451,12 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 		JOIN teams t1 ON m.team_a_id = t1.id
 		JOIN teams t2 ON m.team_b_id = t2.id
 		WHERE (m.team_a_id = @id OR m.team_b_id = @id)
-		  AND m.status != 'Completed'
-		ORDER BY m.scheduled_date DESC NULLS LAST`,
+		ORDER BY 
+			CASE 
+				WHEN m.status IN ('Completed','Finished','Forfeit','Cancelled') THEN 1 
+				ELSE 0 
+			END,
+			m.scheduled_date DESC NULLS LAST`,
 		sql.Named("id", membership.TeamID),
 	).Rows()
 
@@ -614,8 +637,15 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// create team
-	team := Team{Name: req.Name, Status: "Active"}
+	// ✅ Create team with default ELO from .env
+	team := Team{
+		Name:    req.Name,
+		Status:  "Active",
+		Rating:  getEnvInt("DEFAULT_TEAM_RATING", 1000),
+		Wins:    0,
+		Losses:  0,
+		Matches: 0,
+	}
 	if err := DB.Create(&team).Error; err != nil {
 		http.Error(w, "Failed to create team", http.StatusInternalServerError)
 		return
@@ -653,7 +683,7 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{
 		"success": true,
 		"team":    team,
-		"message": "Team created successfully",
+		"message": fmt.Sprintf("Team created successfully with base rating %d", team.Rating),
 	})
 }
 
@@ -715,7 +745,28 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to add player to team", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("✅ Player %d added to team %d as Member", jr.PlayerID, jr.TeamID)
+		// 🧠 Fetch player + team names for readable logging
+		var p Player
+		DB.Select("display_name, username").First(&p, jr.PlayerID)
+
+		var t Team
+		DB.Select("name").First(&t, jr.TeamID)
+
+		display := p.DisplayName
+		if display == "" {
+			display = p.Username
+		}
+		if display == "" {
+			display = fmt.Sprintf("Player#%d", jr.PlayerID)
+		}
+
+		teamName := t.Name
+		if teamName == "" {
+			teamName = fmt.Sprintf("Team#%d", jr.TeamID)
+		}
+
+		// ✅ Log readable output
+		log.Printf("✅ %s added to %s as Member", display, teamName)
 
 		// ✅ Log history (skip duplicates)
 		var existing PlayerHistory
@@ -1282,15 +1333,18 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 // One team enters or edits scores. Resets confirmations until both re-confirm.
 func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		MatchID uint `json:"match_id"`
-		TeamID  uint `json:"team_id"`
-		Maps    []struct {
+		MatchID    uint   `json:"match_id"`
+		TeamID     uint   `json:"team_id"`
+		LeagueSubA *int64 `json:"league_sub_a"`
+		LeagueSubB *int64 `json:"league_sub_b"`
+		Maps       []struct {
 			MapNumber  int    `json:"map_number"`
 			Gamemode   string `json:"gamemode"`
 			TeamAScore int    `json:"team_a_score"`
 			TeamBScore int    `json:"team_b_score"`
 		} `json:"maps"`
 	}
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
@@ -1302,47 +1356,112 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Clear existing scores
-	if err := DB.Where("match_id = ?", req.MatchID).Delete(&MatchScore{}).Error; err != nil {
-		http.Error(w, "Failed to clear previous scores", http.StatusInternalServerError)
+	// ✅ Ensure submitting team is actually in this match
+	isTeamA := req.TeamID == match.TeamAID
+	isTeamB := req.TeamID == match.TeamBID
+	if !isTeamA && !isTeamB {
+		http.Error(w, "You are not part of this match", http.StatusForbidden)
 		return
 	}
 
-	// ✅ Insert new ones
+	// 🚫 Prevent same sub for both teams
+	if req.LeagueSubA != nil && req.LeagueSubB != nil && *req.LeagueSubA == *req.LeagueSubB {
+		http.Error(w, "The same League Sub cannot be used for both teams.", http.StatusBadRequest)
+		return
+	}
+
+	// 🧍 Store League Subs (if provided)
+	match.LeagueSubA = req.LeagueSubA
+	match.LeagueSubB = req.LeagueSubB
+
+	// --- Get existing map scores to detect changes ---
+	var existing []MatchScore
+	DB.Where("match_id = ?", req.MatchID).Find(&existing)
+
+	// --- Build new canonical score data ---
+	var newScores []MatchScore
 	for i, m := range req.Maps {
 		mapNum := m.MapNumber
 		if mapNum <= 0 {
 			mapNum = i + 1
 		}
-		if m.Gamemode == "" {
-			m.Gamemode = "Unknown"
+		mode := strings.TrimSpace(m.Gamemode)
+		if mode == "" {
+			mode = "Unknown"
 		}
 
-		score := MatchScore{
+		our, their := m.TeamAScore, m.TeamBScore
+		aScore, bScore := 0, 0
+
+		if isTeamA {
+			aScore, bScore = our, their
+		} else {
+			aScore, bScore = their, our
+		}
+
+		newScores = append(newScores, MatchScore{
 			MatchID:    req.MatchID,
 			MapNumber:  mapNum,
-			Gamemode:   m.Gamemode,
-			TeamAScore: m.TeamAScore,
-			TeamBScore: m.TeamBScore,
-		}
-		if err := DB.Create(&score).Error; err != nil {
-			log.Printf("❌ Failed to insert score for map %d: %v", mapNum, err)
+			Gamemode:   mode,
+			TeamAScore: aScore,
+			TeamBScore: bScore,
+		})
+	}
+
+	// --- Compare newScores vs existing ---
+	changed := false
+	if len(existing) != len(newScores) {
+		changed = true
+	} else {
+		for _, n := range newScores {
+			found := false
+			for _, e := range existing {
+				if e.MapNumber == n.MapNumber {
+					found = true
+					if e.TeamAScore != n.TeamAScore || e.TeamBScore != n.TeamBScore {
+						changed = true
+					}
+					break
+				}
+			}
+			if !found {
+				changed = true
+			}
 		}
 	}
 
-	// ✅ Force re-confirmation
-	match.TeamAScoreConfirmed = false
-	match.TeamBScoreConfirmed = false
-	match.Status = "Pending Confirmation"
-	if err := DB.Save(&match).Error; err != nil {
-		http.Error(w, "Failed to update match", http.StatusInternalServerError)
-		return
-	}
+	// --- Only update if something actually changed ---
+	if changed {
+		if err := DB.Where("match_id = ?", req.MatchID).Delete(&MatchScore{}).Error; err != nil {
+			http.Error(w, "Failed to clear previous scores", http.StatusInternalServerError)
+			return
+		}
 
-	log.Printf("📝 Team %d submitted or edited scores for match #%d", req.TeamID, match.ID)
+		for _, s := range newScores {
+			if err := DB.Create(&s).Error; err != nil {
+				log.Printf("❌ Failed to insert score for map %d (match %d): %v", s.MapNumber, req.MatchID, err)
+			}
+		}
+
+		match.TeamAScoreConfirmed = false
+		match.TeamBScoreConfirmed = false
+		match.Status = "Pending Confirmation"
+
+		if err := DB.Save(&match).Error; err != nil {
+			log.Printf("❌ Failed to update match after score change: %v", err)
+		}
+
+		log.Printf("📝 Team %d submitted NEW scores for match #%d (normalized vs TeamA/TeamB)", req.TeamID, match.ID)
+	} else {
+		if err := DB.Save(&match).Error; err != nil {
+			log.Printf("❌ Failed to re-save match without score changes: %v", err)
+		}
+		log.Printf("🔁 Team %d re-submitted SAME scores for match #%d — confirmations preserved", req.TeamID, match.ID)
+	}
 
 	respondJSON(w, map[string]any{
 		"success": true,
+		"changed": changed,
 		"message": "Scores saved. Both teams must confirm to finalize.",
 	})
 }
@@ -2466,7 +2585,6 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- POST /api/match/confirm-score ---
-// A team confirms the current match scores. When both confirm the same data, finalize.
 func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		MatchID uint `json:"match_id"`
@@ -2483,22 +2601,27 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Mark this team’s confirmation
+	// ✅ Mark this team's confirmation
 	if req.TeamID == match.TeamAID {
 		match.TeamAScoreConfirmed = true
 	} else if req.TeamID == match.TeamBID {
 		match.TeamBScoreConfirmed = true
+	} else {
+		http.Error(w, "Team not part of match", http.StatusForbidden)
+		return
 	}
 
-	// ✅ Finalize only once both have confirmed
+	// --- Both confirmed? check if scores already match ---
 	if match.TeamAScoreConfirmed && match.TeamBScoreConfirmed {
-		match.Status = "Completed"
+		var maps []MatchScore
+		DB.Where("match_id = ?", match.ID).Find(&maps)
 
-		var scores []MatchScore
-		DB.Where("match_id = ?", match.ID).Find(&scores)
+		if len(maps) == 0 {
+			log.Printf("⚠️ No map scores found for match #%d during confirm", match.ID)
+		}
 
 		totalA, totalB := 0, 0
-		for _, s := range scores {
+		for _, s := range maps {
 			if s.TeamAScore > s.TeamBScore {
 				totalA++
 			} else if s.TeamBScore > s.TeamAScore {
@@ -2506,28 +2629,104 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if totalA > totalB {
-			match.WinnerID = &match.TeamAID
-			match.LoserID = &match.TeamBID
-		} else if totalB > totalA {
-			match.WinnerID = &match.TeamBID
-			match.LoserID = &match.TeamAID
+		// Decide winner/loser
+		if totalA != totalB {
+			var winnerID, loserID uint
+			if totalA > totalB {
+				winnerID, loserID = match.TeamAID, match.TeamBID
+			} else {
+				winnerID, loserID = match.TeamBID, match.TeamAID
+			}
+
+			match.WinnerID = &winnerID
+			match.LoserID = &loserID
+			match.Status = "Completed"
+
+			if err := DB.Save(&match).Error; err != nil {
+				http.Error(w, "Failed to finalize match", http.StatusInternalServerError)
+				return
+			}
+
+			updateLeaderboards(winnerID, loserID)
+			log.Printf("🏁 Match #%d completed (Winner: %d, Loser: %d)", match.ID, winnerID, loserID)
 		} else {
-			match.WinnerID = nil
-			match.LoserID = nil
+			match.Status = "Completed"
+			DB.Save(&match)
+			log.Printf("🤝 Match #%d completed (tie)", match.ID)
 		}
 
-		log.Printf("🏁 Match #%d finalized and marked as Completed", match.ID)
-	} else {
-		match.Status = "Pending Confirmation"
+		respondJSON(w, map[string]any{
+			"success": true,
+			"status":  "Completed",
+			"message": "Match finalized.",
+		})
+		return
 	}
 
-	DB.Save(&match)
+	// ✅ Only one side confirmed → just update flag
+	if err := DB.Save(&match).Error; err != nil {
+		http.Error(w, "Failed to update confirmation", http.StatusInternalServerError)
+		return
+	}
 
 	respondJSON(w, map[string]any{
 		"success": true,
-		"status":  match.Status,
+		"status":  "Pending Confirmation",
+		"message": "Waiting for opponent confirmation.",
 	})
+}
+
+// updateLeaderboards updates both team + player leaderboards using ELO from env.
+func updateLeaderboards(winnerID, loserID uint) {
+	// Read from .env or fallback
+	eloWinPoints := getEnvInt("ELO_WIN_POINTS", 25)
+	eloLossPoints := getEnvInt("ELO_LOSS_POINTS", -25)
+	defaultPlayerRating := getEnvInt("DEFAULT_PLAYER_RATING", 800)
+
+	var winner, loser Team
+	if err := DB.First(&winner, winnerID).Error; err == nil {
+		winner.Wins++
+		winner.Matches++
+		winner.Rating += eloWinPoints
+		DB.Save(&winner)
+	} else {
+		log.Printf("⚠️ Could not find winner team %d", winnerID)
+	}
+
+	if err := DB.First(&loser, loserID).Error; err == nil {
+		loser.Losses++
+		loser.Matches++
+		loser.Rating += eloLossPoints
+		DB.Save(&loser)
+	} else {
+		log.Printf("⚠️ Could not find loser team %d", loserID)
+	}
+
+	// --- Player stats ---
+	var winners, losers []TeamMember
+	DB.Where("team_id = ?", winnerID).Find(&winners)
+	DB.Where("team_id = ?", loserID).Find(&losers)
+
+	for _, w := range winners {
+		DB.Model(&Player{}).Where("id = ?", w.PlayerID).
+			Updates(map[string]any{
+				"wins":    gorm.Expr("wins + 1"),
+				"matches": gorm.Expr("matches + 1"),
+				"rating":  gorm.Expr("COALESCE(rating, ?) + ?", defaultPlayerRating, eloWinPoints),
+			})
+	}
+
+	for _, l := range losers {
+		DB.Model(&Player{}).Where("id = ?", l.PlayerID).
+			Updates(map[string]any{
+				"losses":  gorm.Expr("losses + 1"),
+				"matches": gorm.Expr("matches + 1"),
+				"rating":  gorm.Expr("COALESCE(rating, ?) + ?", defaultPlayerRating, eloLossPoints),
+			})
+	}
+
+	log.Printf("📊 Leaderboards updated (ELO %+d / %+d): winner=%d loser=%d",
+		eloWinPoints, eloLossPoints, winnerID, loserID)
 }
 
 // --- POST /api/mod/team/set-inactive ---
