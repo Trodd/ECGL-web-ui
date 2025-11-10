@@ -117,12 +117,13 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
 
     return (
         <div
-            className="p-3 border rounded bg-dark shadow-sm"
+            className="p-3 border rounded bg-dark shadow-sm mx-auto text-light d-flex flex-column align-items-center"
             style={{
                 width: "100%",
-                maxWidth: 680,
-                margin: "0 auto",
+                maxWidth: 700,
                 borderColor: "#444",
+                textAlign: "center",
+                backgroundColor: "#121212",
             }}
         >
             <div className="d-flex justify-content-between align-items-center mb-2">
@@ -136,55 +137,63 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                 Status: <strong>{match.status || "Pending"}</strong>
             </p>
 
-            {/* 🗓️ Step 1: Schedule / Edit */}
-            {isCaptain && (
-                <div>
-                    <h6 className="text-light mb-2">🗓️ Schedule / Edit Match Time</h6>
-                    {!match.date || editing ? (
-                        <div className="d-flex align-items-center gap-2 mb-2">
-                            <input
-                                type="datetime-local"
-                                className="form-control bg-dark text-light"
-                                style={{ maxWidth: 240 }}
-                                value={localDate}
-                                onChange={(e) => setLocalDate(e.target.value)}
-                            />
-                            <button
-                                className="btn btn-primary btn-sm"
-                                onClick={handleSchedule}
-                            >
-                                {match.date ? "Save Changes" : "Schedule"}
-                            </button>
-                            {editing && (
+            {/* 🗓️ Step 1: Schedule / Edit or View Time */}
+            <div className="mb-3">
+                <h6 className="text-light mb-2">🗓️ Match Time</h6>
+
+                {/* 🧭 Always show the scheduled time if it exists */}
+                {match.date ? (
+                    <p className="small mb-2 text-light">
+                        🕒 Scheduled:&nbsp;
+                        <strong>
+                            {new Date(match.date).toLocaleString([], {
+                                dateStyle: "medium",
+                                timeStyle: "short",
+                            })}
+                        </strong>
+                    </p>
+                ) : (
+                    <p className="small mb-2 text-light">🕒 Not scheduled yet</p>
+                )}
+
+                {/* 🧑 Captains get edit controls */}
+                {isCaptain && (
+                    <>
+                        {!match.date || editing ? (
+                            <div className="d-flex align-items-center gap-2 mt-2">
+                                <input
+                                    type="datetime-local"
+                                    className="form-control bg-dark text-light"
+                                    style={{ maxWidth: 240 }}
+                                    value={localDate}
+                                    onChange={(e) => setLocalDate(e.target.value)}
+                                />
                                 <button
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => setEditing(false)}
+                                    className="btn btn-primary btn-sm"
+                                    onClick={handleSchedule}
                                 >
-                                    Cancel
+                                    {match.date ? "Save Changes" : "Schedule"}
                                 </button>
-                            )}
-                        </div>
-                    ) : (
-                        <>
-                            <p className="text-light small mb-2">
-                                Scheduled time:{" "}
-                                <strong>
-                                    {new Date(match.date).toLocaleString([], {
-                                        dateStyle: "medium",
-                                        timeStyle: "short",
-                                    })}
-                                </strong>
-                            </p>
+                                {editing && (
+                                    <button
+                                        className="btn btn-secondary btn-sm"
+                                        onClick={() => setEditing(false)}
+                                    >
+                                        Cancel
+                                    </button>
+                                )}
+                            </div>
+                        ) : (
                             <button
-                                className="btn btn-outline-warning btn-sm"
+                                className="btn btn-outline-warning btn-sm mt-2"
                                 onClick={() => setEditing(true)}
                             >
                                 ✏️ Edit Date / Time
                             </button>
-                        </>
-                    )}
-                </div>
-            )}
+                        )}
+                    </>
+                )}
+            </div>
 
             {/* 🎯 Step 2: Scoring */}
             {match.date && isCaptain && (
@@ -336,10 +345,10 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
             {msg && (
                 <p
                     className={`small mt-2 mb-0 ${msg.startsWith("✅")
-                            ? "text-success"
-                            : msg.startsWith("⚠️")
-                                ? "text-warning"
-                                : "text-danger"
+                        ? "text-success"
+                        : msg.startsWith("⚠️")
+                            ? "text-warning"
+                            : "text-danger"
                         }`}
                 >
                     {msg}

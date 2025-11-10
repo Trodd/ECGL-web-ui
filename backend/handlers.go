@@ -173,7 +173,7 @@ func GetTeams(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetTeam(w http.ResponseWriter, r *http.Request) {
-	// crash prevention: guard param parse
+	// 🧱 Crash prevention: guard param parse
 	params := mux.Vars(r)
 	teamID, err := strconv.Atoi(params["id"])
 	if err != nil || teamID <= 0 {
@@ -181,7 +181,7 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// crash prevention: find team safely
+	// 🧱 Crash prevention: find team safely
 	var team Team
 	if err := DB.First(&team, teamID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -193,7 +193,7 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Load roster (include display_name) ---
+	// --- Load roster (include display_name, fallback to player_history) ---
 	type RosterPlayer struct {
 		ID          uint   `json:"id"`
 		Username    string `json:"username"`
@@ -201,14 +201,29 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 		Role        string `json:"role"`
 		Rating      int    `json:"rating"`
 	}
+
 	var roster []RosterPlayer
-	if err := DB.Table("team_members").
+
+	// 🧩 Try primary live roster
+	err = DB.Table("team_members").
 		Select("players.id, players.username, players.display_name, team_members.role, players.rating").
 		Joins("JOIN players ON players.id = team_members.player_id").
 		Where("team_members.team_id = ?", teamID).
-		Scan(&roster).Error; err != nil {
+		Scan(&roster).Error
+
+	if err != nil {
 		log.Printf("❌ GetTeam: roster query failed for team %d: %v", teamID, err)
-		roster = []RosterPlayer{} // crash prevention: return empty array
+		roster = []RosterPlayer{}
+	}
+
+	// 🧩 Fallback: use player_history if no active roster found
+	if len(roster) == 0 {
+		DB.Raw(`
+			SELECT p.id, p.username, p.display_name, ph.role, p.rating
+			FROM player_history ph
+			JOIN players p ON p.id = ph.player_id
+			WHERE ph.team_id = ? AND ph.season = ?
+		`, teamID, currentSeason).Scan(&roster)
 	}
 
 	// --- Load match history (include numeric ID and MatchCode) ---
@@ -220,6 +235,7 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 		Date       *time.Time `json:"date"`
 		Result     string     `json:"result"`
 	}
+
 	var matches []MatchRow
 
 	if err := DB.Raw(`
@@ -244,7 +260,7 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 		matches = []MatchRow{}
 	}
 
-	// crash prevention: never return nil arrays
+	// 🧱 Crash prevention: never return nil arrays
 	if roster == nil {
 		roster = []RosterPlayer{}
 	}
@@ -348,11 +364,23 @@ func GetMatches(w http.ResponseWriter, r *http.Request) {
 // --- My Team (session-based) ---
 func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "session")
-	discordID, ok := session.Values["discord_id"].(string)
-	if !ok || discordID == "" {
+	discordID, _ := session.Values["discord_id"].(string)
+
+	// 🧩 DEV MODE OVERRIDE — allows ?as=<discord_id> for debugging
+	devMode := os.Getenv("DEV_MODE") == "true"
+	if devMode {
+		if overrideID := r.URL.Query().Get("as"); overrideID != "" {
+			log.Printf("🧪 [DEV_MODE] Impersonating player %s", overrideID)
+			discordID = overrideID
+		}
+	}
+
+	// 🚫 Still block if no Discord ID and not in dev override
+	if discordID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+
 	playerID, _ := strconv.ParseInt(discordID, 10, 64)
 
 	var player Player
@@ -392,7 +420,9 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 		Rating      int    `json:"rating"`
 	}
 	var roster []RosterPlayer
-	rosterRows, err := DB.Table("team_members").
+	var rosterRows *sql.Rows
+	var err error
+	rosterRows, err = DB.Table("team_members").
 		Select("players.id, players.username, players.display_name, team_members.role, players.rating").
 		Joins("JOIN players ON players.id = team_members.player_id").
 		Where("team_members.team_id = ?", membership.TeamID).
@@ -1527,31 +1557,55 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 	DB.First(&teamA, match.TeamAID)
 	DB.First(&teamB, match.TeamBID)
 
-	// --- Load historical rosters ---
-	type HistoryPlayer struct {
+	// --- Load rosters (player_history → fallback team_members) ---
+	type RosterPlayer struct {
 		PlayerID    int64  `json:"player_id"`
 		DisplayName string `json:"display_name"`
 		Username    string `json:"username"`
 		Role        string `json:"role"`
 	}
-	var rosterA, rosterB []HistoryPlayer
-	DB.Raw(`
-		SELECT p.id AS player_id, p.display_name, p.username, ph.role
-		FROM player_history ph
-		JOIN players p ON p.id = ph.player_id
-		WHERE ph.team_id = ? AND ph.season = COALESCE(?, 'Preseason')
-	`, match.TeamAID, "Preseason").Scan(&rosterA)
-	DB.Raw(`
-		SELECT p.id AS player_id, p.display_name, p.username, ph.role
-		FROM player_history ph
-		JOIN players p ON p.id = ph.player_id
-		WHERE ph.team_id = ? AND ph.season = COALESCE(?, 'Preseason')
-	`, match.TeamBID, "Preseason").Scan(&rosterB)
 
+	var rosterA, rosterB []RosterPlayer
+
+	// Try player_history first
+	DB.Raw(`
+		SELECT p.id AS player_id, p.display_name, p.username, ph.role
+		FROM player_history ph
+		JOIN players p ON p.id = ph.player_id
+		WHERE ph.team_id = ? AND ph.season = ?
+	`, match.TeamAID, currentSeason).Scan(&rosterA)
+
+	DB.Raw(`
+		SELECT p.id AS player_id, p.display_name, p.username, ph.role
+		FROM player_history ph
+		JOIN players p ON p.id = ph.player_id
+		WHERE ph.team_id = ? AND ph.season = ?
+	`, match.TeamBID, currentSeason).Scan(&rosterB)
+
+	// 🧩 Fallback to live team_members if empty
+	if len(rosterA) == 0 {
+		DB.Raw(`
+			SELECT p.id AS player_id, p.display_name, p.username, tm.role
+			FROM team_members tm
+			JOIN players p ON p.id = tm.player_id
+			WHERE tm.team_id = ?
+		`, match.TeamAID).Scan(&rosterA)
+	}
+
+	if len(rosterB) == 0 {
+		DB.Raw(`
+			SELECT p.id AS player_id, p.display_name, p.username, tm.role
+			FROM team_members tm
+			JOIN players p ON p.id = tm.player_id
+			WHERE tm.team_id = ?
+		`, match.TeamBID).Scan(&rosterB)
+	}
+
+	// --- Final Response ---
 	respondJSON(w, map[string]any{
 		"match":      match,
 		"teams":      map[string]any{"a": teamA, "b": teamB},
-		"map_scores": filtered, // ✅ unified for both systems
+		"map_scores": filtered,
 		"roster":     map[string]any{"a": rosterA, "b": rosterB},
 	})
 }
@@ -1962,11 +2016,13 @@ func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
 		modJSONErr(w, http.StatusNotFound, "match not found")
 		return
 	}
-	// verify winner belongs to the match
+
+	// ✅ Verify winner belongs to the match
 	if !(req.WinnerTeamID == m.TeamAID || req.WinnerTeamID == m.TeamBID) {
 		modJSONErr(w, http.StatusBadRequest, "winner_team_id not in this match")
 		return
 	}
+
 	var loser uint
 	if req.WinnerTeamID == m.TeamAID {
 		loser = m.TeamBID
@@ -1978,7 +2034,7 @@ func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
 	m.LoserID = &loser
 	m.Status = "Completed"
 
-	// optional: wipe any lingering map rows
+	// 🧹 Clear any lingering map rows
 	_ = DB.Where("match_id = ?", m.ID).Delete(&MatchScore{}).Error
 
 	if err := DB.Save(&m).Error; err != nil {
@@ -1986,7 +2042,20 @@ func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, map[string]any{"success": true, "message": "match forfeited", "match_id": m.ID, "winner": req.WinnerTeamID})
+	// 🧩 Snapshot both teams' rosters for historical accuracy
+	snapshotTeamRoster(m.TeamAID, currentSeason)
+	snapshotTeamRoster(m.TeamBID, currentSeason)
+
+	log.Printf("🏁 Mod marked match #%d as forfeited (Winner: %d, Loser: %d)", m.ID, req.WinnerTeamID, loser)
+
+	respondJSON(w, map[string]any{
+		"success":    true,
+		"message":    "match forfeited",
+		"match_id":   m.ID,
+		"winner":     req.WinnerTeamID,
+		"loser":      loser,
+		"season_log": currentSeason,
+	})
 }
 
 // POST /api/mod/match/double-forfeit
@@ -2002,21 +2071,39 @@ func ModMatchDoubleForfeit(w http.ResponseWriter, r *http.Request) {
 		modJSONErr(w, http.StatusBadRequest, "invalid match_id")
 		return
 	}
+
 	var m Match
 	if err := DB.First(&m, req.MatchID).Error; err != nil {
 		modJSONErr(w, http.StatusNotFound, "match not found")
 		return
 	}
 
+	// 🧹 Clear out any map scores
 	_ = DB.Where("match_id = ?", m.ID).Delete(&MatchScore{}).Error
+
 	m.WinnerID = nil
 	m.LoserID = nil
-	m.Status = "Completed" // Completed (double forfeit)
+	m.Status = "Completed" // double forfeit = still finalized
+
 	if err := DB.Save(&m).Error; err != nil {
 		modJSONErr(w, http.StatusInternalServerError, "failed to set double forfeit")
 		return
 	}
-	respondJSON(w, map[string]any{"success": true, "message": "double forfeit applied", "match_id": m.ID})
+
+	// 🧩 Snapshot both rosters for historical record
+	snapshotTeamRoster(m.TeamAID, currentSeason)
+	snapshotTeamRoster(m.TeamBID, currentSeason)
+
+	log.Printf("🏳️‍⚖️ Mod applied double forfeit on match #%d between teams %d and %d", m.ID, m.TeamAID, m.TeamBID)
+
+	respondJSON(w, map[string]any{
+		"success":    true,
+		"message":    "double forfeit applied",
+		"match_id":   m.ID,
+		"team_a_id":  m.TeamAID,
+		"team_b_id":  m.TeamBID,
+		"season_log": currentSeason,
+	})
 }
 
 // DELETE /api/mod/match
@@ -2299,22 +2386,41 @@ func ModMatchEditScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// clear old rows + reinsert
+	// 🧹 Clear existing map scores
 	DB.Where("match_id = ?", m.ID).Delete(&MatchScore{})
+
+	// 📝 Insert new map data
 	for _, mapData := range req.Maps {
 		DB.Create(&MatchScore{
 			MatchID:    m.ID,
 			MapNumber:  mapData.MapNumber,
-			Gamemode:   mapData.Gamemode,
+			Gamemode:   strings.TrimSpace(mapData.Gamemode),
 			TeamAScore: mapData.TeamAScore,
 			TeamBScore: mapData.TeamBScore,
 		})
 	}
 
+	// 🏁 Mark match completed
 	m.Status = "Completed"
-	DB.Save(&m)
-	log.Printf("✏️ Mod edited scores for match %d", m.ID)
-	respondJSON(w, map[string]any{"success": true, "message": "scores updated"})
+	if err := DB.Save(&m).Error; err != nil {
+		modJSONErr(w, http.StatusInternalServerError, "failed to save updated match")
+		return
+	}
+
+	// 🧩 Snapshot both teams' rosters for historical record
+	snapshotTeamRoster(m.TeamAID, currentSeason)
+	snapshotTeamRoster(m.TeamBID, currentSeason)
+
+	log.Printf("✏️ Mod edited and finalized scores for match #%d (Teams: %d vs %d)", m.ID, m.TeamAID, m.TeamBID)
+
+	respondJSON(w, map[string]any{
+		"success":    true,
+		"message":    "scores updated and rosters snapshotted",
+		"match_id":   m.ID,
+		"team_a_id":  m.TeamAID,
+		"team_b_id":  m.TeamBID,
+		"season_log": currentSeason,
+	})
 }
 
 // POST /api/mod/season/archive
@@ -2649,10 +2755,19 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 
 			updateLeaderboards(winnerID, loserID)
 			log.Printf("🏁 Match #%d completed (Winner: %d, Loser: %d)", match.ID, winnerID, loserID)
+
+			// 🧩 Snapshot both teams' rosters for historical accuracy
+			snapshotTeamRoster(match.TeamAID, currentSeason)
+			snapshotTeamRoster(match.TeamBID, currentSeason)
+
 		} else {
 			match.Status = "Completed"
 			DB.Save(&match)
 			log.Printf("🤝 Match #%d completed (tie)", match.ID)
+
+			// 🧩 Still snapshot for record keeping (tie matches count too)
+			snapshotTeamRoster(match.TeamAID, currentSeason)
+			snapshotTeamRoster(match.TeamBID, currentSeason)
 		}
 
 		respondJSON(w, map[string]any{
@@ -2727,6 +2842,34 @@ func updateLeaderboards(winnerID, loserID uint) {
 
 	log.Printf("📊 Leaderboards updated (ELO %+d / %+d): winner=%d loser=%d",
 		eloWinPoints, eloLossPoints, winnerID, loserID)
+}
+
+// snapshotTeamRoster saves all current members of a team into player_history for the current season (if not already recorded).
+func snapshotTeamRoster(teamID uint, season string) {
+	var members []struct {
+		PlayerID int64
+		Role     string
+	}
+	DB.Table("team_members").Select("player_id, role").Where("team_id = ?", teamID).Scan(&members)
+
+	var team Team
+	DB.First(&team, teamID)
+
+	for _, m := range members {
+		// Only insert if not already logged for this team+season+player
+		var existing PlayerHistory
+		if err := DB.Where("player_id = ? AND team_id = ? AND season = ?", m.PlayerID, teamID, season).
+			First(&existing).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+
+			DB.Create(&PlayerHistory{
+				PlayerID: m.PlayerID,
+				TeamID:   teamID,
+				TeamName: team.Name,
+				Role:     m.Role,
+				Season:   season,
+			})
+		}
+	}
 }
 
 // --- POST /api/mod/team/set-inactive ---
