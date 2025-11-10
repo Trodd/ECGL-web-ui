@@ -72,3 +72,22 @@ CREATE TABLE player_history (
     UNIQUE(player_id, season)
 );
 
+CREATE TABLE IF NOT EXISTS team_history (
+    id SERIAL PRIMARY KEY,
+    team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    old_name TEXT NOT NULL,
+    new_name TEXT NOT NULL,
+    changed_by BIGINT NOT NULL, -- Discord ID of captain/mod
+    changed_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    id SERIAL PRIMARY KEY,
+    roster_locked BOOLEAN DEFAULT FALSE
+);
+
+-- Ensure one row exists
+INSERT INTO settings (id, roster_locked)
+VALUES (1, FALSE)
+ON CONFLICT (id) DO NOTHING;
+

@@ -493,6 +493,7 @@ func main() {
 	r.HandleFunc("/api/mod/matches/generate", HandleGenerateWeeklyMatches).Methods("POST")
 	r.HandleFunc("/api/mod/team/set-inactive", HandleModSetTeamInactive).Methods("POST")
 	r.HandleFunc("/api/mod/teams/set-all-inactive", HandleModSetAllTeamsInactive).Methods("POST")
+	r.HandleFunc("/api/mod/team/rename", ModTeamRename).Methods("POST")
 
 	r.HandleFunc("/api/mod/team/adjust-rating", ModTeamAdjustRating).Methods("POST")
 	r.HandleFunc("/api/mod/team/disband", ModTeamDisband).Methods("POST")
@@ -509,6 +510,10 @@ func main() {
 	r.HandleFunc("/api/mod/matches/clear-week", HandleModClearWeek).Methods("POST")
 	r.HandleFunc("/api/team/toggle-status", HandleToggleTeamStatus).Methods("POST")
 	r.HandleFunc("/api/team/toggle-join", HandleToggleTeamJoinAllowed).Methods("POST")
+	r.HandleFunc("/api/mod/team/history", ModGetTeamHistory).Methods("GET")
+	r.HandleFunc("/api/mod/roster/lock-all", ModRosterLockAll).Methods("POST")
+	r.HandleFunc("/api/mod/roster/unlock-all", ModRosterUnlockAll).Methods("POST")
+	r.HandleFunc("/api/mod/roster/status", GetRosterLockStatus).Methods("GET")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()
@@ -534,6 +539,7 @@ func main() {
 	api.HandleFunc("/team/join/decision", HandleJoinRequestDecision).Methods("POST")
 	api.HandleFunc("/team/kick", HandleKickMember).Methods("POST")
 	api.HandleFunc("/team/promote", HandlePromoteMember).Methods("POST")
+	r.HandleFunc("/api/team/rename", CaptainRenameTeam).Methods("POST")
 
 	// Players
 	api.HandleFunc("/register", handleRegister).Methods("POST")

@@ -1181,6 +1181,47 @@ export default function LeagueMod() {
                                     </button>
                                 </div>
                             </div>
+                            {/* 🔒 Roster Lock Controls */}
+                            <div
+                                className="p-3 mt-3 rounded"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h6 className="text-info mb-2">🔒 Roster Lock Controls</h6>
+                                <p className="text-light small mb-2">
+                                    Locking rosters prevents all players from <b>joining</b> or <b>creating</b> teams.
+                                </p>
+
+                                <div className="d-flex flex-wrap gap-2">
+                                    <button
+                                        className="btn btn-outline-warning btn-sm"
+                                        onClick={async () => {
+                                            if (!confirm("⚠️ Lock all rosters? This will block all join/create team actions."))
+                                                return;
+                                            await safePost(
+                                                "/api/mod/roster/lock-all",
+                                                {},
+                                                "All rosters locked"
+                                            );
+                                        }}
+                                    >
+                                        🔒 Lock All Rosters
+                                    </button>
+
+                                    <button
+                                        className="btn btn-outline-success btn-sm"
+                                        onClick={async () => {
+                                            if (!confirm("✅ Unlock all rosters and allow joins/creations?")) return;
+                                            await safePost(
+                                                "/api/mod/roster/unlock-all",
+                                                {},
+                                                "All rosters unlocked"
+                                            );
+                                        }}
+                                    >
+                                        🔓 Unlock All Rosters
+                                    </button>
+                                </div>
+                            </div>
                         </>
                     }
                 />
@@ -1265,6 +1306,14 @@ export default function LeagueMod() {
                         </div>
                     }
                 />
+                {/* 📜 TEAM HISTORY */}
+                <AccordionItem
+                    id="teamHistory"
+                    title="📜 Team Rename Logs"
+                    children={
+                        <TeamRenameHistory urlBase={urlBase} />
+                    }
+                />
             </div>
         </div>
     );
@@ -1290,3 +1339,98 @@ function AccordionItem({ id, title, children }) {
         </div>
     );
 }
+
+function TeamRenameHistory({ urlBase }) {
+    const [logs, setLogs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
+    const [teamFilter, setTeamFilter] = useState("");
+
+    useEffect(() => {
+        async function loadLogs() {
+            try {
+                setLoading(true);
+                const url = teamFilter
+                    ? `${urlBase}/api/mod/team/history?team_id=${teamFilter}`
+                    : `${urlBase}/api/mod/team/history`;
+                const res = await axios.get(url, { withCredentials: true });
+                setLogs(res.data?.history || []);
+                setError("");
+            } catch (err) {
+                console.error("❌ Failed to fetch rename history:", err);
+                setError("Failed to load rename history.");
+            } finally {
+                setLoading(false);
+            }
+        }
+        loadLogs();
+    }, [teamFilter, urlBase]);
+
+    return (
+        <div>
+            <h6 className="text-light mb-3">📜 Team Rename Logs</h6>
+
+            <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+                <input
+                    type="number"
+                    className="form-control bg-dark text-light"
+                    placeholder="Filter by Team ID..."
+                    style={{ maxWidth: 180 }}
+                    value={teamFilter}
+                    onChange={(e) => setTeamFilter(e.target.value)}
+                />
+                <button
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={() => setTeamFilter("")}
+                >
+                    Clear Filter
+                </button>
+            </div>
+
+            {loading ? (
+                <p className="text-light">Loading rename logs...</p>
+            ) : error ? (
+                <div className="alert alert-danger">{error}</div>
+            ) : logs.length === 0 ? (
+                <p className="text-muted">No rename logs found.</p>
+            ) : (
+                <div className="table-responsive">
+                    <table className="table table-dark table-striped align-middle text-center">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Team ID</th>
+                                <th>Old Name</th>
+                                <th>New Name</th>
+                                <th>Changed By</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {logs.map((log, idx) => (
+                                <tr key={log.id}>
+                                    <td>{idx + 1}</td>
+                                    <td>{log.team_id}</td>
+                                    <td className="text-danger">{log.old_name}</td>
+                                    <td className="text-success">{log.new_name}</td>
+                                    <td className="text-info">
+                                        {log.changer
+                                            ? `${log.changer} (${log.changed_by})`
+                                            : log.changed_by}
+                                    </td>
+                                    <td className="text-muted">
+                                        {new Date(log.changed_at).toLocaleString([], {
+                                            dateStyle: "medium",
+                                            timeStyle: "short",
+                                        })}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+}
+

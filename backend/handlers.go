@@ -600,8 +600,9 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 🚫 Prevent join if roster globally locked
-	if rosterLocked {
-		http.Error(w, "Roster is currently locked. Joining teams is disabled.", http.StatusForbidden)
+	var rosterLocked bool
+	if err := DB.Raw("SELECT roster_locked FROM settings WHERE id = 1").Scan(&rosterLocked).Error; err == nil && rosterLocked {
+		http.Error(w, "Roster lock is active — joining teams is disabled.", http.StatusForbidden)
 		return
 	}
 
@@ -671,6 +672,13 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	// 🚫 Prevent banned players from creating a team
 	if strings.EqualFold(player.Role, "Banned") {
 		http.Error(w, "Your account is banned from creating teams.", http.StatusForbidden)
+		return
+	}
+
+	// 🚫 Prevent team creation when global roster lock is active
+	var rosterLocked bool
+	if err := DB.Raw("SELECT roster_locked FROM settings WHERE id = 1").Scan(&rosterLocked).Error; err == nil && rosterLocked {
+		http.Error(w, "Roster lock is active — team creation disabled", http.StatusForbidden)
 		return
 	}
 
@@ -3013,4 +3021,218 @@ func HandleModRenameTeam(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": fmt.Sprintf("Renamed team #%d to '%s'", req.TeamID, req.NewName),
 	})
+}
+
+// Rename a team (League Mod only)
+func ModTeamRename(w http.ResponseWriter, r *http.Request) {
+	modIDStr, ok := requireLeagueMod(w, r)
+	if !ok {
+		return
+	}
+
+	// Convert the string ID (Discord ID) to int64 safely
+	modID, _ := strconv.ParseInt(modIDStr, 10, 64)
+
+	var req struct {
+		TeamID  uint   `json:"team_id"`
+		NewName string `json:"new_name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TeamID == 0 || req.NewName == "" {
+		modJSONErr(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	var team Team
+	if err := DB.First(&team, req.TeamID).Error; err != nil {
+		modJSONErr(w, http.StatusNotFound, "team not found")
+		return
+	}
+
+	// Check for duplicate names
+	var exists int64
+	DB.Model(&Team{}).Where("LOWER(name) = LOWER(?) AND id <> ?", req.NewName, req.TeamID).Count(&exists)
+	if exists > 0 {
+		modJSONErr(w, http.StatusConflict, "team name already exists")
+		return
+	}
+
+	// ✅ Save old name before changing
+	oldName := team.Name
+	team.Name = req.NewName
+
+	if err := DB.Save(&team).Error; err != nil {
+		modJSONErr(w, http.StatusInternalServerError, "failed to rename team")
+		return
+	}
+
+	// 🧾 Log rename history
+	_ = DB.Exec(`
+		INSERT INTO team_history (team_id, old_name, new_name, changed_by)
+		VALUES (?, ?, ?, ?)
+	`, team.ID, oldName, team.Name, modID)
+
+	log.Printf("🧰 [MOD] Renamed team #%d: '%s' → '%s' (by mod %d)", team.ID, oldName, team.Name, modID)
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "team renamed successfully",
+		"team":    team,
+	})
+}
+
+// Captain rename team (limited to their own team)
+func CaptainRenameTeam(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "session")
+	discordID, ok := session.Values["discord_id"].(string)
+	if !ok || discordID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	playerID, _ := strconv.ParseInt(discordID, 10, 64)
+
+	var req struct {
+		TeamID  uint   `json:"team_id"`
+		NewName string `json:"new_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TeamID == 0 || req.NewName == "" {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	// 🔒 Verify this player is the captain of the given team
+	var member TeamMember
+	if err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, playerID).First(&member).Error; err != nil {
+		http.Error(w, "not part of this team", http.StatusForbidden)
+		return
+	}
+	if strings.ToLower(member.Role) != "captain" {
+		http.Error(w, "only captains can rename the team", http.StatusForbidden)
+		return
+	}
+
+	// ✅ Verify team exists
+	var team Team
+	if err := DB.First(&team, req.TeamID).Error; err != nil {
+		http.Error(w, "team not found", http.StatusNotFound)
+		return
+	}
+
+	// 🚫 Prevent duplicate names
+	var exists int64
+	DB.Model(&Team{}).Where("LOWER(name) = LOWER(?) AND id <> ?", req.NewName, req.TeamID).Count(&exists)
+	if exists > 0 {
+		http.Error(w, "team name already taken", http.StatusConflict)
+		return
+	}
+
+	// ✅ Save old name before changing
+	oldName := team.Name
+	team.Name = req.NewName
+
+	if err := DB.Save(&team).Error; err != nil {
+		http.Error(w, "failed to rename team", http.StatusInternalServerError)
+		return
+	}
+
+	// 🧾 Log rename history
+	_ = DB.Exec(`
+		INSERT INTO team_history (team_id, old_name, new_name, changed_by)
+		VALUES (?, ?, ?, ?)
+	`, team.ID, oldName, team.Name, playerID)
+
+	log.Printf("🧢 Captain renamed team #%d: '%s' → '%s' (player %d)", team.ID, oldName, team.Name, playerID)
+
+	respondJSON(w, map[string]any{"success": true, "team": team})
+}
+
+// Get all team rename history (League Mod only)
+func ModGetTeamHistory(w http.ResponseWriter, r *http.Request) {
+
+	// Optional filter: ?team_id=###
+	teamIDParam := r.URL.Query().Get("team_id")
+	var teamID int
+	if teamIDParam != "" {
+		if val, err := strconv.Atoi(teamIDParam); err == nil {
+			teamID = val
+		}
+	}
+
+	type HistoryRow struct {
+		ID        uint      `json:"id"`
+		TeamID    uint      `json:"team_id"`
+		OldName   string    `json:"old_name"`
+		NewName   string    `json:"new_name"`
+		ChangedBy int64     `json:"changed_by"`
+		ChangedAt time.Time `json:"changed_at"`
+		Changer   string    `json:"changer"` // username if available
+	}
+
+	query := `
+		SELECT 
+			th.id, th.team_id, th.old_name, th.new_name, th.changed_by, th.changed_at,
+			COALESCE(p.display_name, p.username, 'Unknown') AS changer
+		FROM team_history th
+		LEFT JOIN players p ON p.id = th.changed_by
+	`
+	if teamID > 0 {
+		query += " WHERE th.team_id = ?"
+	}
+
+	query += " ORDER BY th.changed_at DESC LIMIT 100"
+
+	var rows []HistoryRow
+	var err error
+	if teamID > 0 {
+		err = DB.Raw(query, teamID).Scan(&rows).Error
+	} else {
+		err = DB.Raw(query).Scan(&rows).Error
+	}
+
+	if err != nil {
+		log.Printf("❌ ModGetTeamHistory: query failed: %v", err)
+		http.Error(w, "failed to fetch history", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"count":   len(rows),
+		"history": rows,
+	})
+}
+
+// / Lock all rosters
+func ModRosterLockAll(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+	if err := DB.Exec("UPDATE settings SET roster_locked = TRUE WHERE id = 1").Error; err != nil {
+		modJSONErr(w, http.StatusInternalServerError, "failed to enable roster lock")
+		return
+	}
+	DB.Exec("UPDATE teams SET join_allowed = FALSE")
+	respondJSON(w, map[string]any{"success": true, "locked": true})
+}
+
+// Unlock all rosters
+func ModRosterUnlockAll(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+	if err := DB.Exec("UPDATE settings SET roster_locked = FALSE WHERE id = 1").Error; err != nil {
+		modJSONErr(w, http.StatusInternalServerError, "failed to disable roster lock")
+		return
+	}
+	respondJSON(w, map[string]any{"success": true, "locked": false})
+}
+
+// Get global roster lock status
+func GetRosterLockStatus(w http.ResponseWriter, r *http.Request) {
+	var locked bool
+	if err := DB.Raw("SELECT roster_locked FROM settings WHERE id = 1").Scan(&locked).Error; err != nil {
+		http.Error(w, "failed to fetch status", http.StatusInternalServerError)
+		return
+	}
+	respondJSON(w, map[string]any{"locked": locked})
 }

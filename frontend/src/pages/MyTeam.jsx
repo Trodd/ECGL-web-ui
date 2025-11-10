@@ -15,6 +15,7 @@ export default function MyTeam() {
   const [msg, setMsg] = useState("");
   const [selectedSeason, setSelectedSeason] = useState("All");
   const [currentSeason, setCurrentSeason] = useState("Preseason");
+  const [newTeamName, setNewTeamName] = useState("");
 
   const urlBase = import.meta.env.VITE_API_URL;
   const sectionStyle = {
@@ -26,6 +27,22 @@ export default function MyTeam() {
     maxWidth: "800px",
     margin: "0 auto 1.5rem auto",
   };
+
+  const [rosterLocked, setRosterLocked] = useState(false);
+
+  useEffect(() => {
+    async function loadRosterLockStatus() {
+      try {
+        const res = await axios.get(`${urlBase}/api/mod/roster/status`, {
+          withCredentials: true,
+        });
+        setRosterLocked(!!res.data.locked);
+      } catch {
+        setRosterLocked(false);
+      }
+    }
+    loadRosterLockStatus();
+  }, []);
 
   async function loadTeam() {
     try {
@@ -185,7 +202,7 @@ export default function MyTeam() {
       style={{ width: "100%", minHeight: "100vh", padding: "2rem 1rem" }}
     >
       <div style={{ maxWidth: "900px", width: "100%" }}>
-        <h2>🧑 My Team: {team.name}</h2>
+        <h2>🧑{team.name}</h2>
         <p>Status: {team.status || "Active"}</p>
 
         {msg && (
@@ -229,6 +246,48 @@ export default function MyTeam() {
 
             <h5 className="text-light mb-3">⚙️ Team Settings</h5>
 
+            {/* 🧢 Captain Rename Team */}
+            {myRole === "Captain" && (
+              <div className="mt-3 pt-2 border-top border-secondary">
+                <h6 className="text-info mb-2">✏️ Rename Team</h6>
+                <div className="d-flex align-items-center gap-2">
+                  <input
+                    type="text"
+                    className="form-control bg-dark text-light"
+                    placeholder="Enter new team name..."
+                    value={newTeamName}
+                    onChange={(e) => setNewTeamName(e.target.value)}
+                    style={{ maxWidth: 250 }}
+                  />
+                  <button
+                    className="btn btn-outline-info btn-sm"
+                    onClick={async () => {
+                      if (!newTeamName.trim()) {
+                        alert("Enter a new team name first");
+                        return;
+                      }
+                      try {
+                        const res = await axios.post(
+                          `${urlBase}/api/team/rename`,
+                          { team_id: team.id, new_name: newTeamName.trim() },
+                          { withCredentials: true }
+                        );
+                        alert("✅ Team renamed successfully!");
+                        await loadTeam();
+                      } catch (err) {
+                        console.error("❌ Rename failed:", err);
+                        alert(
+                          err.response?.data || "Failed to rename team — check console."
+                        );
+                      }
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* 🟢 Toggle Active/Inactive */}
             <div className="d-flex align-items-center justify-content-between mb-3">
               <label className="text-light me-2 mb-0 fw-light">Status</label>
@@ -260,12 +319,16 @@ export default function MyTeam() {
             {/* 🔒 Allow Join Requests */}
             <div className="d-flex align-items-center justify-content-between">
               <label className="text-light me-2 mb-0 fw-light">Join Requests</label>
+
               <div className="form-check form-switch m-0">
                 <input
                   className="form-check-input"
                   type="checkbox"
                   checked={!!team.join_allowed}
+                  disabled={rosterLocked} // ✅ disable when global lock active
                   onChange={async (e) => {
+                    if (rosterLocked) return alert("🚫 League roster lock is active — cannot change this setting.");
+
                     const newAllow = e.target.checked;
                     if (!team?.id) return;
 
@@ -282,10 +345,7 @@ export default function MyTeam() {
                         { withCredentials: true }
                       );
 
-                      if (!res.data?.success) {
-                        throw new Error("Backend rejected");
-                      }
-
+                      if (!res.data?.success) throw new Error("Backend rejected");
                       await loadTeam();
                     } catch (err) {
                       console.error("❌ Failed to toggle join:", err);
@@ -299,8 +359,13 @@ export default function MyTeam() {
                     }
                   }}
                 />
+
                 <label className="form-check-label text-light small ms-2">
-                  {team.join_allowed ? "Allowed" : "Blocked"}
+                  {rosterLocked
+                    ? "🔒 Locked by League Mods"
+                    : team.join_allowed
+                      ? "Allowed"
+                      : "Blocked"}
                 </label>
               </div>
             </div>

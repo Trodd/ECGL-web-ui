@@ -15,6 +15,20 @@ export default function Register() {
 
   const urlBase = import.meta.env.VITE_API_URL;
 
+  const [rosterLocked, setRosterLocked] = useState(false); // ✅ Global roster lock flag
+
+  // --- Load roster lock status ---
+  useEffect(() => {
+    axios
+      .get(`${urlBase}/api/mod/roster/status`, { withCredentials: true })
+      .then((res) => {
+        if (res.data?.locked !== undefined) {
+          setRosterLocked(Boolean(res.data.locked));
+        }
+      })
+      .catch(() => setRosterLocked(false));
+  }, []);
+
   // --- Load player + team status ---
   useEffect(() => {
     async function loadStatus() {
@@ -157,66 +171,73 @@ export default function Register() {
           )}
         </h2>
 
+        {/* 🚫 Show roster lock warning if active */}
+        {!isBanned && rosterLocked && (
+          <div
+            className="alert alert-warning small mb-3"
+            style={{ maxWidth: 500 }}
+          >
+            <strong>🚫 Roster Lock Active:</strong> Joining or creating teams is temporarily disabled.
+          </div>
+        )}
+
         {isBanned ? (
           <p className="text-light fw-bold mt-2">
             🚫 Contact a Mod for more info.
           </p>
         ) : (
           <>
-            <h5>👥 Request to Join a Team</h5>
-            <div className="mb-3 position-relative" style={{ maxWidth: 300 }}>
-              <input
-                type="text"
-                className="form-control bg-dark text-light"
-                placeholder="Type team name..."
-                value={teamQuery}
-                onChange={(e) => setTeamQuery(e.target.value)}
-              />
-              {teamQuery && (
-                <ul
-                  className="list-group position-absolute w-100"
-                  style={{ zIndex: 1000 }}
-                >
-                  {teams
-                    .filter((t) =>
-                      t.name.toLowerCase().includes(teamQuery.toLowerCase())
-                    )
-                    .slice(0, 5)
-                    .map((t) => (
-                      <li
-                        key={t.id}
-                        className="list-group-item list-group-item-action bg-dark text-light"
-                        onClick={() => handleRequestJoin(t.name)}
-                        style={{ cursor: "pointer" }}
-                      >
-                        {t.name}
-                      </li>
-                    ))}
-                </ul>
-              )}
-            </div>
+            {/* 👥 Team Join/Create section — hidden when roster locked */}
+            {!rosterLocked && (
+              <>
+                <h5>👥 Request to Join a Team</h5>
+                <div className="mb-3 position-relative" style={{ maxWidth: 300 }}>
+                  <input
+                    type="text"
+                    className="form-control bg-dark text-light"
+                    placeholder="Type team name..."
+                    value={teamQuery}
+                    onChange={(e) => setTeamQuery(e.target.value)}
+                  />
+                  {teamQuery && (
+                    <ul
+                      className="list-group position-absolute w-100"
+                      style={{ zIndex: 1000 }}
+                    >
+                      {teams
+                        .filter((t) =>
+                          t.name.toLowerCase().includes(teamQuery.toLowerCase())
+                        )
+                        .slice(0, 5)
+                        .map((t) => (
+                          <li
+                            key={t.id}
+                            className="list-group-item list-group-item-action bg-dark text-light"
+                            onClick={() => handleRequestJoin(t.name)}
+                            style={{ cursor: "pointer" }}
+                          >
+                            {t.name}
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                </div>
 
-            <h5 className="text-light fw-light">➕ Create a Team</h5>
-            <div className="d-flex gap-2 mb-3" style={{ maxWidth: 300 }}>
-              <input
-                type="text"
-                className="form-control bg-dark text-light"
-                placeholder="Team name"
-                value={newTeamName}
-                onChange={(e) => setNewTeamName(e.target.value)}
-              />
-              <button className="btn btn-info" onClick={handleCreateTeam}>
-                Create
-              </button>
-            </div>
-
-            {/* ✅ Unregister only visible for non-banned players */}
-            <button
-              className="btn btn-danger mt-3 w-auto"
-              onClick={handleUnregister}
-            >
-              Unregister
-            </button>
+                <h5 className="text-light fw-light">➕ Create a Team</h5>
+                <div className="d-flex gap-2 mb-3" style={{ maxWidth: 300 }}>
+                  <input
+                    type="text"
+                    className="form-control bg-dark text-light"
+                    placeholder="Team name"
+                    value={newTeamName}
+                    onChange={(e) => setNewTeamName(e.target.value)}
+                  />
+                  <button className="btn btn-info" onClick={handleCreateTeam}>
+                    Create
+                  </button>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
