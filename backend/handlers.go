@@ -122,7 +122,9 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 
 	query := DB.Table("players").
 		Select("id, username, display_name, role, device, timezone").
-		Where("username <> ''")
+		Where("username <> ''").
+		Where("display_name <> ''").
+		Where("role IS NOT NULL AND role <> '' AND role <> 'Unregistered'")
 
 	// ✅ Apply role filter if provided (case-insensitive)
 	if roleFilter != "" {
@@ -584,6 +586,12 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🚫 Block banned players
+	if strings.EqualFold(player.Role, "Banned") {
+		http.Error(w, "Your account is banned from joining teams.", http.StatusForbidden)
+		return
+	}
+
 	// ensure team exists
 	var team Team
 	if err := DB.First(&team, req.TeamID).Error; err != nil {
@@ -657,6 +665,12 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	var player Player
 	if err := DB.First(&player, playerID).Error; err != nil {
 		http.Error(w, "Player not found", http.StatusNotFound)
+		return
+	}
+
+	// 🚫 Prevent banned players from creating a team
+	if strings.EqualFold(player.Role, "Banned") {
+		http.Error(w, "Your account is banned from creating teams.", http.StatusForbidden)
 		return
 	}
 

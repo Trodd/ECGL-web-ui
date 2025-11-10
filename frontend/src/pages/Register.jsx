@@ -145,11 +145,23 @@ export default function Register() {
 
   // --- Registered but no team ---
   if (me?.registered && !team) {
+    const isBanned = me?.role?.toLowerCase() === "banned";
+
     return (
       <div className="text-light">
-        <h2>✅ You’re registered as a {me.role}</h2>
+        <h2 className="mb-3">
+          {isBanned ? (
+            <span className="text-danger">🚫 Your account has been banned</span>
+          ) : (
+            <>✅ You’re registered as a {me.role}</>
+          )}
+        </h2>
 
-        {me.role?.toLowerCase() === "player" && (
+        {isBanned ? (
+          <p className="text-light fw-bold mt-2">
+            🚫 Contact a Mod for more info.
+          </p>
+        ) : (
           <>
             <h5>👥 Request to Join a Team</h5>
             <div className="mb-3 position-relative" style={{ maxWidth: 300 }}>
@@ -161,7 +173,10 @@ export default function Register() {
                 onChange={(e) => setTeamQuery(e.target.value)}
               />
               {teamQuery && (
-                <ul className="list-group position-absolute w-100" style={{ zIndex: 1000 }}>
+                <ul
+                  className="list-group position-absolute w-100"
+                  style={{ zIndex: 1000 }}
+                >
                   {teams
                     .filter((t) =>
                       t.name.toLowerCase().includes(teamQuery.toLowerCase())
@@ -194,12 +209,16 @@ export default function Register() {
                 Create
               </button>
             </div>
+
+            {/* ✅ Unregister only visible for non-banned players */}
+            <button
+              className="btn btn-danger mt-3 w-auto"
+              onClick={handleUnregister}
+            >
+              Unregister
+            </button>
           </>
         )}
-
-        <button className="btn btn-danger mt-3 w-auto" onClick={handleUnregister}>
-          Unregister
-        </button>
       </div>
     );
   }

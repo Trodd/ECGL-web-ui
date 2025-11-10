@@ -81,15 +81,15 @@ export default function Players() {
 
   return (
     <div>
-      <h2>👥 Registered Players</h2>
+      <h2 className="text-light mb-3">👥 Registered Players</h2>
 
       {error && <div className="alert alert-danger">{error}</div>}
 
       {/* Filters */}
-      <div className="d-flex flex-wrap gap-2 mb-3">
+      <div className="d-flex flex-wrap gap-2 mb-3 align-items-center">
         <input
           type="text"
-          className="form-control"
+          className="form-control bg-dark text-light"
           style={{ maxWidth: 240, minWidth: 180 }}
           placeholder="🔍 Search name"
           value={search}
@@ -97,7 +97,7 @@ export default function Players() {
         />
 
         <select
-          className="form-select"
+          className="form-select bg-dark text-light"
           style={{ maxWidth: 200, minWidth: 160 }}
           value={roleFilter}
           onChange={(e) => setRoleFilter(e.target.value || "all")}
@@ -105,15 +105,16 @@ export default function Players() {
           <option value="all">All Roles</option>
           <option value="player">Player</option>
           <option value="league sub">League Sub</option>
+          <option value="banned">Banned</option>
         </select>
       </div>
 
       {loading ? (
-        <p>Loading players…</p>
+        <p className="text-light">Loading players…</p>
       ) : filteredPlayers.length === 0 ? (
-        <p>No players found.</p>
+        <p className="text-muted">No players found.</p>
       ) : (
-        <table className="table table-dark table-striped">
+        <table className="table table-dark table-striped align-middle">
           <thead>
             <tr>
               <th>#</th>
@@ -123,29 +124,25 @@ export default function Players() {
             </tr>
           </thead>
           <tbody>
-            {filteredPlayers.map((p, idx) => {
-              const key = p?.id ?? `row-${idx}`;
-              return (
-                <tr key={key}>
-                  <td>{idx + 1}</td>
-                  <td>
-                    {p.id ? (
-                      <Link
-                        to={`/players/${p.id}`}
-                        className="text-info text-decoration-none"
-                        style={{ fontWeight: "bold" }}
-                      >
-                        {p.display_name || "Unknown"}
-                      </Link>
-                    ) : (
-                      p.display_name || "Unknown"
-                    )}
-                  </td>
-                  <td>{p.role || "-"}</td>
-                  <td>{p.timezone || "-"}</td>
-                </tr>
-              );
-            })}
+            {filteredPlayers.map((p, idx) => (
+              <tr key={p.id ?? idx}>
+                <td>{idx + 1}</td>
+                <td>
+                  {p.id ? (
+                    <Link
+                      to={`/players/${p.id}`}
+                      className="text-info text-decoration-none fw-bold"
+                    >
+                      {p.display_name || "Unknown"}
+                    </Link>
+                  ) : (
+                    p.display_name || "Unknown"
+                  )}
+                </td>
+                <td>{p.role || "-"}</td>
+                <td>{p.timezone || "-"}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
