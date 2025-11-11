@@ -480,6 +480,7 @@ func main() {
 	r.HandleFunc("/api/match/schedule", HandleScheduleMatch).Methods("POST")
 	r.HandleFunc("/api/match/submit-score", HandleSubmitScore).Methods("POST")
 	r.HandleFunc("/api/matches/public", HandlePublicMatches).Methods("GET")
+	r.HandleFunc("/api/settings", GetSettings).Methods("GET")
 
 	// League Mod routes (all requireLeagueMod inside handlers)
 	r.HandleFunc("/api/mod/match/reset", ModMatchReset).Methods("POST")
@@ -514,6 +515,7 @@ func main() {
 	r.HandleFunc("/api/mod/roster/lock-all", ModRosterLockAll).Methods("POST")
 	r.HandleFunc("/api/mod/roster/unlock-all", ModRosterUnlockAll).Methods("POST")
 	r.HandleFunc("/api/mod/roster/status", GetRosterLockStatus).Methods("GET")
+	r.HandleFunc("/api/mod/team/history", ModTeamHistory).Methods("GET")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()

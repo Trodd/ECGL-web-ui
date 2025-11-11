@@ -12,6 +12,15 @@ export default function Register() {
   const [teams, setTeams] = useState([]);
   const [teamQuery, setTeamQuery] = useState("");
   const [newTeamName, setNewTeamName] = useState("");
+  const [settings, setSettings] = useState({ min_team_players: 3, max_team_players: 6 });
+  useEffect(() => {
+    axios
+      .get(`${urlBase}/api/settings`)
+      .then((res) => {
+        if (res.data) setSettings(res.data);
+      })
+      .catch(() => setSettings({ min_team_players: 3, max_team_players: 6 }));
+  }, []);
 
   const urlBase = import.meta.env.VITE_API_URL;
 
@@ -124,16 +133,49 @@ export default function Register() {
       alert("❌ Team not found");
       return;
     }
+
     try {
+      // 🚫 Check for roster lock before anything
+      if (rosterLocked) {
+        alert("⏳ Roster lock is active — you cannot join or create teams right now.");
+        return;
+      }
+
+      // 🧾 Fetch settings for limits (min/max players)
+      const settingsRes = await axios.get(`${urlBase}/api/settings`);
+      const maxPlayers = settingsRes.data?.max_team_players ?? 6;
+
+      // 🧮 Check current team size
+      const teamRes = await axios.get(`${urlBase}/api/team/${team.id}`);
+      const currentCount = teamRes.data?.roster?.length ?? 0;
+
+      // 🚫 Prevent joining full teams
+      if (currentCount >= maxPlayers) {
+        alert(
+          `🚫 "${team.name}" already has the maximum number of players (${maxPlayers}). You cannot join this team.`
+        );
+        return;
+      }
+
+      // ✅ Proceed normally
       await axios.post(
         `${urlBase}/api/team/request`,
         { team_id: team.id },
         { withCredentials: true }
       );
+
       alert(`✅ Join request submitted to "${team.name}"!`);
       setTeamQuery("");
-    } catch {
-      alert("Team is not accepting join requests at this moment");
+    } catch (err) {
+      console.error("Join request failed:", err);
+      if (err.response?.status === 403) {
+        alert(
+          err.response.data ||
+          "🚫 You cannot join this team right now (roster may be locked or team is full)."
+        );
+      } else {
+        alert("⚠️ Failed to submit join request. Please try again later.");
+      }
     }
   }
 

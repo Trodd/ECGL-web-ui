@@ -248,43 +248,41 @@ export default function MyTeam() {
 
             {/* 🧢 Captain Rename Team */}
             {myRole === "Captain" && (
-              <div className="mt-3 pt-2 border-top border-secondary">
+              <div className="mt-3 pt-3 border-top border-secondary" style={{ maxWidth: 300 }}>
                 <h6 className="text-info mb-2">✏️ Rename Team</h6>
-                <div className="d-flex align-items-center gap-2">
-                  <input
-                    type="text"
-                    className="form-control bg-dark text-light"
-                    placeholder="Enter new team name..."
-                    value={newTeamName}
-                    onChange={(e) => setNewTeamName(e.target.value)}
-                    style={{ maxWidth: 250 }}
-                  />
-                  <button
-                    className="btn btn-outline-info btn-sm"
-                    onClick={async () => {
-                      if (!newTeamName.trim()) {
-                        alert("Enter a new team name first");
-                        return;
-                      }
-                      try {
-                        const res = await axios.post(
-                          `${urlBase}/api/team/rename`,
-                          { team_id: team.id, new_name: newTeamName.trim() },
-                          { withCredentials: true }
-                        );
-                        alert("✅ Team renamed successfully!");
-                        await loadTeam();
-                      } catch (err) {
-                        console.error("❌ Rename failed:", err);
-                        alert(
-                          err.response?.data || "Failed to rename team — check console."
-                        );
-                      }
-                    }}
-                  >
-                    Save
-                  </button>
-                </div>
+                <input
+                  type="text"
+                  className="form-control bg-dark text-light mb-2"
+                  placeholder="Enter new team name..."
+                  value={newTeamName}
+                  onChange={(e) => setNewTeamName(e.target.value)}
+                />
+                <button
+                  className="btn btn-outline-info btn-sm"
+                  onClick={async () => {
+                    if (!newTeamName.trim()) {
+                      alert("Enter a new team name first");
+                      return;
+                    }
+                    try {
+                      const res = await axios.post(
+                        `${urlBase}/api/team/rename`,
+                        { team_id: team.id, new_name: newTeamName.trim() },
+                        { withCredentials: true }
+                      );
+                      alert("✅ Team renamed successfully!");
+                      await loadTeam();
+                      setNewTeamName("");
+                    } catch (err) {
+                      console.error("❌ Rename failed:", err);
+                      alert(
+                        err.response?.data || "Failed to rename team — check console."
+                      );
+                    }
+                  }}
+                >
+                  Save
+                </button>
               </div>
             )}
 

@@ -1344,16 +1344,16 @@ function TeamRenameHistory({ urlBase }) {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [teamFilter, setTeamFilter] = useState("");
+    const [query, setQuery] = useState("");
 
     useEffect(() => {
         async function loadLogs() {
             try {
                 setLoading(true);
-                const url = teamFilter
-                    ? `${urlBase}/api/mod/team/history?team_id=${teamFilter}`
-                    : `${urlBase}/api/mod/team/history`;
-                const res = await axios.get(url, { withCredentials: true });
+                const res = await axios.get(
+                    `${urlBase}/api/mod/team/history?q=${encodeURIComponent(query)}`,
+                    { withCredentials: true }
+                );
                 setLogs(res.data?.history || []);
                 setError("");
             } catch (err) {
@@ -1364,7 +1364,7 @@ function TeamRenameHistory({ urlBase }) {
             }
         }
         loadLogs();
-    }, [teamFilter, urlBase]);
+    }, [query, urlBase]);
 
     return (
         <div>
@@ -1372,18 +1372,18 @@ function TeamRenameHistory({ urlBase }) {
 
             <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
                 <input
-                    type="number"
+                    type="text"
                     className="form-control bg-dark text-light"
-                    placeholder="Filter by Team ID..."
-                    style={{ maxWidth: 180 }}
-                    value={teamFilter}
-                    onChange={(e) => setTeamFilter(e.target.value)}
+                    placeholder="Search by player, old name, or new name..."
+                    style={{ maxWidth: 300 }}
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
                 />
                 <button
                     className="btn btn-outline-secondary btn-sm"
-                    onClick={() => setTeamFilter("")}
+                    onClick={() => setQuery("")}
                 >
-                    Clear Filter
+                    Clear
                 </button>
             </div>
 
@@ -1418,7 +1418,7 @@ function TeamRenameHistory({ urlBase }) {
                                             ? `${log.changer} (${log.changed_by})`
                                             : log.changed_by}
                                     </td>
-                                    <td className="text-muted">
+                                    <td className="text-light">
                                         {new Date(log.changed_at).toLocaleString([], {
                                             dateStyle: "medium",
                                             timeStyle: "short",
@@ -1433,4 +1433,3 @@ function TeamRenameHistory({ urlBase }) {
         </div>
     );
 }
-

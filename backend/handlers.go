@@ -86,6 +86,21 @@ func contains(slice []uint, val uint) bool {
 	return false
 }
 
+// --- GET /api/settings ---
+// Provides global configuration and state values for the frontend (roster lock, team size limits, etc.)
+func GetSettings(w http.ResponseWriter, r *http.Request) {
+	// Safe defaults
+	minPlayers := getEnvInt("MIN_TEAM_PLAYERS", 3)
+	maxPlayers := getEnvInt("MAX_TEAM_PLAYERS", 6)
+
+	// respondJSON is your existing helper (used elsewhere in handlers)
+	respondJSON(w, map[string]any{
+		"roster_locked":    rosterLocked, // from global variable or DB table
+		"min_team_players": minPlayers,
+		"max_team_players": maxPlayers,
+	})
+}
+
 func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	session, err := store.Get(r, "session")
 	if err != nil {
@@ -627,6 +642,15 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🚫 Prevent join if team is already full
+	var count int64
+	DB.Model(&TeamMember{}).Where("team_id = ?", team.ID).Count(&count)
+	maxPlayers := getEnvInt("MAX_TEAM_PLAYERS", 6)
+	if count >= int64(maxPlayers) {
+		http.Error(w, fmt.Sprintf("This team already has the maximum of %d players.", maxPlayers), http.StatusForbidden)
+		return
+	}
+
 	// ✅ Create new join request
 	join := TeamJoinRequest{
 		PlayerID: playerID,
@@ -939,11 +963,19 @@ func HandleLeaveTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	playerID, _ := strconv.ParseInt(discordID, 10, 64)
 
-	// verify membership
+	// verify membership (clean logging)
 	var member TeamMember
-	if err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, playerID).
-		First(&member).Error; err != nil {
-		http.Error(w, "Not a team member", http.StatusNotFound)
+	err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, playerID).First(&member).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Printf("ℹ️ Player %d is not a member of team %d (no record found)", playerID, req.TeamID)
+		http.Error(w, "Not a team member", http.StatusForbidden)
+		return
+	}
+
+	if err != nil {
+		log.Printf("❌ DB error while verifying membership for player %d team %d: %v", playerID, req.TeamID, err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
 
@@ -1097,10 +1129,20 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 
 func getMemberRole(teamID uint, playerID int64) (string, error) {
 	var member TeamMember
-	if err := DB.Where("team_id = ? AND player_id = ?", teamID, playerID).
-		First(&member).Error; err != nil {
+	err := DB.Where("team_id = ? AND player_id = ?", teamID, playerID).First(&member).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Clean, friendly log instead of full SQL spam
+		log.Printf("ℹ️ Player %d is not a member of team %d", playerID, teamID)
+		return "", nil // no error, just not found
+	}
+
+	if err != nil {
+		// Actual DB error
+		log.Printf("❌ DB error fetching member role for player %d team %d: %v", playerID, teamID, err)
 		return "", err
 	}
+
 	return member.Role, nil
 }
 
@@ -3235,4 +3277,47 @@ func GetRosterLockStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, map[string]any{"locked": locked})
+}
+
+// --- GET /api/mod/team/history ---
+func ModTeamHistory(w http.ResponseWriter, r *http.Request) {
+	search := strings.TrimSpace(r.URL.Query().Get("q"))
+	teamID := strings.TrimSpace(r.URL.Query().Get("team_id"))
+
+	var rows []struct {
+		ID        uint      `json:"id"`
+		TeamID    uint      `json:"team_id"`
+		OldName   string    `json:"old_name"`
+		NewName   string    `json:"new_name"`
+		ChangedBy string    `json:"changed_by"`
+		Changer   string    `json:"changer"`
+		ChangedAt time.Time `json:"changed_at"`
+	}
+
+	q := DB.Table("team_rename_logs").
+		Select("team_rename_logs.id, team_rename_logs.team_id, team_rename_logs.old_name, team_rename_logs.new_name, team_rename_logs.changed_by, players.display_name AS changer, team_rename_logs.changed_at").
+		Joins("LEFT JOIN players ON players.id = team_rename_logs.changed_by")
+
+	if teamID != "" {
+		q = q.Where("team_rename_logs.team_id = ?", teamID)
+	}
+	if search != "" {
+		searchLike := "%" + search + "%"
+		q = q.Where(`
+			LOWER(team_rename_logs.old_name) LIKE LOWER(?) OR
+			LOWER(team_rename_logs.new_name) LIKE LOWER(?) OR
+			LOWER(players.display_name) LIKE LOWER(?)`,
+			searchLike, searchLike, searchLike)
+	}
+
+	if err := q.Order("team_rename_logs.changed_at DESC").Scan(&rows).Error; err != nil {
+		log.Printf("❌ ModTeamHistory failed: %v", err)
+		http.Error(w, "Failed to fetch rename logs", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"history": rows,
+	})
 }

@@ -191,20 +191,31 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load ALL teams and filter to active only
+	// Load ALL teams and filter to active + roster minimum
 	var allTeams []Team
 	if err := DB.Find(&allTeams).Error; err != nil {
 		http.Error(w, "Failed to load teams", http.StatusInternalServerError)
 		return
 	}
 
+	minPlayers := getEnvInt("MIN_TEAM_PLAYERS", 3)
 	var teams []Team
+
 	for _, t := range allTeams {
-		if strings.EqualFold(t.Status, "Active") {
-			teams = append(teams, t)
-		} else {
+		if !strings.EqualFold(t.Status, "Active") {
 			log.Printf("⏭️ Skipping %s (status: %s)", t.Name, t.Status)
+			continue
 		}
+
+		var playerCount int64
+		DB.Model(&TeamMember{}).Where("team_id = ?", t.ID).Count(&playerCount)
+
+		if playerCount < int64(minPlayers) {
+			log.Printf("🚫 Skipping %s — only %d players (need %d)", t.Name, playerCount, minPlayers)
+			continue
+		}
+
+		teams = append(teams, t)
 	}
 
 	if len(teams) < 2 {
