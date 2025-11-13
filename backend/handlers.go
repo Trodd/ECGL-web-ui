@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -383,16 +384,13 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "session")
 	discordID, _ := session.Values["discord_id"].(string)
 
-	// 🧩 DEV MODE OVERRIDE — allows ?as=<discord_id> for debugging
-	devMode := os.Getenv("DEV_MODE") == "true"
-	if devMode {
+	// DEV MODE override
+	if os.Getenv("DEV_MODE") == "true" {
 		if overrideID := r.URL.Query().Get("as"); overrideID != "" {
-			log.Printf("🧪 [DEV_MODE] Impersonating player %s", overrideID)
 			discordID = overrideID
 		}
 	}
 
-	// 🚫 Still block if no Discord ID and not in dev override
 	if discordID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -400,177 +398,167 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 
 	playerID, _ := strconv.ParseInt(discordID, 10, 64)
 
+	// verify player exists
 	var player Player
 	if err := DB.First(&player, playerID).Error; err != nil {
 		http.Error(w, "player not found", http.StatusNotFound)
 		return
 	}
 
+	// find their team membership
 	var membership TeamMember
-	result := DB.Where("player_id = ?", playerID).Order("team_id DESC").Limit(1).Find(&membership)
+	result := DB.Where("player_id = ?", playerID).
+		Order("team_id DESC").Limit(1).Find(&membership)
+
 	if result.RowsAffected == 0 {
 		respondJSON(w, map[string]any{
-			"team":     nil,
-			"roster":   []any{},
-			"matches":  []any{},
-			"requests": []any{},
-			"myRole":   "",
+			"team": nil, "roster": []any{}, "matches": []any{},
+			"requests": []any{}, "myRole": "",
 		})
-		return
-	} else if result.Error != nil {
-		http.Error(w, "database error", http.StatusInternalServerError)
 		return
 	}
 
+	// load team
 	var team Team
 	if err := DB.First(&team, membership.TeamID).Error; err != nil {
 		http.Error(w, "team not found", http.StatusNotFound)
 		return
 	}
 
-	// --- roster ---
+	// --- Load Current Season (number only) ---
+	// You SHOULD keep the config table
+	var currentSeason string
+	DB.Raw(`SELECT value FROM config WHERE key='current_season' LIMIT 1`).
+		Scan(&currentSeason)
+
+	if strings.TrimSpace(currentSeason) == "" {
+		currentSeason = "0"
+	}
+	currentSeason = strings.TrimSpace(strings.Replace(currentSeason, "Season ", "", 1))
+
+	// --- Prepare match struct ---
+	type MatchWithMaps struct {
+		ID        uint         `json:"id"`
+		MatchCode string       `json:"match_code"`
+		Opponent  string       `json:"opponent"`
+		Date      *time.Time   `json:"date"`
+		Result    string       `json:"result"`
+		Status    string       `json:"status"`
+		Season    string       `json:"season"`
+		TeamAID   uint         `json:"team_a_id"`
+		TeamBID   uint         `json:"team_b_id"`
+		Maps      []MatchScore `json:"maps"`
+	}
+
+	var matches []MatchWithMaps
+
+	rows, err := DB.Raw(`
+        SELECT
+            m.id, m.match_code,
+            CASE WHEN m.team_a_id = @tid THEN t2.name ELSE t1.name END AS opponent,
+            m.scheduled_date,
+            CASE
+                WHEN m.winner_id = @tid THEN 'Win'
+                WHEN m.loser_id = @tid THEN 'Loss'
+                ELSE 'Pending'
+            END AS result,
+            m.status,
+            m.team_a_id, m.team_b_id
+        FROM matches m
+        JOIN teams t1 ON m.team_a_id = t1.id
+        JOIN teams t2 ON m.team_b_id = t2.id
+        WHERE m.team_a_id = @tid OR m.team_b_id = @tid
+        ORDER BY m.scheduled_date DESC NULLS LAST
+    `, sql.Named("tid", membership.TeamID)).Rows()
+
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var m MatchWithMaps
+			if err := rows.Scan(
+				&m.ID, &m.MatchCode, &m.Opponent, &m.Date,
+				&m.Result, &m.Status, &m.TeamAID, &m.TeamBID,
+			); err != nil {
+				continue
+			}
+
+			// 🔥 REAL SEASON LOGIC — decode from match_code
+			parts := strings.Split(m.MatchCode, "-")
+			if len(parts) > 1 && regexp.MustCompile(`^\d+$`).MatchString(parts[0]) {
+				m.Season = parts[0] // "1-Week1-M001" → "1"
+			} else {
+				m.Season = "0" // Preseason (Week1-M001)
+			}
+
+			DB.Where("match_id = ?", m.ID).Find(&m.Maps)
+			matches = append(matches, m)
+		}
+	}
+
+	// --- Sort Active vs Past ---
+	var active []MatchWithMaps
+	var past []MatchWithMaps
+
+	for _, m := range matches {
+
+		seasonMatches := strings.TrimSpace(m.Season) == currentSeason
+		finished := m.Status == "Finished" ||
+			m.Status == "Completed" ||
+			m.Status == "Cancelled" ||
+			m.Status == "Forfeit"
+
+		if seasonMatches && !finished {
+			active = append(active, m)
+		} else {
+			past = append(past, m)
+		}
+	}
+
+	// Active always first
+	matches = append(active, past...)
+
+	// --- Load roster (player list) ---
 	type RosterPlayer struct {
-		ID          string `json:"id"`
+		ID          uint   `json:"id"`
 		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
 		Role        string `json:"role"`
 		Rating      int    `json:"rating"`
 	}
+
 	var roster []RosterPlayer
-	var rosterRows *sql.Rows
-	var err error
-	rosterRows, err = DB.Table("team_members").
+	if err := DB.Table("team_members").
 		Select("players.id, players.username, players.display_name, team_members.role, players.rating").
 		Joins("JOIN players ON players.id = team_members.player_id").
-		Where("team_members.team_id = ?", membership.TeamID).
-		Rows()
-	if err == nil {
-		defer rosterRows.Close()
-		for rosterRows.Next() {
-			var id int64
-			var username, displayName, role string
-			var rating int
-			if err := rosterRows.Scan(&id, &username, &displayName, &role, &rating); err == nil {
-				roster = append(roster, RosterPlayer{
-					ID:          strconv.FormatInt(id, 10),
-					Username:    username,
-					DisplayName: displayName,
-					Role:        role,
-					Rating:      rating,
-				})
-			}
-		}
+		Where("team_members.team_id = ?", team.ID).
+		Scan(&roster).Error; err != nil {
+		log.Printf("❌ GetMyTeam: roster query failed for team %d: %v", team.ID, err)
+		roster = []RosterPlayer{}
 	}
 
-	// --- matches (with map scores + confirmation flags) ---
-	type MatchWithMaps struct {
-		ID                  uint         `json:"id"`
-		MatchCode           string       `json:"match_code"`
-		Opponent            string       `json:"opponent"`
-		Date                *time.Time   `json:"date"`
-		Result              string       `json:"result"`
-		Maps                []MatchScore `json:"maps"`
-		TeamAID             uint         `json:"team_a_id"`
-		TeamBID             uint         `json:"team_b_id"`
-		TeamAScoreConfirmed bool         `json:"team_a_score_confirmed"`
-		TeamBScoreConfirmed bool         `json:"team_b_score_confirmed"`
-		Status              string       `json:"status"`
+	// Fallback: use player_history if no active roster found
+	if len(roster) == 0 {
+		DB.Raw(`
+			SELECT p.id, p.username, p.display_name, ph.role, p.rating
+			FROM player_history ph
+			JOIN players p ON p.id = ph.player_id
+			WHERE ph.team_id = ? AND ph.season = ?
+		`, team.ID, currentSeason).Scan(&roster)
 	}
 
-	var matches []MatchWithMaps
-	matchRows, err := DB.Raw(`
-		SELECT
-			m.id,
-			m.match_code,
-			CASE WHEN m.team_a_id = @id THEN t2.name ELSE t1.name END AS opponent,
-			m.scheduled_date AS date,
-			CASE
-				WHEN m.winner_id = @id THEN 'Win'
-				WHEN m.loser_id = @id THEN 'Loss'
-				ELSE 'Pending'
-			END AS result,
-			m.team_a_id,
-			m.team_b_id,
-			m.team_a_score_confirmed,
-			m.team_b_score_confirmed,
-			m.status
-		FROM matches m
-		JOIN teams t1 ON m.team_a_id = t1.id
-		JOIN teams t2 ON m.team_b_id = t2.id
-		WHERE (m.team_a_id = @id OR m.team_b_id = @id)
-		ORDER BY 
-			CASE 
-				WHEN m.status IN ('Completed','Finished','Forfeit','Cancelled') THEN 1 
-				ELSE 0 
-			END,
-			m.scheduled_date DESC NULLS LAST`,
-		sql.Named("id", membership.TeamID),
-	).Rows()
-
-	if err == nil {
-		defer matchRows.Close()
-		for matchRows.Next() {
-			var m MatchWithMaps
-			if err := matchRows.Scan(
-				&m.ID, &m.MatchCode, &m.Opponent, &m.Date, &m.Result,
-				&m.TeamAID, &m.TeamBID,
-				&m.TeamAScoreConfirmed, &m.TeamBScoreConfirmed,
-				&m.Status,
-			); err != nil {
-				log.Printf("❌ Failed to scan match row: %v", err)
-				continue
-			}
-			var maps []MatchScore
-			DB.Where("match_id = ?", m.ID).Find(&maps)
-
-			// Normalize and attach numeric fields safely
-			for i := range maps {
-				if maps[i].Gamemode == "" {
-					maps[i].Gamemode = "Capture Point"
-				}
-			}
-			m.Maps = maps
-			matches = append(matches, m)
-		}
-	}
-
-	// --- pending join requests ---
-	type JoinRequestResponse struct {
-		ID       string `json:"id"`
-		Username string `json:"username"`
-		Status   string `json:"status"`
-	}
-	var requests []JoinRequestResponse
-	if membership.Role == "Captain" || membership.Role == "Co-Captain" {
-		reqRows, _ := DB.Table("team_join_requests").
-			Select("team_join_requests.id, players.username, team_join_requests.status").
-			Joins("JOIN players ON players.id = team_join_requests.player_id").
-			Where("team_join_requests.team_id = ? AND team_join_requests.status = 'pending'", membership.TeamID).
-			Rows()
-		defer reqRows.Close()
-		for reqRows.Next() {
-			var id uint
-			var username, status string
-			if err := reqRows.Scan(&id, &username, &status); err == nil {
-				requests = append(requests, JoinRequestResponse{
-					ID:       strconv.FormatUint(uint64(id), 10),
-					Username: username,
-					Status:   status,
-				})
-			}
-		}
+	// Ensure non-nil slice
+	if roster == nil {
+		roster = []RosterPlayer{}
 	}
 
 	respondJSON(w, map[string]any{
 		"team": map[string]any{
-			"id":           team.ID,
-			"name":         team.Name,
-			"status":       team.Status,
-			"join_allowed": team.JoinAllowed,
+			"id": team.ID, "name": team.Name,
+			"status": team.Status, "join_allowed": team.JoinAllowed,
 		},
 		"roster":   roster,
 		"matches":  matches,
-		"requests": requests,
+		"requests": []any{},
 		"myRole":   membership.Role,
 	})
 }
@@ -1033,22 +1021,36 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 
 	var rows []MatchRow
 	if err := DB.Raw(`
-	SELECT 
-		m.id,
-		m.match_code,
-		m.team_a_id,
-		t1.name AS team_a,
-		m.team_b_id,
-		t2.name AS team_b,
-		m.scheduled_date,
-		m.status,
-		m.winner_id,
-		m.loser_id
-	FROM matches m
-	JOIN teams t1 ON t1.id = m.team_a_id
-	JOIN teams t2 ON t2.id = m.team_b_id
-	ORDER BY m.created_at DESC
-`).Scan(&rows).Error; err != nil {
+        SELECT 
+            m.id,
+            m.match_code,
+            m.team_a_id,
+            t1.name AS team_a,
+            m.team_b_id,
+            t2.name AS team_b,
+            m.scheduled_date,
+            m.status,
+            m.winner_id,
+            m.loser_id
+        FROM matches m
+        JOIN teams t1 ON t1.id = m.team_a_id
+        JOIN teams t2 ON t2.id = m.team_b_id
+        
+        -- 🔥 Proper season/week sorting (DESC = Newest on top)
+        ORDER BY 
+            CASE 
+                WHEN split_part(m.match_code, '-', 1) ~ '^[0-9]+$' 
+                THEN CAST(split_part(m.match_code, '-', 1) AS INTEGER)
+                ELSE 0
+            END DESC,
+            CAST(
+                split_part(
+                    split_part(m.match_code, 'Week', 2),
+                    '-', 1
+                ) AS INTEGER
+            ) DESC,
+            m.match_code DESC
+    `).Scan(&rows).Error; err != nil {
 		log.Printf("❌ HandlePublicMatches query failed: %v", err)
 		http.Error(w, "failed to fetch matches", http.StatusInternalServerError)
 		return
@@ -1074,7 +1076,6 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 	for _, m := range rows {
 		seasonLabel, weekLabel := deriveSeasonAndWeek(m.MatchCode)
 
-		// ✅ Normalize missing season/week safely
 		if seasonLabel == "" || strings.EqualFold(seasonLabel, "null") {
 			seasonLabel = "Preseason"
 		}
@@ -1098,7 +1099,7 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// --- Filter by season/week query if provided ---
+	// Filter by query
 	var filtered []PublicMatch
 	for _, m := range normalized {
 		if (season == "" || strings.EqualFold(m.Season, season)) &&
@@ -1107,10 +1108,9 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// --- Group by season + week ---
+	// Group by season + week
 	grouped := map[string]map[string][]PublicMatch{}
 	for _, m := range filtered {
-		// ✅ Force empty/null seasons into "Preseason" here too (safety net)
 		if m.Season == "" || strings.EqualFold(m.Season, "null") {
 			m.Season = "Preseason"
 		}
@@ -1120,7 +1120,6 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 		grouped[m.Season][m.Week] = append(grouped[m.Season][m.Week], m)
 	}
 
-	// --- Return clean response ---
 	respondJSON(w, map[string]any{
 		"success": true,
 		"matches": grouped,
@@ -3319,5 +3318,127 @@ func ModTeamHistory(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{
 		"success": true,
 		"history": rows,
+	})
+}
+
+// --- League Mod: Add player to a team manually (with auto role adjustment) ---
+func ModAddPlayerToTeam(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		PlayerID int64  `json:"player_id"`
+		TeamID   uint   `json:"team_id"`
+		Role     string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		modJSONErr(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if req.PlayerID == 0 || req.TeamID == 0 {
+		modJSONErr(w, http.StatusBadRequest, "missing player_id or team_id")
+		return
+	}
+
+	// Normalize role
+	role := strings.Title(strings.ToLower(req.Role))
+	if role == "" {
+		role = "Member"
+	}
+	if role != "Member" && role != "Co-Captain" && role != "Captain" {
+		modJSONErr(w, http.StatusBadRequest, "invalid role")
+		return
+	}
+
+	// ✅ Check if player already belongs to a team
+	var existing TeamMember
+	if err := DB.Where("player_id = ?", req.PlayerID).First(&existing).Error; err == nil {
+		modJSONErr(w, http.StatusConflict, "player already on a team")
+		return
+	}
+
+	// ✅ Auto-demote existing captains/co-captains if adding a Captain
+	if role == "Captain" {
+		// Step 1: Demote any current Captain → Co-Captain
+		DB.Model(&TeamMember{}).
+			Where("team_id = ? AND role = ?", req.TeamID, "Captain").
+			Update("role", "Co-Captain")
+
+		// Step 2: Demote any existing Co-Captain → Member
+		DB.Model(&TeamMember{}).
+			Where("team_id = ? AND role = ?", req.TeamID, "Co-Captain").
+			Update("role", "Member")
+	}
+
+	// ✅ Create new membership
+	member := TeamMember{
+		PlayerID: req.PlayerID,
+		TeamID:   req.TeamID,
+		Role:     role,
+	}
+	log.Printf("🧩 ADD DEBUG: team_id=%v player_id=%v role=%v", req.TeamID, req.PlayerID, role)
+
+	if err := DB.Create(&member).Error; err != nil {
+		modJSONErr(w, http.StatusInternalServerError, "failed to add player to team")
+		return
+	}
+
+	log.Println("✅ DB Create succeeded for player:", req.PlayerID)
+
+	// ✅ Log team history
+	var team Team
+	DB.First(&team, req.TeamID)
+	DB.Create(&PlayerHistory{
+		PlayerID: req.PlayerID,
+		TeamID:   team.ID,
+		TeamName: team.Name,
+		Role:     role,
+		Season:   currentSeason,
+	})
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Player %d added to %s as %s (roles adjusted)", req.PlayerID, team.Name, role),
+	})
+}
+
+// --- League Mod: Set one team active ---
+func ModSetTeamActive(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+	var req struct {
+		TeamID uint `json:"team_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TeamID == 0 {
+		modJSONErr(w, http.StatusBadRequest, "invalid team_id")
+		return
+	}
+	if err := DB.Model(&Team{}).Where("id = ?", req.TeamID).Update("status", "Active").Error; err != nil {
+		modJSONErr(w, http.StatusInternalServerError, "failed to set team active")
+		return
+	}
+	respondJSON(w, map[string]any{"success": true})
+}
+
+// --- League Mod: Set ALL teams active ---
+func ModSetAllTeamsActive(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	// GORM requires an explicit WHERE for global updates
+	if err := DB.Model(&Team{}).
+		Where("1 = 1").
+		Update("status", "Active").Error; err != nil {
+
+		modJSONErr(w, http.StatusInternalServerError, "failed to set all teams active")
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "All teams set to Active",
 	})
 }

@@ -492,18 +492,17 @@ func main() {
 	r.HandleFunc("/api/mod/match/delete", HandleModDeleteMatch).Methods("POST")
 	r.HandleFunc("/api/mod/match/schedule", ModForceSchedule).Methods("POST")
 	r.HandleFunc("/api/mod/matches/generate", HandleGenerateWeeklyMatches).Methods("POST")
+	r.HandleFunc("/api/mod/team/set-active", ModSetTeamActive).Methods("POST")
+	r.HandleFunc("/api/mod/teams/set-all-active", ModSetAllTeamsActive).Methods("POST")
 	r.HandleFunc("/api/mod/team/set-inactive", HandleModSetTeamInactive).Methods("POST")
 	r.HandleFunc("/api/mod/teams/set-all-inactive", HandleModSetAllTeamsInactive).Methods("POST")
 	r.HandleFunc("/api/mod/team/rename", ModTeamRename).Methods("POST")
-
 	r.HandleFunc("/api/mod/team/adjust-rating", ModTeamAdjustRating).Methods("POST")
 	r.HandleFunc("/api/mod/team/disband", ModTeamDisband).Methods("POST")
-
 	r.HandleFunc("/api/mod/player/kick", ModPlayerKick).Methods("POST")
 	r.HandleFunc("/api/mod/player/ban", ModPlayerBan).Methods("POST")
 	r.HandleFunc("/api/mod/player/unban", ModPlayerUnban).Methods("POST")
 	r.HandleFunc("/api/mod/team/delete", HandleModDeleteTeam).Methods("POST")
-
 	r.HandleFunc("/api/mod/leaderboard/reset", ModLeaderboardReset).Methods("POST")
 	r.HandleFunc("/api/mod/match/edit-score", ModMatchEditScore).Methods("POST")
 	r.HandleFunc("/api/mod/season/archive", ModSeasonArchive).Methods("POST")
@@ -516,6 +515,7 @@ func main() {
 	r.HandleFunc("/api/mod/roster/unlock-all", ModRosterUnlockAll).Methods("POST")
 	r.HandleFunc("/api/mod/roster/status", GetRosterLockStatus).Methods("GET")
 	r.HandleFunc("/api/mod/team/history", ModTeamHistory).Methods("GET")
+	r.HandleFunc("/api/mod/team/add-player", ModAddPlayerToTeam).Methods("POST")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()

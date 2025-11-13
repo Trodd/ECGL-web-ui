@@ -39,13 +39,30 @@ export default function Matchups() {
 
     const allSeasons = ["All", ...Object.keys(matches || {})];
 
-    // --- Flatten filtered matches ---
-    const filtered = [];
-    Object.entries(matches || {}).forEach(([season, weeks]) => {
+    // --------------------------------------
+    // 🔥 SORT SEASONS AND WEEKS (DESC)
+    // --------------------------------------
+    const sortedSeasons = Object.keys(matches || {}).sort((a, b) => {
+        const A = a === "Preseason" ? 0 : Number(a);
+        const B = b === "Preseason" ? 0 : Number(b);
+        return B - A; // newest → oldest
+    });
+
+    const sortedFiltered = [];
+
+    sortedSeasons.forEach((season) => {
         if (selectedSeason !== "All" && selectedSeason !== season) return;
-        Object.entries(weeks).forEach(([week, list]) => {
+
+        const weeks = matches[season] || {};
+
+        const sortedWeeks = Object.keys(weeks).sort(
+            (a, b) => Number(b) - Number(a) // newest → oldest
+        );
+
+        sortedWeeks.forEach((week) => {
             if (selectedWeek !== "All" && selectedWeek !== week) return;
-            filtered.push({ season, week, list });
+
+            sortedFiltered.push({ season, week, list: weeks[week] });
         });
     });
 
@@ -95,38 +112,32 @@ export default function Matchups() {
             )}
 
             {/* Results */}
-            {!loading && !error && filtered.length === 0 && (
+            {!loading && !error && sortedFiltered.length === 0 && (
                 <p className="text-light">No matches found for the selected filters.</p>
             )}
 
             {!loading &&
                 !error &&
-                filtered.map(({ season, week, list }) => (
+                sortedFiltered.map(({ season, week, list }) => (
                     <div key={`${season}-${week}`} className="mb-4">
                         <h5 className="text-info border-bottom pb-1 mb-2">
                             {season === "Preseason" ? "Preseason" : `Season ${season}`} — Week {week}
                         </h5>
 
                         {list.map((m) => {
-                            // ✅ Normalize winner detection
                             const winnerId = Number(m.winner_id);
                             const teamAId = Number(m.team_a_id);
                             const teamBId = Number(m.team_b_id);
 
                             let winner = null;
-                            if (winnerId && (winnerId === teamAId || winnerId === teamBId)) {
-                                winner = winnerId === teamAId ? "A" : "B";
-                            } else if (m.team_a_score != null && m.team_b_score != null) {
-                                if (m.team_a_score > m.team_b_score) winner = "A";
-                                else if (m.team_b_score > m.team_a_score) winner = "B";
-                            }
+                            if (winnerId === teamAId) winner = "A";
+                            else if (winnerId === teamBId) winner = "B";
 
                             return (
                                 <Link
                                     to={`/match/${m.id}`}
                                     key={m.id}
-                                    className="text-decoration-none"
-                                    style={{ color: "inherit" }}
+                                    className="text-decoration-none text-light"
                                 >
                                     <div
                                         className="p-2 mb-2 rounded"
@@ -134,42 +145,30 @@ export default function Matchups() {
                                             background: "#181a1b",
                                             border: "1px solid #2a2d2f",
                                             cursor: "pointer",
-                                            transition: "background 0.2s, border-color 0.2s",
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            e.currentTarget.style.background = "#202325";
-                                            e.currentTarget.style.borderColor = "#3a3f42";
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.currentTarget.style.background = "#181a1b";
-                                            e.currentTarget.style.borderColor = "#2a2d2f";
                                         }}
                                     >
-                                        <div className="d-flex justify-content-between align-items-center">
+                                        <div className="d-flex justify-content-between">
                                             <div>
-                                                {/* ✅ Winner = green, Loser = red */}
                                                 <span
                                                     className={`fw-bold ${winner === "A"
-                                                            ? "text-success"
-                                                            : winner === "B"
-                                                                ? "text-danger"
-                                                                : "text-light"
+                                                        ? "text-success"
+                                                        : winner === "B"
+                                                            ? "text-danger"
+                                                            : "text-light"
                                                         }`}
                                                 >
-                                                    {m.team_a}
-                                                    {winner === "A" && " 🏆"}
+                                                    {m.team_a} {winner === "A" && "🏆"}
                                                 </span>{" "}
                                                 vs{" "}
                                                 <span
                                                     className={`fw-bold ${winner === "B"
-                                                            ? "text-success"
-                                                            : winner === "A"
-                                                                ? "text-danger"
-                                                                : "text-light"
+                                                        ? "text-success"
+                                                        : winner === "A"
+                                                            ? "text-danger"
+                                                            : "text-light"
                                                         }`}
                                                 >
-                                                    {m.team_b}
-                                                    {winner === "B" && " 🏆"}
+                                                    {m.team_b} {winner === "B" && "🏆"}
                                                 </span>
                                             </div>
 

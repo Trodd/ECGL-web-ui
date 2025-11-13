@@ -78,43 +78,35 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		nameToID[strings.TrimSpace(t.Name)] = t.ID
 	}
 
-	// --- Step 1.5: Auto double-forfeit unfinished matches for involved teams ---
-	var teamNames []string
-	for _, m := range req.Matches {
-		teamNames = append(teamNames, m.TeamA, m.TeamB)
-	}
+	// --- Step 1.5: Auto double-forfeit only previous week's unfinished matches (same season only) ---
 
-	// Find all matching teams
-	var involvedTeams []Team
-	if err := DB.Where("name IN ?", teamNames).Find(&involvedTeams).Error; err != nil {
-		log.Printf("❌ Failed to load teams for auto-forfeit cleanup: %v", err)
-	} else {
-		for _, team := range involvedTeams {
-			var oldMatches []Match
-			// any active match not already completed/forfeit/cancelled
-			if err := DB.
-				Where("(team_a_id = ? OR team_b_id = ?) AND status NOT IN ?", team.ID, team.ID,
-					[]string{"Completed", "Forfeit", "Cancelled"}).
-				Find(&oldMatches).Error; err != nil {
-				log.Printf("⚠️ Could not load old matches for team %s: %v", team.Name, err)
-				continue
-			}
+	previousWeek := req.Week - 1
+	if previousWeek > 0 {
+		log.Printf("🔍 Auto-forfeit check for Season %s Week %d", currentSeason, previousWeek)
 
-			for _, old := range oldMatches {
-				// Double-forfeit: both teams lose
-				old.Status = "Forfeit"
-				old.WinnerID = nil
-				old.LoserID = nil
+		// Find all matches from previous week that are unfinished
+		var oldMatches []Match
+		if err := DB.
+			Where("season = ?", currentSeason).
+			Where("CAST(week AS INTEGER) = ?", previousWeek).
+			Where("status NOT IN ?", []string{"Completed", "Forfeit", "Cancelled"}).
+			Find(&oldMatches).Error; err != nil {
+			log.Printf("⚠️ Could not load previous week matches: %v", err)
+		}
 
-				// Clear any map scores
-				_ = DB.Where("match_id = ?", old.ID).Delete(&MatchScore{}).Error
+		for _, old := range oldMatches {
+			old.Status = "Forfeit"
+			old.WinnerID = nil
+			old.LoserID = nil
 
-				if err := DB.Save(&old).Error; err != nil {
-					log.Printf("⚠️ Failed to mark match #%d as forfeit: %v", old.ID, err)
-				} else {
-					log.Printf("🏳️ Auto double-forfeited unfinished match #%d: %d vs %d",
-						old.ID, old.TeamAID, old.TeamBID)
-				}
+			// clear map scores (FK safe)
+			_ = DB.Where("match_id = ?", old.ID).Delete(&MatchScore{}).Error
+
+			if err := DB.Save(&old).Error; err != nil {
+				log.Printf("⚠️ Failed to auto forfeit match #%d: %v", old.ID, err)
+			} else {
+				log.Printf("🏳️ Auto double-forfeited Week %d match #%d (%d vs %d)",
+					previousWeek, old.ID, old.TeamAID, old.TeamBID)
 			}
 		}
 	}
@@ -228,13 +220,43 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		TeamAID uint
 		TeamBID uint
 	}
-	// Avoid rematches within the last 3 weeks
-	var previous []SimpleMatch
+	//--------------------------------------------------
+	// 1️⃣ Block last 3 weeks (based on match_code only)
+	//--------------------------------------------------
+	var last3 []SimpleMatch
 	DB.Table("matches").
-		Where("season = ? AND CAST(week AS INTEGER) >= ?", currentSeason, week-3).
-		Find(&previous)
+		Select("team_a_id, team_b_id").
+		Where("season = ?", currentSeason).
+		Where(`
+			CAST(
+				SPLIT_PART(SPLIT_PART(match_code, 'Week', 2), '-', 1)
+				AS INTEGER
+			) >= ?
+		`, week-3).
+		Find(&last3)
+
 	recentPairs := make(map[[2]uint]bool)
-	for _, m := range previous {
+	for _, m := range last3 {
+		key := [2]uint{min(m.TeamAID, m.TeamBID), max(m.TeamAID, m.TeamBID)}
+		recentPairs[key] = true
+	}
+
+	//--------------------------------------------------
+	// 2️⃣ Absolutely block previous week (week-1)
+	//--------------------------------------------------
+	var lastWeek []SimpleMatch
+	DB.Table("matches").
+		Select("team_a_id, team_b_id").
+		Where("season = ?", currentSeason).
+		Where(`
+			CAST(
+				SPLIT_PART(SPLIT_PART(match_code, 'Week', 2), '-', 1)
+				AS INTEGER
+			) = ?
+		`, week-1).
+		Find(&lastWeek)
+
+	for _, m := range lastWeek {
 		key := [2]uint{min(m.TeamAID, m.TeamBID), max(m.TeamAID, m.TeamBID)}
 		recentPairs[key] = true
 	}
