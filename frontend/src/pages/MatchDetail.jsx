@@ -4,8 +4,15 @@ import axios from "axios";
 
 export default function MatchDetail() {
     const { id } = useParams();
+
     const [matchData, setMatchData] = useState(null);
     const [loading, setLoading] = useState(true);
+
+    // ⭐ NEW: store logged-in user
+    const [me, setMe] = useState(null);
+
+    // ⭐ NEW: read current configured week
+    const currentWeek = import.meta.env.VITE_CURRENT_WEEK;
 
     useEffect(() => {
         axios
@@ -20,6 +27,32 @@ export default function MatchDetail() {
             })
             .finally(() => setLoading(false));
     }, [id]);
+
+    useEffect(() => {
+        axios
+            .get(`${import.meta.env.VITE_API_URL}/api/me`, { withCredentials: true })
+            .then((res) => setMe(res.data))
+            .catch(() => setMe(null));
+    }, []);
+
+    async function handleCastRequest() {
+        try {
+            const res = await axios.post(
+                `${import.meta.env.VITE_API_URL}/api/match/cast`,
+                { match_id: Number(id) },
+                { withCredentials: true }
+            );
+
+            if (res?.data?.channel_id) {
+                alert("🎥 Cast channel created!");
+
+                const guildID = import.meta.env.VITE_DISCORD_GUILD_ID;
+            }
+        } catch (err) {
+            console.error("❌ Cast Error:", err);
+            alert(err.response?.data || "Failed to create cast channel.");
+        }
+    }
 
     if (loading) return <p className="text-light">Loading match details...</p>;
     if (!matchData) return <p className="text-danger">⚠️ Match not found.</p>;
@@ -44,16 +77,27 @@ export default function MatchDetail() {
                 ? "text-warning"
                 : "text-muted";
 
-    // --- Debug output in console ---
-    console.log("🎯 Render MatchDetail:", { match, teamA, teamB, maps, rosterA, rosterB });
-    console.log("✅ Match data loaded:", matchData);
-
     return (
         <div className="container py-3 text-light">
-            <h2 className="mb-3">
-                Match Details{" "}
-                <small className="text-light ms-2">#{match.id || id}</small>
-            </h2>
+            {/* --- Page Title & Caster Button --- */}
+            <div className="d-flex justify-content-between align-items-center mb-3">
+                <h2 className="mb-0 text-light">
+                    Match Details{" "}
+                    <small className="text-light ms-2">#{match.id || id}</small>
+                </h2>
+
+                {/* ⭐ Caster-only button */}
+                {me?.is_caster &&
+                    match.status === "Scheduled" && (
+                        <button
+                            className="btn btn-info btn-sm"
+                            onClick={handleCastRequest}
+                            style={{ whiteSpace: "nowrap" }}
+                        >
+                            🎥 Cast Match
+                        </button>
+                    )}
+            </div>
 
             {/* --- Header --- */}
             <div className="card bg-dark border-secondary mb-4 shadow-sm">
@@ -88,7 +132,6 @@ export default function MatchDetail() {
                     ? matchData.map_scores
                     : [];
 
-                // Filter out unplayed (0–0) maps
                 const validMaps = mapData.filter(
                     (m) =>
                         !(
@@ -100,11 +143,18 @@ export default function MatchDetail() {
                 if (validMaps.length === 0)
                     return <p className="text-light">No map scores recorded yet.</p>;
 
-                // Compute totals for overall winner
-                const totalA = validMaps.filter((m) => m.team_a_score > m.team_b_score).length;
-                const totalB = validMaps.filter((m) => m.team_b_score > m.team_a_score).length;
+                const totalA = validMaps.filter(
+                    (m) => m.team_a_score > m.team_b_score
+                ).length;
+                const totalB = validMaps.filter(
+                    (m) => m.team_b_score > m.team_a_score
+                ).length;
                 const winner =
-                    totalA > totalB ? teamA.name : totalB > totalA ? teamB.name : null;
+                    totalA > totalB
+                        ? teamA.name
+                        : totalB > totalA
+                            ? teamB.name
+                            : null;
 
                 return (
                     <>
@@ -141,24 +191,20 @@ export default function MatchDetail() {
                                             <tr key={i}>
                                                 <td>Map {m.map ?? i + 1}</td>
                                                 <td>{mode}</td>
-                                                <td
-                                                    className={`fw-bold ${aWin
-                                                            ? "text-success"
-                                                            : bWin
-                                                                ? "text-danger"
-                                                                : "text-light"
-                                                        }`}
-                                                >
+                                                <td className={`fw-bold ${aWin
+                                                    ? "text-success"
+                                                    : bWin
+                                                        ? "text-danger"
+                                                        : "text-light"
+                                                    }`}>
                                                     {m.team_a_score}
                                                 </td>
-                                                <td
-                                                    className={`fw-bold ${bWin
-                                                            ? "text-success"
-                                                            : aWin
-                                                                ? "text-danger"
-                                                                : "text-light"
-                                                        }`}
-                                                >
+                                                <td className={`fw-bold ${bWin
+                                                    ? "text-success"
+                                                    : aWin
+                                                        ? "text-danger"
+                                                        : "text-light"
+                                                    }`}>
                                                     {m.team_b_score}
                                                 </td>
                                                 <td>
@@ -171,7 +217,9 @@ export default function MatchDetail() {
                                                             ✅ {teamB.name}
                                                         </span>
                                                     ) : (
-                                                        <span className="text-secondary">Tie</span>
+                                                        <span className="text-secondary">
+                                                            Tie
+                                                        </span>
                                                     )}
                                                 </td>
                                             </tr>

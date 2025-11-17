@@ -238,6 +238,32 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	casterRoleID := getEnv("DISCORD_CASTER_ROLE_ID", "")
+
+	isCaster := false
+	if guildID != "" && botToken != "" && casterRoleID != "" {
+		req, _ := http.NewRequest("GET",
+			fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordIDStr),
+			nil)
+		req.Header.Set("Authorization", "Bot "+botToken)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil && resp.StatusCode == 200 {
+			var member struct {
+				Roles []string `json:"roles"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&member) == nil {
+				for _, role := range member.Roles {
+					if role == casterRoleID {
+						isCaster = true
+						break
+					}
+				}
+			}
+			resp.Body.Close()
+		}
+	}
+
 	// ✅ active registered player + mod info
 	respondJSON(w, map[string]any{
 		"registered": true,
@@ -247,7 +273,8 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		"device":     player.Device,
 		"timezone":   player.Timezone,
 		"avatar":     session.Values["avatar"],
-		"is_mod":     isMod, // 👈 added
+		"is_mod":     isMod,
+		"is_caster":  isCaster,
 	})
 }
 
@@ -318,7 +345,13 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
+
 	player.Registered = true
+	SendDiscordLog(
+		fmt.Sprintf("🟢 **<@%s>** has signed up as a **%s** in timezone **%s**",
+			discordIDStr, player.Role, player.Timezone,
+		),
+	)
 	respondJSON(w, player)
 }
 
@@ -342,6 +375,7 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 	if err := DB.Where("player_id = ?", discordID).Find(&memberships).Error; err == nil {
 		for _, m := range memberships {
 			role := m.Role
+
 			// log history
 			var team Team
 			DB.First(&team, m.TeamID)
@@ -353,20 +387,31 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 				Season:   currentSeason,
 			})
 
+			// remove player from team
 			DB.Delete(&TeamMember{}, "player_id = ? AND team_id = ?", discordID, m.TeamID)
 
-			// check if team is empty
+			// check if team is empty → auto-disband
 			var remaining []TeamMember
 			DB.Where("team_id = ?", m.TeamID).Find(&remaining)
 			if len(remaining) == 0 {
 				DB.Delete(&Team{}, m.TeamID)
-				log.Printf("🗑️ Disbanded empty team %d", m.TeamID)
+
+				// ⭐ DISCORD LOG — Auto-disband ⭐
+				SendDiscordLog(
+					fmt.Sprintf(
+						"🗑️ **Team Disbanded:** **%s (#%d)** — last member unregistered",
+						team.Name,
+						team.ID,
+					),
+				)
+
 				continue
 			}
 
-			// promote if captain left
+			// promote new captain if captain left
 			if role == "Captain" {
 				var next TeamMember
+				// try co-captain first
 				if err := DB.Where("team_id = ? AND role = ?", m.TeamID, "Co-Captain").First(&next).Error; err == nil {
 					DB.Model(&next).Update("role", "Captain")
 				} else if err := DB.Where("team_id = ?", m.TeamID).First(&next).Error; err == nil {
@@ -379,7 +424,7 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 	// ❌ Clear pending join requests
 	DB.Where("player_id = ?", discordID).Delete(&TeamJoinRequest{})
 
-	// ✅ Clear role/device/timezone but keep stats
+	// ✅ Reset registration fields but keep stats
 	if err := DB.Model(&Player{}).Where("id = ?", discordID).
 		Updates(map[string]any{
 			"role":     "",
@@ -390,6 +435,11 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
+
+	// ⭐ DISCORD LOG — Player unregistered ⭐
+	SendDiscordLog(
+		fmt.Sprintf("🔴 <@%s> has left the league", discordIDStr),
+	)
 
 	respondJSON(w, map[string]any{
 		"success":    true,
@@ -479,6 +529,7 @@ func main() {
 	r.HandleFunc("/api/match/confirm-score", HandleConfirmScore).Methods("POST")
 	r.HandleFunc("/api/match/schedule", HandleScheduleMatch).Methods("POST")
 	r.HandleFunc("/api/match/submit-score", HandleSubmitScore).Methods("POST")
+	r.HandleFunc("/api/match/cast", HandleRequestCast).Methods("POST")
 	r.HandleFunc("/api/matches/public", HandlePublicMatches).Methods("GET")
 	r.HandleFunc("/api/settings", GetSettings).Methods("GET")
 
@@ -568,12 +619,14 @@ func main() {
 	}))
 
 	// TLS
-	host := "gigglesquad.mooo.com"
+	host := mustGet("TLS_HOST", "ecgleague.com")
+
 	certManager := autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		Cache:      autocert.DirCache("certs"),
-		HostPolicy: autocert.HostWhitelist(host),
+		HostPolicy: autocert.HostWhitelist(host, "www."+host),
 	}
+
 	server := &http.Server{
 		Addr:    ":443",
 		Handler: r,
@@ -585,8 +638,9 @@ func main() {
 		ErrorLog: log.New(quietErrorLog{}, "", 0),
 	}
 
-	// Redirect HTTP→HTTPS
+	// HTTP challenge server for Let's Encrypt
 	go func() {
+		log.Println("🌐 Listening on :80 for ACME HTTP-01 challenges")
 		http.ListenAndServe(":80", certManager.HTTPHandler(nil))
 	}()
 

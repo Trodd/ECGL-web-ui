@@ -172,7 +172,7 @@ export default function MyTeam() {
     try {
       await axios.post(
         `${urlBase}/api/team/kick`,
-        { team_id: team.id, player_id: String(playerId) },
+        { team_id: team.id, player_id: String(playerId) }, // ✅ string
         { withCredentials: true }
       );
       await loadTeam();
@@ -204,7 +204,7 @@ export default function MyTeam() {
     try {
       await axios.post(
         `${urlBase}/api/team/promote`,
-        { team_id: team.id, player_id: String(playerId), role },
+        { team_id: team.id, player_id: String(playerId), role }, // ✅ string
         { withCredentials: true }
       );
       await loadTeam();
@@ -420,7 +420,7 @@ export default function MyTeam() {
             {(roster ?? []).length > 0 ? (
               roster.map((m) => (
                 <li
-                  key={m.id}
+                  key={`player-${m.id}`}
                   className="list-group-item d-flex justify-content-between align-items-center px-3 py-2"
                   style={{
                     borderRadius: "0.5rem",
@@ -472,21 +472,31 @@ export default function MyTeam() {
           </ul>
         </div>
         {/* 📥 Join Requests - compact + aligned with settings */}
-        {(myRole === "Captain" || myRole === "Co-Captain") &&
-          (requests ?? []).length > 0 && (
-            <div
-              className="mt-4 p-3 rounded"
-              style={{
-                backgroundColor: "#1a1a1a",
-                border: "1px solid #333",
-                maxWidth: "420px", // ✅ same width as settings
-              }}
-            >
-              <h4 className="mb-3 text-light">📥 Join Requests</h4>
-              <ul className="list-group">
-                {requests.map((req) => (
+        {(myRole === "Captain" || myRole === "Co-Captain") && Array.isArray(requests) && requests.length > 0 && (
+          <div
+            className="mt-4 p-3 rounded"
+            style={{
+              backgroundColor: "#1a1a1a",
+              border: "1px solid #333",
+              maxWidth: "420px",
+            }}
+          >
+            <h4 className="mb-3 text-light">📥 Join Requests</h4>
+            <ul className="list-group">
+
+              {requests.map((req) => {
+                // --- SAFE FALLBACKS for ALL backend formats ---
+                const name =
+                  req.display_name ||
+                  req.display ||
+                  req.username ||
+                  "Unknown Player";
+
+                const status = req.status || "pending";
+
+                return (
                   <li
-                    key={req.id}
+                    key={`req-${req.id}`}
                     className="list-group-item d-flex justify-content-between align-items-center px-2 py-2"
                     style={{
                       backgroundColor: "#111",
@@ -496,11 +506,10 @@ export default function MyTeam() {
                     }}
                   >
                     <span>
-                      <strong>{req.username}</strong>{" "}
-                      <span className="text-muted small">
-                        ({req.status || "pending"})
-                      </span>
+                      <strong>{name}</strong>
+                      <span className="text-muted small"> ({status})</span>
                     </span>
+
                     <div className="d-flex gap-1">
                       <button
                         className="btn btn-success btn-sm"
@@ -516,10 +525,12 @@ export default function MyTeam() {
                       </button>
                     </div>
                   </li>
-                ))}
-              </ul>
-            </div>
-          )}
+                );
+              })}
+
+            </ul>
+          </div>
+        )}
         {/* 📅 Active Matches */}
         <h4 className="mt-4 mb-3">📅 Active Matches</h4>
         <div className="d-flex flex-column align-items-center gap-3 w-100">
@@ -674,10 +685,10 @@ export default function MyTeam() {
                       <td>{m.date ? new Date(m.date).toLocaleDateString() : "-"}</td>
                       <td
                         className={`fw-bold ${m.result === "Win"
-                            ? "text-success"
-                            : m.result === "Loss"
-                              ? "text-danger"
-                              : "text-warning"
+                          ? "text-success"
+                          : m.result === "Loss"
+                            ? "text-danger"
+                            : "text-warning"
                           }`}
                       >
                         {m.result || "Pending"}

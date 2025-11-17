@@ -202,6 +202,7 @@ export default function Register() {
   // --- Registered but no team ---
   if (me?.registered && !team) {
     const isBanned = me?.role?.toLowerCase() === "banned";
+    const isLeagueSub = me?.role?.toLowerCase() === "league sub";
 
     return (
       <div className="text-light">
@@ -213,14 +214,18 @@ export default function Register() {
           )}
         </h2>
 
-        {/* 🚫 Show roster lock warning if active */}
+        {/* 🚫 Show roster lock warning */}
         {!isBanned && rosterLocked && (
-          <div
-            className="alert alert-warning small mb-3"
-            style={{ maxWidth: 500 }}
-          >
+          <div className="alert alert-warning small mb-3" style={{ maxWidth: 500 }}>
             <strong>🚫 Roster Lock Active:</strong> Joining or creating teams is temporarily disabled.
           </div>
+        )}
+
+        {/* ⭐ ALWAYS show unregister button unless banned */}
+        {!isBanned && (
+          <button className="btn btn-danger mb-4" onClick={handleUnregister}>
+            Unregister
+          </button>
         )}
 
         {isBanned ? (
@@ -229,8 +234,21 @@ export default function Register() {
           </p>
         ) : (
           <>
-            {/* 👥 Team Join/Create section — hidden when roster locked */}
-            {!rosterLocked && (
+            {/* 💬 League Sub message */}
+            {isLeagueSub && (
+              <div className="text-warning fw-bold mt-2">
+                ⚠️ League Subs cannot join or create teams.
+                <ul className="mt-2">
+                  <li>League Subs are stand-in players who fill in for teams when needed.</li>
+                  <li>Look for teams requesting subs in the <strong>looking-for-subs</strong> channel.</li>
+                  <li>League Subs do not join teams or participate as full rostered players.</li>
+                  <li>To become a full player, please unregister and re-register as a Player.</li>
+                </ul>
+              </div>
+            )}
+
+            {/* 👥 Team Join/Create section — ONLY for non-League Subs */}
+            {!isLeagueSub && !rosterLocked && (
               <>
                 <h5>👥 Request to Join a Team</h5>
                 <div className="mb-3 position-relative" style={{ maxWidth: 300 }}>
@@ -310,8 +328,8 @@ export default function Register() {
             onChange={(e) => setRole(e.target.value)}
           >
             <option value="">Select role...</option>
-            <option value="player">Player</option>
-            <option value="league sub">League Sub</option>
+            <option value="Player">Player</option>
+            <option value="League Sub">League Sub</option>
           </select>
         </div>
 

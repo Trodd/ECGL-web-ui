@@ -408,12 +408,17 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 	// find their team membership
 	var membership TeamMember
 	result := DB.Where("player_id = ?", playerID).
-		Order("team_id DESC").Limit(1).Find(&membership)
+		Order("team_id DESC").
+		Limit(1).
+		Find(&membership)
 
 	if result.RowsAffected == 0 {
 		respondJSON(w, map[string]any{
-			"team": nil, "roster": []any{}, "matches": []any{},
-			"requests": []any{}, "myRole": "",
+			"team":     nil,
+			"roster":   []any{},
+			"matches":  []any{},
+			"requests": []any{},
+			"myRole":   "",
 		})
 		return
 	}
@@ -425,8 +430,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Load Current Season (number only) ---
-	// You SHOULD keep the config table
+	// --- Current season ---
 	var currentSeason string
 	DB.Raw(`SELECT value FROM config WHERE key='current_season' LIMIT 1`).
 		Scan(&currentSeason)
@@ -436,7 +440,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	currentSeason = strings.TrimSpace(strings.Replace(currentSeason, "Season ", "", 1))
 
-	// --- Prepare match struct ---
+	// --- Load matches ---
 	type MatchWithMaps struct {
 		ID        uint         `json:"id"`
 		MatchCode string       `json:"match_code"`
@@ -453,23 +457,23 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 	var matches []MatchWithMaps
 
 	rows, err := DB.Raw(`
-        SELECT
-            m.id, m.match_code,
-            CASE WHEN m.team_a_id = @tid THEN t2.name ELSE t1.name END AS opponent,
-            m.scheduled_date,
-            CASE
-                WHEN m.winner_id = @tid THEN 'Win'
-                WHEN m.loser_id = @tid THEN 'Loss'
-                ELSE 'Pending'
-            END AS result,
-            m.status,
-            m.team_a_id, m.team_b_id
-        FROM matches m
-        JOIN teams t1 ON m.team_a_id = t1.id
-        JOIN teams t2 ON m.team_b_id = t2.id
-        WHERE m.team_a_id = @tid OR m.team_b_id = @tid
-        ORDER BY m.scheduled_date DESC NULLS LAST
-    `, sql.Named("tid", membership.TeamID)).Rows()
+		SELECT
+			m.id, m.match_code,
+			CASE WHEN m.team_a_id = @tid THEN t2.name ELSE t1.name END AS opponent,
+			m.scheduled_date,
+			CASE
+				WHEN m.winner_id = @tid THEN 'Win'
+				WHEN m.loser_id = @tid THEN 'Loss'
+				ELSE 'Pending'
+			END AS result,
+			m.status,
+			m.team_a_id, m.team_b_id
+		FROM matches m
+		JOIN teams t1 ON m.team_a_id = t1.id
+		JOIN teams t2 ON m.team_b_id = t2.id
+		WHERE m.team_a_id = @tid OR m.team_b_id = @tid
+		ORDER BY m.scheduled_date DESC NULLS LAST
+	`, sql.Named("tid", membership.TeamID)).Rows()
 
 	if err == nil {
 		defer rows.Close()
@@ -482,26 +486,27 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// 🔥 REAL SEASON LOGIC — decode from match_code
+			// extract season from match_code
 			parts := strings.Split(m.MatchCode, "-")
 			if len(parts) > 1 && regexp.MustCompile(`^\d+$`).MatchString(parts[0]) {
-				m.Season = parts[0] // "1-Week1-M001" → "1"
+				m.Season = parts[0]
 			} else {
-				m.Season = "0" // Preseason (Week1-M001)
+				m.Season = "0"
 			}
 
+			// load maps
 			DB.Where("match_id = ?", m.ID).Find(&m.Maps)
 			matches = append(matches, m)
 		}
 	}
 
-	// --- Sort Active vs Past ---
+	// re-sort active vs past
 	var active []MatchWithMaps
 	var past []MatchWithMaps
 
 	for _, m := range matches {
-
 		seasonMatches := strings.TrimSpace(m.Season) == currentSeason
+
 		finished := m.Status == "Finished" ||
 			m.Status == "Completed" ||
 			m.Status == "Cancelled" ||
@@ -514,12 +519,11 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Active always first
 	matches = append(active, past...)
 
 	// --- Load roster (player list) ---
 	type RosterPlayer struct {
-		ID          uint   `json:"id"`
+		ID          string `json:"id"` // 👈 string now
 		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
 		Role        string `json:"role"`
@@ -528,10 +532,16 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 
 	var roster []RosterPlayer
 	if err := DB.Table("team_members").
-		Select("players.id, players.username, players.display_name, team_members.role, players.rating").
+		Select(`
+				CAST(players.id AS text) AS id,
+				players.username,
+				players.display_name,
+				team_members.role,
+				players.rating`).
 		Joins("JOIN players ON players.id = team_members.player_id").
 		Where("team_members.team_id = ?", team.ID).
 		Scan(&roster).Error; err != nil {
+
 		log.Printf("❌ GetMyTeam: roster query failed for team %d: %v", team.ID, err)
 		roster = []RosterPlayer{}
 	}
@@ -539,26 +549,50 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 	// Fallback: use player_history if no active roster found
 	if len(roster) == 0 {
 		DB.Raw(`
-			SELECT p.id, p.username, p.display_name, ph.role, p.rating
-			FROM player_history ph
-			JOIN players p ON p.id = ph.player_id
-			WHERE ph.team_id = ? AND ph.season = ?
-		`, team.ID, currentSeason).Scan(&roster)
+				SELECT
+					CAST(p.id AS text) AS id,
+					p.username,
+					p.display_name,
+					ph.role,
+					p.rating
+				FROM player_history ph
+				JOIN players p ON p.id = ph.player_id
+				WHERE ph.team_id = ? AND ph.season = ?
+			`, team.ID, currentSeason).Scan(&roster)
 	}
 
-	// Ensure non-nil slice
 	if roster == nil {
 		roster = []RosterPlayer{}
 	}
 
+	// --- Load Join Requests (SAFE ALWAYS ARRAY) ---
+	var joinRequests []map[string]any
+	errReq := DB.Raw(`
+		SELECT r.id, r.player_id,
+		       p.username,
+		       COALESCE(p.display_name, '') AS display_name,
+		       r.status
+		FROM team_join_requests r
+		JOIN players p ON p.id = r.player_id
+		WHERE r.team_id = ? AND r.status = 'pending'
+		ORDER BY r.id ASC
+	`, team.ID).Scan(&joinRequests).Error
+
+	if errReq != nil || joinRequests == nil {
+		joinRequests = []map[string]any{}
+	}
+
+	// --- final response ---
 	respondJSON(w, map[string]any{
 		"team": map[string]any{
-			"id": team.ID, "name": team.Name,
-			"status": team.Status, "join_allowed": team.JoinAllowed,
+			"id":           team.ID,
+			"name":         team.Name,
+			"status":       team.Status,
+			"join_allowed": team.JoinAllowed,
 		},
 		"roster":   roster,
 		"matches":  matches,
-		"requests": []any{},
+		"requests": joinRequests,
 		"myRole":   membership.Role,
 	})
 }
@@ -744,6 +778,14 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		log.Printf("✅ Membership confirmed: player %d in team %d as %s", check.PlayerID, check.TeamID, check.Role)
 	}
 
+	SendDiscordLog(
+		fmt.Sprintf(
+			"🏗️ **Team Created:** **%s** by <@%s>",
+			team.Name,
+			session.Values["discord_id"].(string),
+		),
+	)
+
 	respondJSON(w, map[string]any{
 		"success": true,
 		"team":    team,
@@ -831,6 +873,14 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 
 		// ✅ Log readable output
 		log.Printf("✅ %s added to %s as Member", display, teamName)
+
+		SendDiscordLog(
+			fmt.Sprintf(
+				"** <@%d> **has joined team **%s**",
+				jr.PlayerID,
+				teamName,
+			),
+		)
 
 		// ✅ Log history (skip duplicates)
 		var existing PlayerHistory
@@ -942,58 +992,95 @@ func HandleLeaveTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Player comes from session, not frontend
+	// ✅ Player comes from session
 	session, _ := store.Get(r, "session")
-	discordID, ok := session.Values["discord_id"].(string)
-	if !ok || discordID == "" {
+	discordIDStr, ok := session.Values["discord_id"].(string)
+	if !ok || discordIDStr == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	playerID, _ := strconv.ParseInt(discordID, 10, 64)
+	playerID, _ := strconv.ParseInt(discordIDStr, 10, 64)
 
-	// verify membership (clean logging)
+	// Load team (for name)
+	var team Team
+	if err := DB.First(&team, req.TeamID).Error; err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify membership
 	var member TeamMember
 	err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, playerID).First(&member).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		log.Printf("ℹ️ Player %d is not a member of team %d (no record found)", playerID, req.TeamID)
+		log.Printf("ℹ️ Player %d is not a member of team %d", playerID, req.TeamID)
 		http.Error(w, "Not a team member", http.StatusForbidden)
 		return
 	}
 
 	if err != nil {
-		log.Printf("❌ DB error while verifying membership for player %d team %d: %v", playerID, req.TeamID, err)
+		log.Printf("❌ DB error verifying membership: %v", err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
 
-	// Save role before removing
+	// Save role before leaving
 	role := member.Role
+
+	// Remove from team
 	if err := DB.Delete(&member).Error; err != nil {
 		http.Error(w, "Failed to leave team", http.StatusInternalServerError)
 		return
 	}
 
-	// Check remaining members
+	// Count remaining members
 	var remaining []TeamMember
 	DB.Where("team_id = ?", req.TeamID).Find(&remaining)
 
+	// If empty, auto-disband team
 	if len(remaining) == 0 {
+
 		DB.Model(&Team{}).
 			Where("id = ?", req.TeamID).
 			Update("status", "Disbanded")
-		log.Printf("🏴‍☠️ Team %d marked as Disbanded (last member left)", req.TeamID)
+
+		log.Printf("🏴‍☠️ Team %s (#%d) auto-disbanded (last member left)", team.Name, team.ID)
+
+		// ⭐ DISCORD LOG — Auto Disband
+		SendDiscordLog(
+			fmt.Sprintf(
+				"🗑️ **Team Disbanded:** **%s (#%d)** — last member left",
+				team.Name,
+				team.ID,
+			),
+		)
+
 	} else if role == "Captain" {
+		// Captain left → promote next person
 		var next TeamMember
+
 		if err := DB.Where("team_id = ? AND role = ?", req.TeamID, "Co-Captain").
 			First(&next).Error; err == nil {
+
 			DB.Model(&next).Update("role", "Captain")
-			log.Printf("👑 Co-Captain %d promoted to Captain (team %d)", next.PlayerID, req.TeamID)
+			log.Printf("👑 Promoted Co-Captain %d to Captain (team %d)", next.PlayerID, req.TeamID)
+
 		} else if err := DB.Where("team_id = ?", req.TeamID).First(&next).Error; err == nil {
+
 			DB.Model(&next).Update("role", "Captain")
-			log.Printf("👑 Member %d promoted to Captain (team %d)", next.PlayerID, req.TeamID)
+			log.Printf("👑 Promoted Member %d to Captain (team %d)", next.PlayerID, req.TeamID)
 		}
 	}
+
+	// ⭐ DISCORD LOG — Player Left
+	SendDiscordLog(
+		fmt.Sprintf(
+			"🚪 <@%s> has left team **%s (#%d)**",
+			discordIDStr,
+			team.Name,
+			team.ID,
+		),
+	)
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -1165,7 +1252,7 @@ func HandleKickMember(w http.ResponseWriter, r *http.Request) {
 	}
 	requesterID, _ := strconv.ParseInt(discordID, 10, 64)
 
-	// target ID
+	// target ID (keep exactly as it was when it worked)
 	playerID := req.PlayerID.Int64() // ✅ always valid int64 now
 
 	// role check
@@ -1208,9 +1295,27 @@ func HandleKickMember(w http.ResponseWriter, r *http.Request) {
 	DB.Where("team_id = ?", req.TeamID).Find(&remaining)
 	if len(remaining) == 0 {
 		DB.Delete(&Team{}, req.TeamID)
-		respondJSON(w, map[string]any{"success": true, "message": "Member kicked, team disbanded"})
+
+		// 🔔 Discord log for “kicked + disbanded”
+		SendDiscordLog(fmt.Sprintf(
+			"🦶 **Player Kicked:** <@%d> removed from **%s** — team disbanded (no members left)",
+			playerID,
+			team.Name,
+		))
+
+		respondJSON(w, map[string]any{
+			"success": true,
+			"message": "Member kicked, team disbanded",
+		})
 		return
 	}
+
+	// 🔔 Discord log for normal kick
+	SendDiscordLog(fmt.Sprintf(
+		"🦶 **Player Kicked:** <@%d> removed from **%s**",
+		playerID,
+		team.Name,
+	))
 
 	respondJSON(w, map[string]any{"success": true, "message": "Member kicked"})
 }
@@ -1236,7 +1341,7 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 	}
 	requesterID, _ := strconv.ParseInt(discordID, 10, 64)
 
-	// target
+	// target (keep same as last working version)
 	playerID := int64(req.PlayerID) // ✅ always valid int64 now
 
 	if req.Role != "Captain" && req.Role != "Co-Captain" {
@@ -1279,6 +1384,14 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// 🔔 Discord log for promotion
+	SendDiscordLog(fmt.Sprintf(
+		"⬆️ **Promotion:** <@%d> is now **%s** on **Team #%d**",
+		playerID,
+		req.Role,
+		req.TeamID,
+	))
+
 	respondJSON(w, map[string]any{"success": true, "message": "Member promoted to " + req.Role})
 }
 
@@ -1316,6 +1429,15 @@ func HandleToggleTeamStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to update team status", http.StatusInternalServerError)
 		return
 	}
+
+	SendDiscordLog(
+		fmt.Sprintf(
+			"🔄 **Team Status Changed:** Team #%d → **%s** by <@%s>",
+			req.TeamID,
+			req.Status,
+			discordID,
+		),
+	)
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -1360,6 +1482,15 @@ func HandleToggleTeamJoinAllowed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to update join setting", http.StatusInternalServerError)
 		return
 	}
+
+	SendDiscordLog(
+		fmt.Sprintf(
+			"👥 **Join Requests %s** for **Team #%d** (by <@%s>)",
+			map[bool]string{true: "Enabled", false: "Disabled"}[req.Allow],
+			req.TeamID,
+			discordID,
+		),
+	)
 
 	respondJSON(w, map[string]any{
 		"success":      true,
@@ -1416,6 +1547,25 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 		log.Printf("✏️ Match #%d rescheduled by Team %d: %s → %s", match.ID, req.TeamID, oldDate, date.Format(time.RFC1123))
 	}
 
+	// Fetch team names
+	var teamA, teamB Team
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+
+	// Actor
+	session, _ := store.Get(r, "session")
+	discordIDStr, _ := session.Values["discord_id"].(string)
+
+	// Only log when match is officially Scheduled
+	if match.Status == "Scheduled" {
+		LogMatch(
+			fmt.Sprintf(
+				"📅 **Match Scheduled:** %s — %s vs %s\nScheduled by <@%s>",
+				match.MatchCode, teamA.Name, teamB.Name, discordIDStr,
+			),
+		)
+	}
+
 	respondJSON(w, map[string]any{
 		"success": true,
 		"message": fmt.Sprintf("Match scheduled for %s", date.Format(time.RFC1123)),
@@ -1449,7 +1599,6 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Ensure submitting team is actually in this match
 	isTeamA := req.TeamID == match.TeamAID
 	isTeamB := req.TeamID == match.TeamBID
 	if !isTeamA && !isTeamB {
@@ -1457,27 +1606,28 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🚫 Prevent same sub for both teams
+	// 🚫 Cannot reuse same league sub for both sides
 	if req.LeagueSubA != nil && req.LeagueSubB != nil && *req.LeagueSubA == *req.LeagueSubB {
 		http.Error(w, "The same League Sub cannot be used for both teams.", http.StatusBadRequest)
 		return
 	}
 
-	// 🧍 Store League Subs (if provided)
+	// Save league subs
 	match.LeagueSubA = req.LeagueSubA
 	match.LeagueSubB = req.LeagueSubB
 
-	// --- Get existing map scores to detect changes ---
+	// Get existing score-set
 	var existing []MatchScore
 	DB.Where("match_id = ?", req.MatchID).Find(&existing)
 
-	// --- Build new canonical score data ---
+	// Build new canonicalized score set
 	var newScores []MatchScore
 	for i, m := range req.Maps {
 		mapNum := m.MapNumber
 		if mapNum <= 0 {
 			mapNum = i + 1
 		}
+
 		mode := strings.TrimSpace(m.Gamemode)
 		if mode == "" {
 			mode = "Unknown"
@@ -1486,10 +1636,13 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 		our, their := m.TeamAScore, m.TeamBScore
 		aScore, bScore := 0, 0
 
+		// Normalize into teamA vs teamB perspective
 		if isTeamA {
-			aScore, bScore = our, their
+			aScore = our
+			bScore = their
 		} else {
-			aScore, bScore = their, our
+			aScore = their
+			bScore = our
 		}
 
 		newScores = append(newScores, MatchScore{
@@ -1501,8 +1654,9 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// --- Compare newScores vs existing ---
+	// Detect changes
 	changed := false
+
 	if len(existing) != len(newScores) {
 		changed = true
 	} else {
@@ -1523,16 +1677,13 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// --- Only update if something actually changed ---
+	// Apply changes if needed
 	if changed {
-		if err := DB.Where("match_id = ?", req.MatchID).Delete(&MatchScore{}).Error; err != nil {
-			http.Error(w, "Failed to clear previous scores", http.StatusInternalServerError)
-			return
-		}
+		DB.Where("match_id = ?", req.MatchID).Delete(&MatchScore{})
 
 		for _, s := range newScores {
 			if err := DB.Create(&s).Error; err != nil {
-				log.Printf("❌ Failed to insert score for map %d (match %d): %v", s.MapNumber, req.MatchID, err)
+				log.Printf("❌ Failed to insert map %d score: %v", s.MapNumber, err)
 			}
 		}
 
@@ -1544,12 +1695,14 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 			log.Printf("❌ Failed to update match after score change: %v", err)
 		}
 
-		log.Printf("📝 Team %d submitted NEW scores for match #%d (normalized vs TeamA/TeamB)", req.TeamID, match.ID)
+		log.Printf("📝 Team %d submitted NEW scores for match #%d", req.TeamID, match.ID)
+
 	} else {
+		// No changes — preserve confirmations
 		if err := DB.Save(&match).Error; err != nil {
-			log.Printf("❌ Failed to re-save match without score changes: %v", err)
+			log.Printf("❌ Failed to save unchanged match: %v", err)
 		}
-		log.Printf("🔁 Team %d re-submitted SAME scores for match #%d — confirmations preserved", req.TeamID, match.ID)
+		log.Printf("🔁 Team %d re-submitted SAME scores for match #%d", req.TeamID, match.ID)
 	}
 
 	respondJSON(w, map[string]any{
@@ -2062,9 +2215,12 @@ func ModMatchReset(w http.ResponseWriter, r *http.Request) {
 // POST /api/mod/match/forfeit
 // body: { "match_id": <id>, "winner_team_id": <teamID> }
 func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireLeagueMod(w, r); !ok {
+	modDiscordID, ok := requireLeagueMod(w, r)
+	if !ok {
 		return
 	}
+	actorDiscordID := modDiscordID
+
 	var req struct {
 		MatchID      uint `json:"match_id"`
 		WinnerTeamID uint `json:"winner_team_id"`
@@ -2080,12 +2236,13 @@ func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Verify winner belongs to the match
-	if !(req.WinnerTeamID == m.TeamAID || req.WinnerTeamID == m.TeamBID) {
-		modJSONErr(w, http.StatusBadRequest, "winner_team_id not in this match")
+	// Winner must be one of the teams
+	if req.WinnerTeamID != m.TeamAID && req.WinnerTeamID != m.TeamBID {
+		modJSONErr(w, http.StatusBadRequest, "winner_team_id not part of this match")
 		return
 	}
 
+	// Determine loser
 	var loser uint
 	if req.WinnerTeamID == m.TeamAID {
 		loser = m.TeamBID
@@ -2093,23 +2250,42 @@ func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
 		loser = m.TeamAID
 	}
 
+	// Assign winner/loser + finalize match
 	m.WinnerID = &req.WinnerTeamID
 	m.LoserID = &loser
 	m.Status = "Completed"
 
-	// 🧹 Clear any lingering map rows
-	_ = DB.Where("match_id = ?", m.ID).Delete(&MatchScore{}).Error
+	// Clear map scores
+	DB.Where("match_id = ?", m.ID).Delete(&MatchScore{})
 
 	if err := DB.Save(&m).Error; err != nil {
 		modJSONErr(w, http.StatusInternalServerError, "failed to set forfeit")
 		return
 	}
 
-	// 🧩 Snapshot both teams' rosters for historical accuracy
+	// Snapshot both teams
 	snapshotTeamRoster(m.TeamAID, currentSeason)
 	snapshotTeamRoster(m.TeamBID, currentSeason)
 
-	log.Printf("🏁 Mod marked match #%d as forfeited (Winner: %d, Loser: %d)", m.ID, req.WinnerTeamID, loser)
+	// Fetch team names
+	var teamA, teamB Team
+	DB.First(&teamA, m.TeamAID)
+	DB.First(&teamB, m.TeamBID)
+
+	winnerTeam := teamA
+	loserTeam := teamB
+	if req.WinnerTeamID == teamB.ID {
+		winnerTeam, loserTeam = teamB, teamA
+	}
+
+	// ⭐ MOD LOG → score log channel
+	LogScore(fmt.Sprintf(
+		"🏳️ **Match Forfeited by Mod:** %s\nWinner: **%s**\nLoser: **%s**\nForced by <@%s>",
+		m.MatchCode,
+		winnerTeam.Name,
+		loserTeam.Name,
+		actorDiscordID,
+	))
 
 	respondJSON(w, map[string]any{
 		"success":    true,
@@ -2306,9 +2482,12 @@ func ModPlayerKick(w http.ResponseWriter, r *http.Request) {
 // POST /api/mod/player/ban
 // body: { "player_id": "<discord id or number>", "reason": "optional" }
 func ModPlayerBan(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireLeagueMod(w, r); !ok {
+	modDiscordID, ok := requireLeagueMod(w, r)
+	if !ok {
 		return
 	}
+	actorDiscordID := modDiscordID
+
 	var req struct {
 		PlayerID FlexibleID `json:"player_id"`
 		Reason   string     `json:"reason"`
@@ -2324,7 +2503,6 @@ func ModPlayerBan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// mark as banned
 	if p.Role != "Banned" {
 		p.Role = "Banned"
 		if err := DB.Save(&p).Error; err != nil {
@@ -2332,18 +2510,41 @@ func ModPlayerBan(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// remove from any team
-	_ = DB.Where("player_id = ?", req.PlayerID.Int64()).Delete(&TeamMember{}).Error
 
-	respondJSON(w, map[string]any{"success": true, "message": "player banned", "player_id": p.ID})
+	// Remove from any team
+	DB.Where("player_id = ?", p.ID).Delete(&TeamMember{})
+
+	// ⭐ MOD LOG — Ban
+	LogGeneral(
+		fmt.Sprintf(
+			"⛔ **Player Banned:** <@%d> by <@%s>%s",
+			p.ID,
+			actorDiscordID,
+			func() string {
+				if req.Reason != "" {
+					return "\n**Reason:** " + req.Reason
+				}
+				return ""
+			}(),
+		),
+	)
+
+	respondJSON(w, map[string]any{
+		"success":   true,
+		"message":   "player banned",
+		"player_id": p.ID,
+	})
 }
 
 // POST /api/mod/player/unban
 // body: { "player_id": "<discord id or number>" }
 func ModPlayerUnban(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireLeagueMod(w, r); !ok {
+	modDiscordID, ok := requireLeagueMod(w, r)
+	if !ok {
 		return
 	}
+	actorDiscordID := modDiscordID
+
 	var req struct {
 		PlayerID FlexibleID `json:"player_id"`
 	}
@@ -2351,11 +2552,13 @@ func ModPlayerUnban(w http.ResponseWriter, r *http.Request) {
 		modJSONErr(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
+
 	var p Player
 	if err := DB.First(&p, req.PlayerID.Int64()).Error; err != nil {
 		modJSONErr(w, http.StatusNotFound, "player not found")
 		return
 	}
+
 	if p.Role == "Banned" {
 		p.Role = "Player"
 		if err := DB.Save(&p).Error; err != nil {
@@ -2363,7 +2566,21 @@ func ModPlayerUnban(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	respondJSON(w, map[string]any{"success": true, "message": "player unbanned", "player_id": p.ID})
+
+	// ⭐ MOD LOG — Unban
+	LogGeneral(
+		fmt.Sprintf(
+			"♻️ **Player Unbanned:** <@%d> by <@%s>",
+			p.ID,
+			actorDiscordID,
+		),
+	)
+
+	respondJSON(w, map[string]any{
+		"success":   true,
+		"message":   "player unbanned",
+		"player_id": p.ID,
+	})
 }
 
 // ========= DATA MOD: Reset Leaderboard (optional) =========
@@ -2718,13 +2935,17 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get confirming user
+	session, _ := store.Get(r, "session")
+	actorDiscordID := session.Values["discord_id"].(string)
+
 	var match Match
 	if err := DB.First(&match, req.MatchID).Error; err != nil {
 		http.Error(w, "match not found", http.StatusNotFound)
 		return
 	}
 
-	// Update confirmation
+	// Mark schedule confirmation
 	if match.TeamAID == req.TeamID {
 		match.TeamAScheduleConfirmed = true
 	} else if match.TeamBID == req.TeamID {
@@ -2734,22 +2955,119 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Both confirmed → mark scheduled
-	if match.TeamAScheduleConfirmed && match.TeamBScheduleConfirmed {
-		match.Status = "Scheduled"
-		now := time.Now()
-		match.ScheduleConfirmedAt = &now
+	// Load teams
+	var teamA, teamB Team
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+
+	// ================================
+	// 📌 Detect if this is a reschedule
+	// ================================
+	isReschedule := false
+	if match.Status == "Scheduled" {
+		isReschedule = true
 	}
 
-	if err := DB.Save(&match).Error; err != nil {
-		http.Error(w, "failed to update", http.StatusInternalServerError)
-		return
+	// If both teams confirmed → finalize
+	if match.TeamAScheduleConfirmed && match.TeamBScheduleConfirmed {
+
+		// Update match
+		now := time.Now()
+		match.Status = "Scheduled"
+		match.ScheduleConfirmedAt = &now
+		DB.Save(&match)
+
+		// ================================
+		// 🔍 Load team rosters
+		// ================================
+		var teamAMembers, teamBMembers []TeamMember
+		DB.Where("team_id = ?", match.TeamAID).Find(&teamAMembers)
+		DB.Where("team_id = ?", match.TeamBID).Find(&teamBMembers)
+
+		// ================================
+		// 🧠 Format roster pings (clean)
+		// ================================
+		formatPings := func(list []TeamMember) string {
+			if len(list) == 0 {
+				return "*No players found*"
+			}
+			if len(list) > 15 {
+				// Show first 10, hide the rest
+				p := ""
+				for i := 0; i < 10; i++ {
+					p += fmt.Sprintf("<@%d> ", list[i].PlayerID)
+				}
+				return fmt.Sprintf("%s\n…and **%d more**", p, len(list)-10)
+			}
+			// Normal ping list
+			p := ""
+			for _, m := range list {
+				p += fmt.Sprintf("<@%d> ", m.PlayerID)
+			}
+			return p
+		}
+
+		pingA := formatPings(teamAMembers)
+		pingB := formatPings(teamBMembers)
+
+		// ================================
+		// 📅 Include scheduled date/time
+		// ================================
+		scheduledDate := "Not Set"
+		if match.ScheduledDate != nil {
+			// Discord timestamp style
+			scheduledDate = fmt.Sprintf("<t:%d:f>", match.ScheduledDate.Unix())
+		}
+
+		// ================================
+		// 📝 Build log message
+		// ================================
+		var logMsg string
+
+		if isReschedule {
+			// 🔁 Reschedule log
+			logMsg = fmt.Sprintf(
+				"🔁 **Match Rescheduled:** %s\n"+
+					"Teams: **%s** vs **%s**\n"+
+					"Rescheduled by <@%s>\n"+
+					"📅 New Date: %s\n\n"+
+					"🔵 **Team %s Players:**\n%s\n\n"+
+					"🔴 **Team %s Players:**\n%s",
+				match.MatchCode,
+				teamA.Name, teamB.Name,
+				actorDiscordID,
+				scheduledDate,
+				teamA.Name, pingA,
+				teamB.Name, pingB,
+			)
+		} else {
+			// 🆕 Initial schedule log
+			logMsg = fmt.Sprintf(
+				"📅 **Match Scheduled:** %s\n"+
+					"Teams: **%s** vs **%s**\n"+
+					"Confirmed by <@%s>\n"+
+					"📅 Match Date: %s\n\n"+
+					"🔵 **Team %s Players:**\n%s\n\n"+
+					"🔴 **Team %s Players:**\n%s",
+				match.MatchCode,
+				teamA.Name, teamB.Name,
+				actorDiscordID,
+				scheduledDate,
+				teamA.Name, pingA,
+				teamB.Name, pingB,
+			)
+		}
+
+		// ================================
+		// 📤 Send schedule log to MATCHES channel
+		// ================================
+		LogMatch(logMsg)
 	}
 
 	respondJSON(w, map[string]any{
 		"success":  true,
-		"match_id": match.ID,
 		"status":   match.Status,
+		"match_id": match.ID,
 	})
 }
 
@@ -2759,6 +3077,7 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		MatchID uint `json:"match_id"`
 		TeamID  uint `json:"team_id"`
 	}
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
@@ -2770,7 +3089,13 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Mark this team's confirmation
+	// 🔔 Log team confirmation
+	SendDiscordLog(
+		fmt.Sprintf("📝 **Score Confirmation:** Team **%d** confirmed scores for Match **#%d**",
+			req.TeamID, req.MatchID),
+	)
+
+	// --- Confirm team ---
 	if req.TeamID == match.TeamAID {
 		match.TeamAScoreConfirmed = true
 	} else if req.TeamID == match.TeamBID {
@@ -2780,13 +3105,14 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Both confirmed? check if scores already match ---
+	// --- If BOTH confirmed, finalize the match ---
 	if match.TeamAScoreConfirmed && match.TeamBScoreConfirmed {
+
 		var maps []MatchScore
 		DB.Where("match_id = ?", match.ID).Find(&maps)
 
 		if len(maps) == 0 {
-			log.Printf("⚠️ No map scores found for match #%d during confirm", match.ID)
+			log.Printf("⚠️ No map scores for match #%d", match.ID)
 		}
 
 		totalA, totalB := 0, 0
@@ -2798,39 +3124,53 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Decide winner/loser
+		// --- Determine winner ---
 		if totalA != totalB {
+
 			var winnerID, loserID uint
 			if totalA > totalB {
-				winnerID, loserID = match.TeamAID, match.TeamBID
+				winnerID = match.TeamAID
+				loserID = match.TeamBID
 			} else {
-				winnerID, loserID = match.TeamBID, match.TeamAID
+				winnerID = match.TeamBID
+				loserID = match.TeamAID
 			}
 
 			match.WinnerID = &winnerID
 			match.LoserID = &loserID
 			match.Status = "Completed"
+			DB.Save(&match)
 
-			if err := DB.Save(&match).Error; err != nil {
-				http.Error(w, "Failed to finalize match", http.StatusInternalServerError)
-				return
-			}
-
+			// 🔥 Leaderboard update
 			updateLeaderboards(winnerID, loserID)
-			log.Printf("🏁 Match #%d completed (Winner: %d, Loser: %d)", match.ID, winnerID, loserID)
 
-			// 🧩 Snapshot both teams' rosters for historical accuracy
+			// 📸 Snapshot rosters
 			snapshotTeamRoster(match.TeamAID, currentSeason)
 			snapshotTeamRoster(match.TeamBID, currentSeason)
+
+			// 🔔 Discord log
+			SendDiscordLog(
+				fmt.Sprintf(
+					"🏆 **Match Finalized (#%d):** Winner **Team %d**, Loser **Team %d**",
+					match.ID, winnerID, loserID),
+			)
 
 		} else {
+			// --- Tie case ---
 			match.Status = "Completed"
 			DB.Save(&match)
-			log.Printf("🤝 Match #%d completed (tie)", match.ID)
 
-			// 🧩 Still snapshot for record keeping (tie matches count too)
+			// snapshot anyway
 			snapshotTeamRoster(match.TeamAID, currentSeason)
 			snapshotTeamRoster(match.TeamBID, currentSeason)
+
+			// 🔔 Discord log
+			SendDiscordLog(
+				fmt.Sprintf(
+					"🤝 **Match Finalized (#%d):** Ended in a tie.",
+					match.ID,
+				),
+			)
 		}
 
 		respondJSON(w, map[string]any{
@@ -2841,11 +3181,8 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Only one side confirmed → just update flag
-	if err := DB.Save(&match).Error; err != nil {
-		http.Error(w, "Failed to update confirmation", http.StatusInternalServerError)
-		return
-	}
+	// --- Only one team confirmed ---
+	DB.Save(&match)
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -3184,6 +3521,16 @@ func CaptainRenameTeam(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("🧢 Captain renamed team #%d: '%s' → '%s' (player %d)", team.ID, oldName, team.Name, playerID)
 
+	SendDiscordLog(
+		fmt.Sprintf(
+			"✏️ **Team Renamed:** **%s** → **%s** (Team #%d, Captain <@%d>)",
+			oldName,
+			team.Name,
+			team.ID,
+			playerID,
+		),
+	)
+
 	respondJSON(w, map[string]any{"success": true, "team": team})
 }
 
@@ -3441,4 +3788,230 @@ func ModSetAllTeamsActive(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "All teams set to Active",
 	})
+}
+
+// POST /api/match/cast
+// Creates a private caster channel
+func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
+	type Body struct {
+		MatchID uint `json:"match_id"`
+	}
+	var req Body
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MatchID == 0 {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	session, _ := store.Get(r, "session")
+	discordIDStr, ok := session.Values["discord_id"].(string)
+	if !ok || discordIDStr == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var player Player
+	if err := DB.First(&player, "id = ?", discordIDStr).Error; err != nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	casterRoleID := getEnv("DISCORD_CASTER_ROLE_ID", "")
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	botToken := getEnv("DISCORD_BOT_TOKEN", "")
+
+	if casterRoleID == "" || guildID == "" || botToken == "" {
+		http.Error(w, "Caster role not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// Check guild roles
+	isCaster := false
+	{
+		url := fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordIDStr)
+		req2, _ := http.NewRequest("GET", url, nil)
+		req2.Header.Set("Authorization", "Bot "+botToken)
+		resp, err := http.DefaultClient.Do(req2)
+		if err == nil && resp.StatusCode == 200 {
+			var member struct {
+				Roles []string `json:"roles"`
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&member)
+			resp.Body.Close()
+
+			for _, r := range member.Roles {
+				if r == casterRoleID {
+					isCaster = true
+					break
+				}
+			}
+		}
+	}
+
+	if !isCaster {
+		http.Error(w, "You are not a caster", http.StatusForbidden)
+		return
+	}
+
+	var match Match
+	if err := DB.First(&match, req.MatchID).Error; err != nil {
+		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
+	finalStatuses := map[string]bool{
+		"Finished":       true,
+		"Completed":      true,
+		"Forfeit":        true,
+		"Double Forfeit": true,
+		"Cancelled":      true,
+	}
+
+	if finalStatuses[strings.TrimSpace(match.Status)] {
+		http.Error(w, "This match has already been finalized and cannot be casted.", http.StatusForbidden)
+		return
+	}
+
+	if match.Status != "Scheduled" {
+		http.Error(w, "Match is not scheduled", http.StatusForbidden)
+		return
+	}
+
+	var teamA Team
+	var teamB Team
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+
+	var rosterA []TeamMember
+	var rosterB []TeamMember
+	DB.Where("team_id = ?", match.TeamAID).Find(&rosterA)
+	DB.Where("team_id = ?", match.TeamBID).Find(&rosterB)
+
+	categoryID := getEnv("DISCORD_CAST_CATEGORY_ID", "")
+	if categoryID == "" {
+		http.Error(w, "Cast category not configured", http.StatusInternalServerError)
+		return
+	}
+
+	const (
+		PermViewChannel        = 1 << 10 // 1024
+		PermSendMessages       = 1 << 11 // 2048
+		PermReadMessageHistory = 1 << 16 // 65536
+	)
+
+	overwrites := []map[string]any{
+		{
+			"id":   guildID,
+			"type": 0,
+			"deny": PermViewChannel, // int, not string
+		},
+		{
+			"id":    casterRoleID,
+			"type":  0,
+			"allow": PermViewChannel | PermSendMessages | PermReadMessageHistory,
+		},
+	}
+
+	modRoleID := getEnv("DISCORD_LEAGUE_MOD_ROLE_ID", "")
+	if modRoleID != "" {
+		overwrites = append(overwrites, map[string]any{
+			"id":    modRoleID,
+			"type":  0,
+			"allow": PermViewChannel | PermReadMessageHistory,
+		})
+	}
+
+	for _, tm := range append(rosterA, rosterB...) {
+		overwrites = append(overwrites, map[string]any{
+			"id":    fmt.Sprint(tm.PlayerID),
+			"type":  1,
+			"allow": PermViewChannel | PermReadMessageHistory,
+		})
+	}
+
+	body := map[string]any{
+		"name":                  fmt.Sprintf("cast-%s", match.MatchCode),
+		"type":                  0,
+		"parent_id":             categoryID,
+		"permission_overwrites": overwrites,
+	}
+
+	jsonBody, _ := json.Marshal(body)
+
+	req3, _ := http.NewRequest("POST",
+		fmt.Sprintf("https://discord.com/api/v10/guilds/%s/channels", guildID),
+		strings.NewReader(string(jsonBody)))
+
+	req3.Header.Set("Authorization", "Bot "+botToken)
+	req3.Header.Set("Content-Type", "application/json")
+
+	resp3, err := http.DefaultClient.Do(req3)
+	if err != nil {
+		http.Error(w, "Failed to create Discord channel", http.StatusInternalServerError)
+		return
+	}
+	defer resp3.Body.Close()
+
+	if resp3.StatusCode != 201 {
+		bodyBytes, _ := io.ReadAll(resp3.Body)
+		log.Println("Discord API error:", resp3.Status)
+		log.Println("Response:", string(bodyBytes))
+		http.Error(w, "Discord API error", http.StatusInternalServerError)
+		return
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	json.NewDecoder(resp3.Body).Decode(&created)
+
+	// ==========================================================
+	// SEND MESSAGE INSIDE THE CAST CHANNEL
+	// ==========================================================
+	msgBody := map[string]any{
+		"content": fmt.Sprintf(
+			"📣 **This match is being casted!**\n\n"+
+				"**%s vs %s**\n\n"+
+				"🔗 **Post all Taxi Links here**\n\n"+
+				"wait for casters greenlight before starting the match.\n\n%s",
+			teamA.Name,
+			teamB.Name,
+			buildMentionList(rosterA, rosterB),
+		),
+	}
+
+	msgJSON, _ := json.Marshal(msgBody)
+
+	msgReq, _ := http.NewRequest("POST",
+		fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages", created.ID),
+		strings.NewReader(string(msgJSON)),
+	)
+
+	msgReq.Header.Set("Authorization", "Bot "+botToken)
+	msgReq.Header.Set("Content-Type", "application/json")
+
+	msgResp, err := http.DefaultClient.Do(msgReq)
+	if err != nil {
+		log.Println("❌ Failed to send cast message:", err)
+	} else {
+		defer msgResp.Body.Close()
+		if msgResp.StatusCode >= 300 {
+			bodyBytes, _ := io.ReadAll(msgResp.Body)
+			log.Println("❌ Discord message error:", msgResp.Status)
+			log.Println("Response:", string(bodyBytes))
+		}
+	}
+
+	respondJSON(w, map[string]any{
+		"success":    true,
+		"channel_id": created.ID,
+	})
+}
+
+func buildMentionList(a []TeamMember, b []TeamMember) string {
+	text := ""
+	for _, tm := range append(a, b...) {
+		text += fmt.Sprintf("<@%d> ", tm.PlayerID)
+	}
+	return text
 }
