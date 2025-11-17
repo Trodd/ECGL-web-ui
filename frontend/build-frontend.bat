@@ -6,10 +6,10 @@ rmdir /s /q dist
 rmdir /s /q node_modules
 
 echo 📦 Installing dependencies...
-npm install
+call npm install
 
 echo 🏗️ Building frontend...
-npm run build
+call npm run build
 
 echo ✅ Build complete! Dist folder is at:
 echo    C:\ECGLwebui\frontend\dist

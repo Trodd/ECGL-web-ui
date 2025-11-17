@@ -3,9 +3,9 @@
   "short_name": "ECGL",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1b1b1b",
-  "theme_color": "#1b1b1b",
-  "orientation": "portrait",
+  "background_color": "#0a0a0a",
+  "theme_color": "#3b6ea5",
+  "description": "Competitive Echo Combat League with teams, matchups, schedules, and leaderboards.",
   "icons": [
     {
       "src": "/icon-192.png",

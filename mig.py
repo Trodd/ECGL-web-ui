@@ -4,6 +4,7 @@ import psycopg2
 import difflib
 from oauth2client.service_account import ServiceAccountCredentials
 from pytz import timezone
+from datetime import datetime, UTC
 
 # === Google Sheets ===
 scope = [
@@ -349,32 +350,77 @@ def migrate_matches(include_orphans=True):
         team_b = row[2].strip() if len(row) > 2 else ""
         proposed_str = row[3].strip() if len(row) > 3 else ""
         scheduled_str = row[4].strip() if len(row) > 4 else ""
-        status = row[5].strip().capitalize() if len(row) > 5 else "Finished"
+        status_raw = row[5].strip() if len(row) > 5 else ""
         winner_name = row[6].strip() if len(row) > 6 else None
         loser_name = row[7].strip() if len(row) > 7 else None
 
-        valid_statuses = {
-            "finished": "Finished",
-            "forfeited": "Forfeited",
-            "double forfeit": "Forfeited",
-            "pending": "Proposed",
-            "scheduled": "Scheduled",
-            "tbd": "Proposed",
-            "": "Proposed",
-        }
-        status = valid_statuses.get(status.lower(), "Finished")
+        # Temporary place-holder, real logic below
+        final_status = "Finished"
+
+        # Determine winner/loser IDs BEFORE deciding final status
+        winner_id = None
+        loser_id = None
+
+        if winner_name:
+            # Try team name first
+            winner_id = ensure_team(winner_name)
+            # If not a team, try resolving the player's team
+            if winner_id is None:
+                winner_id = resolve_team_from_player(winner_name)
+
+        if loser_name:
+            loser_id = ensure_team(loser_name)
+            if loser_id is None:
+                loser_id = resolve_team_from_player(loser_name)
+
+        # Count score rows NOW (we check after scoring migration too)
+        cur.execute("SELECT COUNT(*) FROM match_scores WHERE match_id = (SELECT id FROM matches WHERE match_code=%s)", (match_code,))
+        score_count = cur.fetchone()[0] if cur.rowcount else 0
+
+        # ====== FINAL STATUS LOGIC ======
+        # 1) Double Forfeit → no winner, no loser
+        if not winner_id and not loser_id:
+            final_status = "Double Forfeit"
+
+        # 2) Forfeit → winner & loser exist, but NO map scores
+        elif winner_id and loser_id and score_count == 0:
+            final_status = "Forfeit"
+
+        # 3) Finished → winner & loser AND map scores exist
+        elif winner_id and loser_id and score_count > 0:
+            final_status = "Finished"
+
+        # 4) Pending / Proposed cases
+        elif status_raw.lower() in ["pending", "tbd", "proposed", ""]:
+            final_status = "Proposed"
+
+        # 5) Scheduled
+        elif status_raw.lower() == "scheduled":
+            final_status = "Scheduled"
+
+        # 6) Fallback
+        else:
+            final_status = "Finished"
 
         def safe_parse_date(s):
             if not s or s.upper() == "TBD":
                 return None
+
             s = s.strip()
+
             try:
+                # Discord timestamp: <t:1728172800:f>
                 if s.startswith("<t:") and s.endswith(":f>"):
                     ts = int(s.split(":")[1])
-                    return datetime.utcfromtimestamp(ts)
+                    return datetime.fromtimestamp(ts, UTC)
+
+                # Plain UNIX timestamp
                 if s.isdigit():
-                    return datetime.utcfromtimestamp(int(s))
+                    return datetime.fromtimestamp(int(s), UTC)
+
+                # Fallback to your regular date parser
                 return parse_date(s)
+
             except Exception:
                 return None
 
@@ -383,8 +429,6 @@ def migrate_matches(include_orphans=True):
         # --- Auto-create teams if not found ---
         team_a_id = ensure_team(team_a)
         team_b_id = ensure_team(team_b)
-        winner_id = ensure_team(winner_name) if winner_name else None
-        loser_id = ensure_team(loser_name) if loser_name else None
 
         try:
             cur.execute("""
@@ -398,7 +442,7 @@ def migrate_matches(include_orphans=True):
                         status = EXCLUDED.status,
                         winner_id = EXCLUDED.winner_id,
                         loser_id = EXCLUDED.loser_id;
-            """, (match_code, team_a_id, team_b_id, scheduled_date, status, winner_id, loser_id))
+            """, (match_code, team_a_id, team_b_id, scheduled_date, final_status, winner_id, loser_id))
 
             if cur.rowcount == 1:
                 inserted += 1
@@ -535,6 +579,21 @@ def migrate_player_history():
     conn.commit()
     print("✅ Player History recorded for", current_season)
 
+def resolve_team_from_player(player_name):
+    """Return the player's team_id if the sheet names the PLAYER, not the TEAM."""
+    clean = normalize_name(player_name)
+    normalized_map = {normalize_name(k): v for k, v in player_map.items()}
+
+    # If player exists, find their team
+    if clean in normalized_map:
+        discord_id = normalized_map[clean][0]
+        cur.execute("SELECT team_id FROM team_members WHERE player_id=%s", (discord_id,))
+        r = cur.fetchone()
+        if r:
+            return r[0]  # team_id
+
+    return None
+
 # === Run Migration (order matters!) ===
 migrate_teams()
 migrate_players_sheet()
@@ -542,8 +601,8 @@ migrate_players_leaderboard()
 migrate_team_members()
 migrate_team_leaderboard()
 migrate_player_history()
+migrate_scoring()  
 migrate_matches()
-migrate_scoring()
 
 cur.close()
 conn.close()

@@ -2146,7 +2146,7 @@ func modJSONErr(w http.ResponseWriter, code int, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": msg})
 }
 
-func getUint(body any) (uint, bool) {
+/*func getUint(body any) (uint, bool) {
 	switch v := body.(type) {
 	case float64:
 		if v < 0 {
@@ -2172,7 +2172,7 @@ func getUint(body any) (uint, bool) {
 	default:
 		return 0, false
 	}
-}
+}*/
 
 // ========= MATCH MOD: Reset / Forfeit / DoubleForfeit / Delete =========
 
@@ -3096,11 +3096,12 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// --- Confirm team ---
-	if req.TeamID == match.TeamAID {
+	switch req.TeamID {
+	case match.TeamAID:
 		match.TeamAScoreConfirmed = true
-	} else if req.TeamID == match.TeamBID {
+	case match.TeamBID:
 		match.TeamBScoreConfirmed = true
-	} else {
+	default:
 		http.Error(w, "Team not part of match", http.StatusForbidden)
 		return
 	}

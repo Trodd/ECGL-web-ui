@@ -43,9 +43,16 @@ body {
 .nav-tabs {
   position: sticky;
   top: 0;
+  /* stays at very top of the screen */
   z-index: 1000;
-  background: #111;
+
+  /* visual styling */
+  background-color: #000 !important;
   padding: 5px 15px;
+
+  /* extend background behind the notch */
+  padding-top: env(safe-area-inset-top);
+
   margin: 0;
   border-bottom: 1px solid #333;
 }
@@ -340,4 +347,59 @@ h3 {
   padding: 6px 10px;
   border-radius: 6px;
   display: inline-block;
+}
+
+/* === Fully Mobile-Friendly Tab Bar Override === */
+
+/* Make the tab row behave like a horizontal scroll menu */
+.ecgl-tabs {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  overflow-y: hidden;
+  white-space: nowrap;
+  gap: 6px;
+  padding-bottom: 4px;
+
+  -webkit-overflow-scrolling: touch;
+  /* Smooth iOS scrolling */
+  scrollbar-width: none;
+  /* Hide Firefox scrollbar */
+}
+
+.ecgl-tabs::-webkit-scrollbar {
+  display: none;
+  /* Hide Chrome/Safari scrollbar */
+}
+
+/* Prevent link wrapping & shrinking */
+.ecgl-tabs .nav-link {
+  flex: 0 0 auto !important;
+  white-space: nowrap;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+}
+
+/* Keep logout on the far right but still scrollable */
+.ecgl-tabs .ms-auto {
+  margin-left: auto !important;
+  flex: 0 0 auto;
+}
+
+/* === Notch / Safe-Area Support === */
+
+/* Allow edge-to-edge fullscreen */
+html {
+  height: -webkit-fill-available;
+}
+
+/* ONLY the header should get safe-area padding */
+.ecgl-header {
+  padding-top: max(env(safe-area-inset-top), 12px);
+  margin-top: 0 !important;
+}
+
+/* Body should NOT get safe-area padding */
+body {
+  padding-top: 0 !important;
 }

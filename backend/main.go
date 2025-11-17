@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -605,20 +606,31 @@ func main() {
 	api.HandleFunc("/leaderboard/players", GetPlayerLeaderboard).Methods("GET")
 	api.HandleFunc("/leaderboard/teams", GetTeamLeaderboard).Methods("GET")
 
-	// Static frontend
+	// STATIC FRONTEND + SPA FALLBACK
 	distDir := "../frontend/dist"
+
+	// Serve static assets (JS, CSS, PNG, manifest, etc)
 	r.PathPrefix("/assets/").Handler(http.StripPrefix("/", http.FileServer(http.Dir(distDir))))
 
-	// Catch-all for SPA (non-API only)
-	r.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// SPA fallback for all non-API routes
+	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Allow API routes to 404 through normal handler
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			http.NotFound(w, r) // never serve HTML for API calls
+			http.NotFound(w, r)
 			return
 		}
-		http.ServeFile(w, r, distDir+"/index.html")
-	}))
 
-	// TLS
+		staticPath := filepath.Join(distDir, r.URL.Path)
+		if info, err := os.Stat(staticPath); err == nil && !info.IsDir() {
+			http.ServeFile(w, r, staticPath)
+			return
+		}
+
+		// Fallback → serve React index.html
+		http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
+	})
+
+	// TLS SETUP (autocert / Let's Encrypt)
 	host := mustGet("TLS_HOST", "ecgleague.com")
 
 	certManager := autocert.Manager{
@@ -638,12 +650,13 @@ func main() {
 		ErrorLog: log.New(quietErrorLog{}, "", 0),
 	}
 
-	// HTTP challenge server for Let's Encrypt
+	// HTTP (port 80) listener for Let's Encrypt challenges
 	go func() {
 		log.Println("🌐 Listening on :80 for ACME HTTP-01 challenges")
 		http.ListenAndServe(":80", certManager.HTTPHandler(nil))
 	}()
 
-	log.Println("🚀 ECGL API running at https://" + host)
+	log.Println("🚀 ECGL running at https://" + host)
 	log.Fatal(server.ListenAndServeTLS("", ""))
+
 }
