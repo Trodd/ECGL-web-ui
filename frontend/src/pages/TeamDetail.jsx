@@ -52,25 +52,26 @@ export default function TeamDetail() {
 
     return matches.filter((m) => {
       const code = (m.match_code || "").toLowerCase();
+
+      // --- PRESEASON MATCHES ---
+      // Preseason codes look like: "week1-m032"
+      // OR sometimes "preseason-week3-m028"
       if (selectedSeason === "Preseason") {
-        // ✅ Any match that doesn’t specify S1/S2/etc = Preseason
-        return (
-          code.includes("week") ||
-          (!code.includes("s1") &&
-            !code.includes("s2") &&
-            !code.includes("s3") &&
-            !code.includes("season"))
-        );
+        return code.startsWith("week") || code.startsWith("preseason");
       }
 
-      // ✅ Otherwise match against season keyword
-      const keyword = selectedSeason.toLowerCase().replace(" ", "");
-      return code.includes(keyword);
+      // --- REGULAR SEASONS ---
+      // Convert "Season 1" → "1"
+      const num = selectedSeason.replace(/[^0-9]/g, "");
+      if (!num) return false;
+
+      // Season codes look like: "1-week2-m015"
+      return code.startsWith(`${num}-`);
     });
   }, [matches, selectedSeason]);
 
   if (error) return <p className="text-danger">{error}</p>;
-  if (!team) return <p className="text-muted">Loading team...</p>;
+  if (!team) return <p className="text-light">Loading team...</p>;
 
   return (
     <div>
@@ -106,7 +107,7 @@ export default function TeamDetail() {
           ))}
         </ul>
       ) : (
-        <p className="text-muted">No roster found.</p>
+        <p className="text-light">No roster found.</p>
       )}
 
       <h3 className="mt-4 mb-3 text-light">📜 Match History</h3>

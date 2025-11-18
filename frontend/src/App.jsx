@@ -50,7 +50,7 @@ function App() {
       </header>
 
       {/* === Navbar === */}
-      <ul className="nav nav-tabs mb-3 ecgl-tabs">
+      <ul className="ecgl-tabs nav nav-tabs">
         <li className="nav-item">
           <NavLink to="/" end className="nav-link">
             🏠 Home

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -100,6 +101,43 @@ func GetSettings(w http.ResponseWriter, r *http.Request) {
 		"min_team_players": minPlayers,
 		"max_team_players": maxPlayers,
 	})
+}
+
+// Returns BOTH captain + co-captain pings for a team
+func getBothCaptainPings(teamID uint) string {
+	var members []TeamMember
+
+	// Find captain AND co-captain for that team
+	DB.Where("team_id = ? AND (role = ? OR role = ?)", teamID, "Captain", "Co-Captain").
+		Find(&members)
+
+	// Safety fallback
+	if len(members) == 0 {
+		return "*No captains found*"
+	}
+
+	// Build ping string
+	p := ""
+	for _, m := range members {
+		p += fmt.Sprintf("<@%d> ", m.PlayerID)
+	}
+
+	return p
+}
+
+// Returns ONLY the actual captain — if no captain exists, fallback to co-captain
+func getCaptainPing(teamID uint) string {
+	var captain TeamMember
+	if err := DB.Where("team_id = ? AND role = ?", teamID, "Captain").First(&captain).Error; err == nil {
+		return fmt.Sprintf("<@%d>", captain.PlayerID)
+	}
+
+	var co TeamMember
+	if err := DB.Where("team_id = ? AND role = ?", teamID, "Co-Captain").First(&co).Error; err == nil {
+		return fmt.Sprintf("<@%d>", co.PlayerID)
+	}
+
+	return "*No captain found*"
 }
 
 func LogoutHandler(w http.ResponseWriter, r *http.Request) {
@@ -1430,12 +1468,14 @@ func HandleToggleTeamStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var team Team
+	DB.First(&team, req.TeamID)
 	SendDiscordLog(
 		fmt.Sprintf(
-			"🔄 **Team Status Changed:** Team #%d → **%s** by <@%s>",
-			req.TeamID,
-			req.Status,
-			discordID,
+			"🔄 **Team Status Changed:** **%s** → **%s** by <@%s>",
+			team.Name,  // team name instead of ID
+			req.Status, // new status
+			discordID,  // who changed it
 		),
 	)
 
@@ -1483,11 +1523,13 @@ func HandleToggleTeamJoinAllowed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var team Team
+	DB.First(&team, req.TeamID)
 	SendDiscordLog(
 		fmt.Sprintf(
-			"👥 **Join Requests %s** for **Team #%d** (by <@%s>)",
+			"👥 **Join Requests %s** for **%s** (by <@%s>)",
 			map[bool]string{true: "Enabled", false: "Disabled"}[req.Allow],
-			req.TeamID,
+			team.Name,
 			discordID,
 		),
 	)
@@ -1498,6 +1540,43 @@ func HandleToggleTeamJoinAllowed(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("Join requests %s",
 			map[bool]string{true: "enabled", false: "disabled"}[req.Allow]),
 	})
+}
+
+func SendDiscordEmbedWithPings(content, title, description string) {
+	botToken := getEnv("DISCORD_BOT_TOKEN", "")
+	channelID := getEnv("DISCORD_LOG_CHANNEL_MATCHES", "")
+
+	if botToken == "" || channelID == "" {
+		log.Println("❌ Missing Discord env vars (Embed not sent)")
+		return
+	}
+
+	body := map[string]any{
+		"content": content, // <-- THIS IS WHERE REAL PINGS GO
+		"embeds": []any{
+			map[string]any{
+				"title":       title,
+				"description": description,
+				"color":       0x3498DB,
+			},
+		},
+	}
+
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest(
+		"POST",
+		"https://discord.com/api/v10/channels/"+channelID+"/messages",
+		bytes.NewBuffer(b),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bot "+botToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Println("❌ SendDiscordEmbed error:", err)
+		return
+	}
+	resp.Body.Close()
 }
 
 // --- POST /api/match/schedule ---
@@ -1513,24 +1592,26 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// --- Load match ---
 	var match Match
 	if err := DB.First(&match, req.MatchID).Error; err != nil {
 		http.Error(w, "Match not found", http.StatusNotFound)
 		return
 	}
 
+	// --- Parse date ---
 	date, err := time.Parse(time.RFC3339, req.Date)
 	if err != nil {
 		http.Error(w, "Invalid date format", http.StatusBadRequest)
 		return
 	}
 
-	// ✅ Allow update if it was already scheduled
 	oldDate := ""
 	if match.ScheduledDate != nil {
 		oldDate = match.ScheduledDate.Format(time.RFC1123)
 	}
 
+	// --- Update & confirm ---
 	match.ScheduledDate = &date
 	match.Status = "Scheduled"
 	match.TeamAScheduleConfirmed = true
@@ -1541,13 +1622,18 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// --- Logging (console only) ---
 	if oldDate == "" {
 		log.Printf("📅 Match #%d scheduled by Team %d for %s", match.ID, req.TeamID, date.Format(time.RFC1123))
 	} else {
 		log.Printf("✏️ Match #%d rescheduled by Team %d: %s → %s", match.ID, req.TeamID, oldDate, date.Format(time.RFC1123))
 	}
 
-	// Fetch team names
+	// =====================================================
+	//         🔥 Build Embed for Discord Log
+	// =====================================================
+
+	// Fetch teams
 	var teamA, teamB Team
 	DB.First(&teamA, match.TeamAID)
 	DB.First(&teamB, match.TeamBID)
@@ -1556,16 +1642,61 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "session")
 	discordIDStr, _ := session.Values["discord_id"].(string)
 
-	// Only log when match is officially Scheduled
-	if match.Status == "Scheduled" {
-		LogMatch(
-			fmt.Sprintf(
-				"📅 **Match Scheduled:** %s — %s vs %s\nScheduled by <@%s>",
-				match.MatchCode, teamA.Name, teamB.Name, discordIDStr,
-			),
-		)
+	// --- Fetch rosters ---
+	var rosterA, rosterB []TeamMember
+	DB.Where("team_id = ?", match.TeamAID).Find(&rosterA)
+	DB.Where("team_id = ?", match.TeamBID).Find(&rosterB)
+
+	// --- Format pings safely ---
+	formatPings := func(list []TeamMember) string {
+		if len(list) == 0 {
+			return "*No players found*"
+		}
+		p := ""
+		for _, m := range list {
+			p += fmt.Sprintf("<@%d> ", m.PlayerID)
+		}
+		return p
 	}
 
+	pingA := formatPings(rosterA)
+	pingB := formatPings(rosterB)
+
+	// Discord timestamp
+	timestamp := "<t:%d:f>"
+	if match.ScheduledDate != nil {
+		timestamp = fmt.Sprintf("<t:%d:f>", match.ScheduledDate.Unix())
+	} else {
+		timestamp = "Not Set"
+	}
+
+	// --- Build embed description ---
+	desc := fmt.Sprintf(
+		"📌 **%s vs %s**\n"+
+			"📅 **Match Time:** %s\n"+
+			"🧑‍✈️ **Scheduled by:** <@%s>\n\n"+
+			"🔵 **%s Roster:**\n%s\n\n"+
+			"🔴 **%s Roster:**\n%s",
+		teamA.Name, teamB.Name,
+		timestamp,
+		discordIDStr,
+		teamA.Name, pingA,
+		teamB.Name, pingB,
+	)
+
+	/// Combine both rosters into a ping message
+	pingContent := fmt.Sprintf(
+		"%s %s",
+		pingA, pingB,
+	)
+
+	SendDiscordEmbedWithPings(
+		pingContent,
+		fmt.Sprintf("📅 Match Scheduled — %s", match.MatchCode),
+		desc,
+	)
+
+	// Response
 	respondJSON(w, map[string]any{
 		"success": true,
 		"message": fmt.Sprintf("Match scheduled for %s", date.Format(time.RFC1123)),
@@ -1633,24 +1764,12 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 			mode = "Unknown"
 		}
 
-		our, their := m.TeamAScore, m.TeamBScore
-		aScore, bScore := 0, 0
-
-		// Normalize into teamA vs teamB perspective
-		if isTeamA {
-			aScore = our
-			bScore = their
-		} else {
-			aScore = their
-			bScore = our
-		}
-
 		newScores = append(newScores, MatchScore{
 			MatchID:    req.MatchID,
 			MapNumber:  mapNum,
 			Gamemode:   mode,
-			TeamAScore: aScore,
-			TeamBScore: bScore,
+			TeamAScore: m.TeamAScore,
+			TeamBScore: m.TeamBScore,
 		})
 	}
 
@@ -3071,6 +3190,46 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func SendScoreEmbedWithPings(content, title, description string) {
+	botToken := getEnv("DISCORD_BOT_TOKEN", "")
+	channelID := getEnv("DISCORD_LOG_CHANNEL_SCORES", "") // ⬅ CORRECT CHANNEL
+
+	if botToken == "" || channelID == "" {
+		log.Println("❌ Missing Discord score log env vars")
+		return
+	}
+
+	body := map[string]any{
+		"content": content, // pings go here
+		"embeds": []any{
+			map[string]any{
+				"title":       title,
+				"description": description,
+				"color":       0x2ECC71, // green highlight
+			},
+		},
+	}
+
+	b, _ := json.Marshal(body)
+
+	req, _ := http.NewRequest(
+		"POST",
+		"https://discord.com/api/v10/channels/"+channelID+"/messages",
+		bytes.NewBuffer(b),
+	)
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bot "+botToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Println("❌ SendScoreEmbedWithPings error:", err)
+		return
+	}
+
+	resp.Body.Close()
+}
+
 // --- POST /api/match/confirm-score ---
 func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -3083,19 +3242,86 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// --- Load match ---
 	var match Match
 	if err := DB.First(&match, req.MatchID).Error; err != nil {
 		http.Error(w, "Match not found", http.StatusNotFound)
 		return
 	}
 
-	// 🔔 Log team confirmation
-	SendDiscordLog(
-		fmt.Sprintf("📝 **Score Confirmation:** Team **%d** confirmed scores for Match **#%d**",
-			req.TeamID, req.MatchID),
-	)
+	// --- Load map scores ---
+	var maps []MatchScore
+	DB.Where("match_id = ?", match.ID).Find(&maps)
 
-	// --- Confirm team ---
+	if len(maps) == 0 {
+		http.Error(w, "No map scores submitted yet", http.StatusBadRequest)
+		return
+	}
+
+	// --- Convert score list to a comparable string ---
+	calcHash := func(scores []MatchScore) string {
+		s := ""
+		for _, m := range scores {
+			s += fmt.Sprintf("%d-%d|", m.TeamAScore, m.TeamBScore)
+		}
+		return s
+	}
+
+	currentHash := calcHash(maps)
+
+	// --- If this is the *first* confirmation, store the hash ---
+	if match.ScoreHash == "" {
+		match.ScoreHash = currentHash
+	} else {
+		// --- SECOND TEAM MUST CONFIRM THE SAME HASH ---
+		if match.ScoreHash != currentHash {
+			// ============================================================
+			// ⚠️ Opponent entered different scores → overwrite existing ones
+			// ============================================================
+
+			// Delete old scores
+			DB.Where("match_id = ?", match.ID).Delete(&MatchScore{})
+
+			// Recreate scores using the NEW submission
+			for _, s := range maps {
+				DB.Create(&MatchScore{
+					MatchID:    match.ID,
+					MapNumber:  s.MapNumber,
+					Gamemode:   s.Gamemode,
+					TeamAScore: s.TeamAScore,
+					TeamBScore: s.TeamBScore,
+				})
+			}
+
+			// Reset confirmations so BOTH must confirm again
+			match.TeamAScoreConfirmed = false
+			match.TeamBScoreConfirmed = false
+
+			// Reset stored hash so it recalculates next time
+			match.ScoreHash = currentHash
+
+			match.Status = "Pending Confirmation"
+			DB.Save(&match)
+
+			// Notify teams in Discord
+			SendDiscordLog(
+				fmt.Sprintf(
+					"🔄 **Score Updated:** Team %d submitted a *different* score set for Match #%d.\n"+
+						"New scores have been saved. Both teams must confirm again.",
+					req.TeamID, match.ID,
+				),
+			)
+
+			respondJSON(w, map[string]any{
+				"success": true,
+				"status":  "Reset to new scores",
+				"message": "Opponent entered different scores. New scores saved — both teams must confirm again.",
+			})
+			return
+		}
+	}
+
+	// --- Mark team as confirmed ---
 	switch req.TeamID {
 	case match.TeamAID:
 		match.TeamAScoreConfirmed = true
@@ -3106,89 +3332,161 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- If BOTH confirmed, finalize the match ---
-	if match.TeamAScoreConfirmed && match.TeamBScoreConfirmed {
+	DB.Save(&match)
 
-		var maps []MatchScore
-		DB.Where("match_id = ?", match.ID).Find(&maps)
+	// --- One team confirmed (but not both yet) ---
+	if !(match.TeamAScoreConfirmed && match.TeamBScoreConfirmed) {
 
-		if len(maps) == 0 {
-			log.Printf("⚠️ No map scores for match #%d", match.ID)
+		// Fetch teams
+		var teamA, teamB Team
+		DB.First(&teamA, match.TeamAID)
+		DB.First(&teamB, match.TeamBID)
+
+		// Determine submitter + opponent
+		confirmingTeam := teamA
+		opposingTeam := teamB
+		if req.TeamID == match.TeamBID {
+			confirmingTeam = teamB
+			opposingTeam = teamA
 		}
 
-		totalA, totalB := 0, 0
-		for _, s := range maps {
-			if s.TeamAScore > s.TeamBScore {
-				totalA++
-			} else if s.TeamBScore > s.TeamAScore {
-				totalB++
-			}
-		}
+		// Get submitting Discord user ID
+		session, _ := store.Get(r, "session")
+		discordIDStr, _ := session.Values["discord_id"].(string)
+		submitterID, _ := strconv.ParseInt(discordIDStr, 10, 64)
+		submitterPing := fmt.Sprintf("<@%d>", submitterID)
 
-		// --- Determine winner ---
-		if totalA != totalB {
+		// Opponent captain + co-captain pings
+		opposingCaptainPings := getBothCaptainPings(opposingTeam.ID)
 
-			var winnerID, loserID uint
-			if totalA > totalB {
-				winnerID = match.TeamAID
-				loserID = match.TeamBID
-			} else {
-				winnerID = match.TeamBID
-				loserID = match.TeamAID
-			}
-
-			match.WinnerID = &winnerID
-			match.LoserID = &loserID
-			match.Status = "Completed"
-			DB.Save(&match)
-
-			// 🔥 Leaderboard update
-			updateLeaderboards(winnerID, loserID)
-
-			// 📸 Snapshot rosters
-			snapshotTeamRoster(match.TeamAID, currentSeason)
-			snapshotTeamRoster(match.TeamBID, currentSeason)
-
-			// 🔔 Discord log
-			SendDiscordLog(
-				fmt.Sprintf(
-					"🏆 **Match Finalized (#%d):** Winner **Team %d**, Loser **Team %d**",
-					match.ID, winnerID, loserID),
-			)
-
-		} else {
-			// --- Tie case ---
-			match.Status = "Completed"
-			DB.Save(&match)
-
-			// snapshot anyway
-			snapshotTeamRoster(match.TeamAID, currentSeason)
-			snapshotTeamRoster(match.TeamBID, currentSeason)
-
-			// 🔔 Discord log
-			SendDiscordLog(
-				fmt.Sprintf(
-					"🤝 **Match Finalized (#%d):** Ended in a tie.",
-					match.ID,
-				),
-			)
-		}
+		// Log
+		SendDiscordLog(
+			fmt.Sprintf(
+				"📝 **%s submitted score confirmation for Match %s**\n"+
+					"👥 **Teams:** %s vs %s\n"+
+					"👤 **By:** %s\n"+
+					"⏳ **Waiting on:** %s captains: %s",
+				confirmingTeam.Name,  // the team confirming
+				match.MatchCode,      // match ID
+				teamA.Name,           // team A name
+				teamB.Name,           // team B name
+				submitterPing,        // the user who clicked confirm
+				opposingTeam.Name,    // team that still needs to confirm
+				opposingCaptainPings, // captain + co-captain pings
+			),
+		)
 
 		respondJSON(w, map[string]any{
 			"success": true,
-			"status":  "Completed",
-			"message": "Match finalized.",
+			"status":  "Pending Confirmation",
+			"message": "Waiting for opponent confirmation.",
 		})
 		return
 	}
 
-	// --- Only one team confirmed ---
+	// ==============================================================
+	// 🏆 BOTH TEAMS CONFIRMED *AND* SCORE HASHES MATCH → FINALIZE
+	// ==============================================================
+
+	totalA, totalB := 0, 0
+	for _, s := range maps {
+		if s.TeamAScore > s.TeamBScore {
+			totalA++
+		} else if s.TeamBScore > s.TeamAScore {
+			totalB++
+		}
+	}
+
+	if totalA != totalB {
+		// Determine winner
+		var winnerID, loserID uint
+		if totalA > totalB {
+			winnerID = match.TeamAID
+			loserID = match.TeamBID
+		} else {
+			winnerID = match.TeamBID
+			loserID = match.TeamAID
+		}
+
+		match.WinnerID = &winnerID
+		match.LoserID = &loserID
+	}
+
+	match.Status = "Completed"
 	DB.Save(&match)
+
+	// --- Leaderboard Updates ---
+	if match.WinnerID != nil {
+		updateLeaderboards(*match.WinnerID, *match.LoserID)
+	}
+
+	// --- Roster snapshot ---
+	snapshotTeamRoster(match.TeamAID, currentSeason)
+	snapshotTeamRoster(match.TeamBID, currentSeason)
+
+	// --- Discord Log (Final Match Result) ---
+	var teamA, teamB Team
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+
+	// --- Load all map scores in order ---
+	var finalMaps []MatchScore
+	DB.Where("match_id = ?", match.ID).Order("map_number ASC").Find(&finalMaps)
+
+	// Build map-by-map breakdown in the clean style
+	mapLines := ""
+	for _, m := range finalMaps {
+		mapLines += fmt.Sprintf(
+			"**Map %d (%s)**\n%s %d – %d %s\n\n",
+			m.MapNumber,
+			m.Gamemode,
+			teamA.Name, m.TeamAScore,
+			m.TeamBScore, teamB.Name,
+		)
+	}
+
+	// Determine winner text
+	winnerName := "Tie"
+	if match.WinnerID != nil {
+		if *match.WinnerID == match.TeamAID {
+			winnerName = teamA.Name
+		} else {
+			winnerName = teamB.Name
+		}
+	}
+
+	// Pings outside embed for actual mentioning
+	content := fmt.Sprintf(
+		"🔔 **Finalized Match Results for %s vs %s**\n%s",
+		teamA.Name,
+		teamB.Name,
+		getBothCaptainPings(teamA.ID)+getBothCaptainPings(teamB.ID),
+	)
+
+	// Embed description (no Week section)
+	desc := fmt.Sprintf(
+		"**%s vs %s**\n\n"+
+			"📘 **Match ID**\n%s\n\n"+
+			"%s"+
+			"**Winner**\n%s",
+		teamA.Name,
+		teamB.Name,
+		match.MatchCode,
+		mapLines,
+		winnerName,
+	)
+
+	// Send embed to score log channel
+	SendScoreEmbedWithPings(
+		content,
+		"🏆 Final Match Result",
+		desc,
+	)
 
 	respondJSON(w, map[string]any{
 		"success": true,
-		"status":  "Pending Confirmation",
-		"message": "Waiting for opponent confirmation.",
+		"status":  "Completed",
+		"message": "Match finalized.",
 	})
 }
 

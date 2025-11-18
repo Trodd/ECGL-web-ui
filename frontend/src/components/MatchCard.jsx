@@ -27,20 +27,23 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
 
     // ✅ Load saved scores
     useEffect(() => {
-        if (match.maps && match.maps.length > 0) {
-            const preset = {};
-            match.maps.forEach((m) => {
-                const ourScore = isTeamA ? m.team_a_score : m.team_b_score;
-                const oppScore = isTeamA ? m.team_b_score : m.team_a_score;
-                preset[`map${m.map_number}`] = {
-                    mode: m.gamemode || "",
-                    our: ourScore ?? "",
-                    their: oppScore ?? "",
-                };
-            });
-            setScores(preset);
-        }
-    }, [match.maps, isTeamA]);
+        if (!match.maps || match.maps.length === 0) return;
+
+        const preset = {};
+        match.maps.forEach((m) => {
+            const isViewingTeamA = team.id === match.team_a_id;
+
+            preset[`map${m.map_number}`] = {
+                mode: m.gamemode || "",
+
+                // Stable mapping that never flips on reload
+                our: isViewingTeamA ? m.team_a_score : m.team_b_score,
+                their: isViewingTeamA ? m.team_b_score : m.team_a_score,
+            };
+        });
+
+        setScores(preset);
+    }, [match.maps, match.team_a_id, team.id]);
 
     // 🔄 Load League Subs once
     useEffect(() => {
@@ -76,11 +79,21 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
             .filter((n) => scores[`map${n}`])
             .map((n) => {
                 const s = scores[`map${n}`];
+
                 return {
                     map_number: n,
                     gamemode: s.mode || "",
-                    team_a_score: isTeamA ? Number(s.our || 0) : Number(s.their || 0),
-                    team_b_score: isTeamA ? Number(s.their || 0) : Number(s.our || 0),
+
+                    // ALWAYS submit scores in TeamA/TeamB alignment.
+                    team_a_score:
+                        match.team_a_id === team.id
+                            ? Number(s.our || 0)
+                            : Number(s.their || 0),
+
+                    team_b_score:
+                        match.team_b_id === team.id
+                            ? Number(s.our || 0)
+                            : Number(s.their || 0),
                 };
             });
 
