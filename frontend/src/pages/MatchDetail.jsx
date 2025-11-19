@@ -4,12 +4,24 @@ import axios from "axios";
 
 export default function MatchDetail() {
     const { id } = useParams();
-
     const [matchData, setMatchData] = useState(null);
     const [loading, setLoading] = useState(true);
-
-    // ⭐ NEW: store logged-in user
     const [me, setMe] = useState(null);
+    const [players, setPlayers] = useState([]);
+
+    useEffect(() => {
+        axios
+            .get(`${import.meta.env.VITE_API_URL}/api/players`, { withCredentials: true })
+            .then((res) => setPlayers(res.data || []))
+            .catch(() => setPlayers([]));
+    }, []);
+
+    // Lookup helper
+    function getPlayerName(id) {
+        if (!id) return "None";
+        const p = players.find((x) => String(x.id) === String(id));
+        return p ? p.display_name || p.username : "Unknown";
+    }
 
     // ⭐ NEW: read current configured week
     const currentWeek = import.meta.env.VITE_CURRENT_WEEK;
@@ -231,6 +243,33 @@ export default function MatchDetail() {
                     </>
                 );
             })()}
+
+            {/* --- League Subs --- */}
+            <h4 className="text-light mt-4 mb-3">🧍 League Subs</h4>
+
+            <div className="card bg-dark border-secondary mb-4 shadow-sm">
+                <div className="card-body">
+
+                    <p className="mb-2">
+                        <strong className="text-info">{teamA.name} Sub:</strong>{" "}
+                        {match.league_sub_a ? (
+                            <span className="text-light">{getPlayerName(String(match.league_sub_a))}</span>
+                        ) : (
+                            <span className="text-light">None</span>
+                        )}
+                    </p>
+
+                    <p className="mb-0">
+                        <strong className="text-warning">{teamB.name} Sub:</strong>{" "}
+                        {match.league_sub_b ? (
+                            <span className="text-light">{getPlayerName(String(match.league_sub_b))}</span>
+                        ) : (
+                            <span className="text-light">None</span>
+                        )}
+                    </p>
+
+                </div>
+            </div>
 
             {/* --- Rosters --- */}
             <h4 className="text-light mt-4 mb-3">👥 Rosters at Time of Match</h4>

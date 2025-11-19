@@ -76,7 +76,12 @@ export default function PlayerDetail() {
                       to={`/teams/${h.team_id}`}
                       className="text-info text-decoration-none"
                     >
-                      {h.team}
+                      <>
+                        {h.team}
+                        {h.role === "League Sub" && (
+                          <span className="text-warning ms-2">(League Sub)</span>
+                        )}
+                      </>
                     </Link>
                   ) : (
                     h.team

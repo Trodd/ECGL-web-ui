@@ -12,7 +12,7 @@ start /b go run .
 :: Move into frontend folder and start Vite React app
 cd ../frontend
 echo [FRONTEND] Starting React app on http://localhost:5173 ...
-npm run build
+npm run dev
 
 :: Go back to root when done
 cd ..

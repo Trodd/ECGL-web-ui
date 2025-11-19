@@ -45,12 +45,29 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
         setScores(preset);
     }, [match.maps, match.team_a_id, team.id]);
 
+    // Load saved league subs (NEW — INSERT THIS)
+    useEffect(() => {
+        if (match.league_sub_a !== null && match.league_sub_a !== undefined) {
+            setSelectedSubA(String(match.league_sub_a));
+        }
+        if (match.league_sub_b !== null && match.league_sub_b !== undefined) {
+            setSelectedSubB(String(match.league_sub_b));
+        }
+    }, [match.league_sub_a, match.league_sub_b]);
+
     // 🔄 Load League Subs once
     useEffect(() => {
         axios
             .get(`${urlBase}/api/players?role=League Sub`, { withCredentials: true })
             .then((res) => {
-                if (Array.isArray(res.data)) setLeagueSubs(res.data);
+                if (Array.isArray(res.data)) {
+                    // 🚨 FORCE STRING IDs
+                    const cleaned = res.data.map((p) => ({
+                        ...p,
+                        id: String(p.id),
+                    }));
+                    setLeagueSubs(cleaned);
+                }
             })
             .catch(() => setLeagueSubs([]));
     }, []);
@@ -104,8 +121,8 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                     match_id: match.id,
                     team_id: team.id,
                     maps,
-                    league_sub_a: selectedSubA || null,
-                    league_sub_b: selectedSubB || null,
+                    league_sub_a: selectedSubA ? String(selectedSubA) : null,
+                    league_sub_b: selectedSubB ? String(selectedSubB) : null,
                 },
                 { withCredentials: true }
             );
@@ -227,13 +244,11 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                                 style={{ minWidth: 200 }}
                             >
                                 <option value="">None</option>
-                                {leagueSubs
-                                    .filter((s) => s.id !== selectedSubB)
-                                    .map((s) => (
-                                        <option key={s.id} value={s.id}>
-                                            {s.display_name || s.username}
-                                        </option>
-                                    ))}
+                                {leagueSubs.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.display_name || s.username}
+                                    </option>
+                                ))}
                             </select>
                         </div>
 
@@ -249,13 +264,11 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                                 style={{ minWidth: 200 }}
                             >
                                 <option value="">None</option>
-                                {leagueSubs
-                                    .filter((s) => s.id !== selectedSubA)
-                                    .map((s) => (
-                                        <option key={s.id} value={s.id}>
-                                            {s.display_name || s.username}
-                                        </option>
-                                    ))}
+                                {leagueSubs.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.display_name || s.username}
+                                    </option>
+                                ))}
                             </select>
                         </div>
                     </div>
@@ -342,12 +355,13 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                     {(selectedSubA || selectedSubB) && (
                         <p className="text-muted mt-1 mb-0">
                             {selectedSubA &&
-                                `League Sub (Your Team): ${leagueSubs.find((s) => s.id === selectedSubA)?.display_name ||
+                                `League Sub (Your Team): ${leagueSubs.find((s) => String(s.id) === String(selectedSubA))
+                                    ?.display_name ||
                                 "Unknown"
                                 }`}
                             {selectedSubA && selectedSubB && " • "}
                             {selectedSubB &&
-                                `Opponent Sub: ${leagueSubs.find((s) => s.id === selectedSubB)?.display_name ||
+                                `Opponent Sub: ${leagueSubs.find((s) => String(s.id) === String(selectedSubB))?.display_name ||
                                 "Unknown"
                                 }`}
                         </p>

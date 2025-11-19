@@ -45,32 +45,45 @@ func requireLogin(w http.ResponseWriter, r *http.Request) (*sessions.Session, bo
 	return session, true
 }
 
-type FlexibleID int64
-
-func (f *FlexibleID) UnmarshalJSON(data []byte) error {
-	// Try string first
-	var s string
-	if err := json.Unmarshal(data, &s); err == nil {
-		i, err := strconv.ParseInt(s, 10, 64)
-		if err != nil {
-			return err
-		}
-		*f = FlexibleID(i)
-		return nil
-	}
-
-	// Fallback: try number
-	var i int64
-	if err := json.Unmarshal(data, &i); err == nil {
-		*f = FlexibleID(i)
-		return nil
-	}
-
-	return errors.New("invalid FlexibleID")
+// --- FlexibleID ---
+// Safely decode JSON numbers or strings into int64 without float64 precision loss.
+type FlexibleID struct {
+	value *int64
 }
 
-func (f FlexibleID) Int64() int64 {
-	return int64(f)
+func (f *FlexibleID) UnmarshalJSON(b []byte) error {
+	// Handle null
+	if string(b) == "null" {
+		f.value = nil
+		return nil
+	}
+
+	// Try string first
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		v, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid string ID: %w", err)
+		}
+		f.value = &v
+		return nil
+	}
+
+	// Now try integer WITHOUT float64
+	var i int64
+	if err := json.Unmarshal(b, &i); err == nil {
+		f.value = &i
+		return nil
+	}
+
+	return fmt.Errorf("invalid FlexibleID payload: %s", string(b))
+}
+
+func (f *FlexibleID) Int64() int64 {
+	if f.value == nil {
+		return 0
+	}
+	return *f.value
 }
 
 func respondJSON(w http.ResponseWriter, data interface{}) {
@@ -480,16 +493,20 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 
 	// --- Load matches ---
 	type MatchWithMaps struct {
-		ID        uint         `json:"id"`
-		MatchCode string       `json:"match_code"`
-		Opponent  string       `json:"opponent"`
-		Date      *time.Time   `json:"date"`
-		Result    string       `json:"result"`
-		Status    string       `json:"status"`
-		Season    string       `json:"season"`
-		TeamAID   uint         `json:"team_a_id"`
-		TeamBID   uint         `json:"team_b_id"`
-		Maps      []MatchScore `json:"maps"`
+		ID        uint       `json:"id"`
+		MatchCode string     `json:"match_code"`
+		Opponent  string     `json:"opponent"`
+		Date      *time.Time `json:"date"`
+		Result    string     `json:"result"`
+		Status    string     `json:"status"`
+		Season    string     `json:"season"`
+		TeamAID   uint       `json:"team_a_id"`
+		TeamBID   uint       `json:"team_b_id"`
+
+		// 🔒 Send as JSON strings so JS doesn't corrupt 64-bit IDs
+		LeagueSubA *string      `json:"league_sub_a"`
+		LeagueSubB *string      `json:"league_sub_b"`
+		Maps       []MatchScore `json:"maps"`
 	}
 
 	var matches []MatchWithMaps
@@ -522,6 +539,19 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 				&m.Result, &m.Status, &m.TeamAID, &m.TeamBID,
 			); err != nil {
 				continue
+			}
+
+			// attach league subs from full Match (int64 -> string)
+			var fullMatch Match
+			if err := DB.First(&fullMatch, m.ID).Error; err == nil {
+				if fullMatch.LeagueSubA != nil {
+					v := strconv.FormatInt(*fullMatch.LeagueSubA, 10)
+					m.LeagueSubA = &v
+				}
+				if fullMatch.LeagueSubB != nil {
+					v := strconv.FormatInt(*fullMatch.LeagueSubB, 10)
+					m.LeagueSubB = &v
+				}
 			}
 
 			// extract season from match_code
@@ -561,7 +591,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 
 	// --- Load roster (player list) ---
 	type RosterPlayer struct {
-		ID          string `json:"id"` // 👈 string now
+		ID          string `json:"id"` // string to avoid precision issues
 		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
 		Role        string `json:"role"`
@@ -1380,7 +1410,7 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 	requesterID, _ := strconv.ParseInt(discordID, 10, 64)
 
 	// target (keep same as last working version)
-	playerID := int64(req.PlayerID) // ✅ always valid int64 now
+	playerID := req.PlayerID.Int64() // ✅ always valid int64 now
 
 	if req.Role != "Captain" && req.Role != "Co-Captain" {
 		http.Error(w, "Invalid role", http.StatusBadRequest)
@@ -1707,10 +1737,10 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 // One team enters or edits scores. Resets confirmations until both re-confirm.
 func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		MatchID    uint   `json:"match_id"`
-		TeamID     uint   `json:"team_id"`
-		LeagueSubA *int64 `json:"league_sub_a"`
-		LeagueSubB *int64 `json:"league_sub_b"`
+		MatchID    uint        `json:"match_id"`
+		TeamID     uint        `json:"team_id"`
+		LeagueSubA *FlexibleID `json:"league_sub_a"`
+		LeagueSubB *FlexibleID `json:"league_sub_b"`
 		Maps       []struct {
 			MapNumber  int    `json:"map_number"`
 			Gamemode   string `json:"gamemode"`
@@ -1722,6 +1752,17 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
+	}
+
+	// --- Convert FlexibleID → *int64 for the Match struct ---
+	var subA, subB *int64
+	if req.LeagueSubA != nil {
+		v := req.LeagueSubA.Int64()
+		subA = &v
+	}
+	if req.LeagueSubB != nil {
+		v := req.LeagueSubB.Int64()
+		subB = &v
 	}
 
 	var match Match
@@ -1738,14 +1779,19 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 🚫 Cannot reuse same league sub for both sides
-	if req.LeagueSubA != nil && req.LeagueSubB != nil && *req.LeagueSubA == *req.LeagueSubB {
+	if subA != nil && subB != nil && *subA == *subB {
 		http.Error(w, "The same League Sub cannot be used for both teams.", http.StatusBadRequest)
 		return
 	}
 
 	// Save league subs
-	match.LeagueSubA = req.LeagueSubA
-	match.LeagueSubB = req.LeagueSubB
+	match.LeagueSubA = subA
+	match.LeagueSubB = subB
+
+	DB.Model(&match).Updates(map[string]any{
+		"league_sub_a": subA,
+		"league_sub_b": subB,
+	})
 
 	// Get existing score-set
 	var existing []MatchScore
@@ -1831,6 +1877,26 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func stringifyRosterPlayers(r []MatchRosterPlayer) []map[string]any {
+	out := make([]map[string]any, 0, len(r))
+	for _, p := range r {
+		out = append(out, map[string]any{
+			"player_id":    strconv.FormatInt(p.PlayerID, 10),
+			"display_name": p.DisplayName,
+			"username":     p.Username,
+			"role":         p.Role,
+		})
+	}
+	return out
+}
+
+type MatchRosterPlayer struct {
+	PlayerID    int64  `json:"player_id"`
+	DisplayName string `json:"display_name"`
+	Username    string `json:"username"`
+	Role        string `json:"role"`
+}
+
 // --- Get match with unified map_scores (legacy + JSONB) ---
 func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -1892,15 +1958,7 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 	DB.First(&teamA, match.TeamAID)
 	DB.First(&teamB, match.TeamBID)
 
-	// --- Load rosters (player_history → fallback team_members) ---
-	type RosterPlayer struct {
-		PlayerID    int64  `json:"player_id"`
-		DisplayName string `json:"display_name"`
-		Username    string `json:"username"`
-		Role        string `json:"role"`
-	}
-
-	var rosterA, rosterB []RosterPlayer
+	var rosterA, rosterB []MatchRosterPlayer
 
 	// Try player_history first
 	DB.Raw(`
@@ -1936,13 +1994,43 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 		`, match.TeamBID).Scan(&rosterB)
 	}
 
-	// --- Final Response ---
+	// Safely stringify league subs
+	var leagueSubA string
+	var leagueSubB string
+
+	if match.LeagueSubA != nil {
+		leagueSubA = strconv.FormatInt(*match.LeagueSubA, 10)
+	}
+
+	if match.LeagueSubB != nil {
+		leagueSubB = strconv.FormatInt(*match.LeagueSubB, 10)
+	}
+
+	// Final Response
 	respondJSON(w, map[string]any{
-		"match":      match,
+		"match": map[string]any{
+			"id":                     match.ID,
+			"match_code":             match.MatchCode,
+			"team_a_id":              match.TeamAID,
+			"team_b_id":              match.TeamBID,
+			"scheduled_date":         match.ScheduledDate,
+			"proposed_date":          match.ProposedDate,
+			"status":                 match.Status,
+			"winner_id":              match.WinnerID,
+			"loser_id":               match.LoserID,
+			"team_a_score_confirmed": match.TeamAScoreConfirmed,
+			"team_b_score_confirmed": match.TeamBScoreConfirmed,
+			"league_sub_a":           leagueSubA, // <-- FIXED
+			"league_sub_b":           leagueSubB, // <-- FIXED
+		},
 		"teams":      map[string]any{"a": teamA, "b": teamB},
 		"map_scores": filtered,
-		"roster":     map[string]any{"a": rosterA, "b": rosterB},
+		"roster": map[string]any{
+			"a": stringifyRosterPlayers(rosterA),
+			"b": stringifyRosterPlayers(rosterB),
+		},
 	})
+
 }
 
 // helper to safely coerce numbers
@@ -3249,25 +3337,40 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Load map scores ---
+	// --- Load map scores (ordered for stable hashing) ---
 	var maps []MatchScore
-	DB.Where("match_id = ?", match.ID).Find(&maps)
+	DB.Where("match_id = ?", match.ID).Order("map_number ASC").Find(&maps)
 
 	if len(maps) == 0 {
 		http.Error(w, "No map scores submitted yet", http.StatusBadRequest)
 		return
 	}
 
-	// --- Convert score list to a comparable string ---
-	calcHash := func(scores []MatchScore) string {
-		s := ""
+	// 🔄 Reload match to ensure we have the latest LeagueSubA/B (from submit-score)
+	DB.First(&match, match.ID)
+
+	// --- Convert score list + subs to a comparable string ---
+	calcHash := func(scores []MatchScore, subA *int64, subB *int64) string {
+		var sb strings.Builder
+
 		for _, m := range scores {
-			s += fmt.Sprintf("%d-%d|", m.TeamAScore, m.TeamBScore)
+			// Include map_number as well just to be extra stable
+			sb.WriteString(fmt.Sprintf("M%d:%d-%d|", m.MapNumber, m.TeamAScore, m.TeamBScore))
 		}
-		return s
+
+		var aVal, bVal int64
+		if subA != nil {
+			aVal = *subA
+		}
+		if subB != nil {
+			bVal = *subB
+		}
+
+		sb.WriteString(fmt.Sprintf("A:%d|B:%d", aVal, bVal))
+		return sb.String()
 	}
 
-	currentHash := calcHash(maps)
+	currentHash := calcHash(maps, match.LeagueSubA, match.LeagueSubB)
 
 	// --- If this is the *first* confirmation, store the hash ---
 	if match.ScoreHash == "" {
@@ -3275,31 +3378,29 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// --- SECOND TEAM MUST CONFIRM THE SAME HASH ---
 		if match.ScoreHash != currentHash {
-			// ============================================================
-			// ⚠️ Opponent entered different scores → overwrite existing ones
-			// ============================================================
 
-			// Delete old scores
+			// ⚠️ Opponent entered different scores or subs → overwrite existing ones
 			DB.Where("match_id = ?", match.ID).Delete(&MatchScore{})
 
-			// Recreate scores using the NEW submission
+			// Recreate scores using the NEW submission (what's currently in DB)
 			for _, s := range maps {
-				DB.Create(&MatchScore{
+				if err := DB.Create(&MatchScore{
 					MatchID:    match.ID,
 					MapNumber:  s.MapNumber,
 					Gamemode:   s.Gamemode,
 					TeamAScore: s.TeamAScore,
 					TeamBScore: s.TeamBScore,
-				})
+				}).Error; err != nil {
+					log.Printf("❌ Failed to recreate map %d score: %v", s.MapNumber, err)
+				}
 			}
 
 			// Reset confirmations so BOTH must confirm again
 			match.TeamAScoreConfirmed = false
 			match.TeamBScoreConfirmed = false
 
-			// Reset stored hash so it recalculates next time
+			// Reset stored hash to the new state
 			match.ScoreHash = currentHash
-
 			match.Status = "Pending Confirmation"
 			DB.Save(&match)
 
@@ -3315,7 +3416,7 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, map[string]any{
 				"success": true,
 				"status":  "Reset to new scores",
-				"message": "Opponent entered different scores. New scores saved — both teams must confirm again.",
+				"message": "Opponent entered different scores or league subs. New scores saved — both teams must confirm again.",
 			})
 			return
 		}
@@ -3385,9 +3486,10 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ==============================================================
-	// 🏆 BOTH TEAMS CONFIRMED *AND* SCORE HASHES MATCH → FINALIZE
+	// 🏆 BOTH TEAMS CONFIRMED → FINALIZE MATCH
 	// ==============================================================
 
+	// Count map wins
 	totalA, totalB := 0, 0
 	for _, s := range maps {
 		if s.TeamAScore > s.TeamBScore {
@@ -3397,8 +3499,8 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Determine winner
 	if totalA != totalB {
-		// Determine winner
 		var winnerID, loserID uint
 		if totalA > totalB {
 			winnerID = match.TeamAID
@@ -3407,7 +3509,6 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 			winnerID = match.TeamBID
 			loserID = match.TeamAID
 		}
-
 		match.WinnerID = &winnerID
 		match.LoserID = &loserID
 	}
@@ -3415,25 +3516,62 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 	match.Status = "Completed"
 	DB.Save(&match)
 
-	// --- Leaderboard Updates ---
+	// Leaderboard update for teams
 	if match.WinnerID != nil {
 		updateLeaderboards(*match.WinnerID, *match.LoserID)
 	}
 
-	// --- Roster snapshot ---
-	snapshotTeamRoster(match.TeamAID, currentSeason)
-	snapshotTeamRoster(match.TeamBID, currentSeason)
-
-	// --- Discord Log (Final Match Result) ---
+	// Load team records
 	var teamA, teamB Team
 	DB.First(&teamA, match.TeamAID)
 	DB.First(&teamB, match.TeamBID)
 
-	// --- Load all map scores in order ---
+	// 🧍 APPLY LEAGUE SUB STATS
+	applySubStats := func(subID *int64, won bool, teamID uint, teamName string) {
+		if subID == nil {
+			return
+		}
+
+		var p Player
+		if err := DB.First(&p, *subID).Error; err != nil {
+			return
+		}
+
+		// Update stats
+		p.Matches++
+		if won {
+			p.Wins++
+			p.Rating += getEnvInt("ELO_WIN_POINTS", 25)
+		} else {
+			p.Losses++
+			p.Rating += getEnvInt("ELO_LOSS_POINTS", -25)
+		}
+		DB.Save(&p)
+
+		// Add to PlayerHistory with correct team
+		DB.Create(&PlayerHistory{
+			PlayerID: *subID,
+			TeamID:   teamID,
+			TeamName: teamName,
+			Role:     "League Sub",
+			Season:   currentSeason,
+		})
+	}
+
+	if match.WinnerID != nil {
+		if *match.WinnerID == match.TeamAID {
+			applySubStats(match.LeagueSubA, true, teamA.ID, teamA.Name)
+			applySubStats(match.LeagueSubB, false, teamB.ID, teamB.Name)
+		} else {
+			applySubStats(match.LeagueSubA, false, teamA.ID, teamA.Name)
+			applySubStats(match.LeagueSubB, true, teamB.ID, teamB.Name)
+		}
+	}
+
+	// 📖 Load final map list
 	var finalMaps []MatchScore
 	DB.Where("match_id = ?", match.ID).Order("map_number ASC").Find(&finalMaps)
 
-	// Build map-by-map breakdown in the clean style
 	mapLines := ""
 	for _, m := range finalMaps {
 		mapLines += fmt.Sprintf(
@@ -3445,7 +3583,7 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	// Determine winner text
+	// Determine winner's name
 	winnerName := "Tie"
 	if match.WinnerID != nil {
 		if *match.WinnerID == match.TeamAID {
@@ -3455,7 +3593,23 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Pings outside embed for actual mentioning
+	// 🧍 League Sub Display
+	subAName := "None"
+	subBName := "None"
+
+	if match.LeagueSubA != nil {
+		var p Player
+		DB.First(&p, *match.LeagueSubA)
+		subAName = p.DisplayName
+	}
+
+	if match.LeagueSubB != nil {
+		var p Player
+		DB.First(&p, *match.LeagueSubB)
+		subBName = p.DisplayName
+	}
+
+	// 🔔 Pings outside embed
 	content := fmt.Sprintf(
 		"🔔 **Finalized Match Results for %s vs %s**\n%s",
 		teamA.Name,
@@ -3463,20 +3617,25 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		getBothCaptainPings(teamA.ID)+getBothCaptainPings(teamB.ID),
 	)
 
-	// Embed description (no Week section)
+	// 📦 Final Embed
 	desc := fmt.Sprintf(
 		"**%s vs %s**\n\n"+
 			"📘 **Match ID**\n%s\n\n"+
 			"%s"+
-			"**Winner**\n%s",
+			"🧍 **League Subs**\n"+
+			"• %s Sub: **%s**\n"+
+			"• %s Sub: **%s**\n\n"+
+			"🏆 **Winner**\n%s",
 		teamA.Name,
 		teamB.Name,
 		match.MatchCode,
 		mapLines,
+		teamA.Name, subAName,
+		teamB.Name, subBName,
 		winnerName,
 	)
 
-	// Send embed to score log channel
+	// Send embed
 	SendScoreEmbedWithPings(
 		content,
 		"🏆 Final Match Result",
