@@ -9,6 +9,13 @@ export default function Matchups() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    function normalizeWeek(week) {
+        if (week === null || week === undefined) return "CHAL";
+        const w = String(week).trim();
+        if (w === "" || w === "0") return "CHAL";
+        return w;
+    }
+
     // --- Fetch all matchups ---
     useEffect(() => {
         setLoading(true);
@@ -60,9 +67,15 @@ export default function Matchups() {
         );
 
         sortedWeeks.forEach((week) => {
-            if (selectedWeek !== "All" && selectedWeek !== week) return;
+            const normalized = normalizeWeek(week);
 
-            sortedFiltered.push({ season, week, list: weeks[week] });
+            if (selectedWeek !== "All" && selectedWeek !== normalized) return;
+
+            sortedFiltered.push({
+                season,
+                week: normalized,
+                list: weeks[week],
+            });
         });
     });
 

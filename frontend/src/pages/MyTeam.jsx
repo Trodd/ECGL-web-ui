@@ -16,6 +16,9 @@ export default function MyTeam() {
   const [selectedSeason, setSelectedSeason] = useState("All");
   const [currentSeason, setCurrentSeason] = useState("Preseason");
   const [newTeamName, setNewTeamName] = useState("");
+  const [teamSettings, setTeamSettings] = useState({});
+  const [challengeRequests, setChallengeRequests] = useState([]);
+  const [allowChallenges, setAllowChallenges] = useState(true);
 
   const urlBase = import.meta.env.VITE_API_URL;
   const sectionStyle = {
@@ -53,6 +56,19 @@ export default function MyTeam() {
     loadRosterLockStatus();
   }, []);
 
+  useEffect(() => {
+    axios.get(`${urlBase}/api/myteam`, { withCredentials: true })
+      .then(res => {
+        setTeamSettings(res.data.team);
+        setAllowChallenges(!!res.data.team?.allow_challenges);
+        setChallengeRequests(res.data.challenge_requests || []);
+      })
+      .catch(() => {
+        setTeamSettings({});
+        setChallengeRequests([]);
+      });
+  }, []);
+
   async function loadTeam() {
     try {
       setLoading(true);
@@ -72,6 +88,11 @@ export default function MyTeam() {
         requests: Array.isArray(res.data?.requests) ? res.data.requests : [],
         myRole: res.data?.myRole || "",
       });
+
+      setTeamSettings(res.data.team || {});
+      setAllowChallenges(res.data.team?.allow_challenges ?? true);
+      setChallengeRequests(res.data.challenge_requests || []);
+
     } catch (err) {
       console.error("❌ Failed to load MyTeam:", err);
       setData({
@@ -211,6 +232,20 @@ export default function MyTeam() {
     } catch (err) {
       console.error("Promote failed:", err);
       alert("❌ Failed to promote player");
+    }
+  }
+
+  async function respondChallenge(id, accept) {
+    try {
+      await axios.post(
+        `${urlBase}/api/challenge/respond`,
+        { challenge_id: id, accept },
+        { withCredentials: true }
+      );
+
+      loadTeam();  // reload MyTeam data
+    } catch (err) {
+      alert("Error updating challenge: " + err.response?.data);
     }
   }
 
@@ -407,6 +442,32 @@ export default function MyTeam() {
                       </label>
                     </div>
                   </div>
+                  {/* 🔒 Allow Challenges */}
+                  <div className="form-check form-switch mb-3">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      checked={teamSettings.allow_challenges ?? true}
+                      onChange={async (e) => {
+                        const checked = e.target.checked;
+                        setAllowChallenges(checked);
+                        setTeamSettings(prev => ({ ...prev, allow_challenges: checked }));
+
+                        try {
+                          await axios.post(
+                            `${urlBase}/api/team/toggle-challenges`,
+                            { team_id: team.id, allow: checked },
+                            { withCredentials: true }
+                          );
+                        } catch {
+                          alert("Failed to update challenge settings.");
+                        }
+                      }}
+                    />
+                    <label className="form-check-label text-light">
+                      Allow Other Teams to Challenge Us
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>
@@ -471,64 +532,101 @@ export default function MyTeam() {
             )}
           </ul>
         </div>
-        {/* 📥 Join Requests - compact + aligned with settings */}
-        {(myRole === "Captain" || myRole === "Co-Captain") && Array.isArray(requests) && requests.length > 0 && (
+        {/* 📥 + ⚔️ SIDE-BY-SIDE REQUESTS */}
+        {(myRole === "Captain" || myRole === "Co-Captain") && (
           <div
-            className="mt-4 p-3 rounded"
-            style={{
-              backgroundColor: "#1a1a1a",
-              border: "1px solid #333",
-              maxWidth: "420px",
-            }}
+            className="d-flex flex-wrap gap-3 justify-content-center mt-4"
+            style={{ width: "100%", maxWidth: "900px" }}
           >
-            <h4 className="mb-3 text-light">📥 Join Requests</h4>
-            <ul className="list-group">
+            {/* LEFT COLUMN — JOIN REQUESTS */}
+            <div
+              className="p-3 rounded"
+              style={{
+                backgroundColor: "#1a1a1a",
+                border: "1px solid #333",
+                flex: "1 1 300px",
+                maxWidth: "420px",
+              }}
+            >
+              <h4 className="mb-3 text-light">📥 Join Requests</h4>
 
-              {requests.map((req) => {
-                // --- SAFE FALLBACKS for ALL backend formats ---
-                const name =
-                  req.display_name ||
-                  req.display ||
-                  req.username ||
-                  "Unknown Player";
+              {requests.length === 0 ? (
+                <p className="text-light small">No join requests.</p>
+              ) : (
+                <ul className="list-group">
+                  {requests.map((req) => (
+                    <li
+                      key={req.id}
+                      className="list-group-item bg-dark text-light d-flex justify-content-between align-items-center px-2 py-2"
+                      style={{ borderRadius: "0.35rem", marginBottom: "4px" }}
+                    >
+                      <span>
+                        <strong>{req.display_name || req.username || "Unknown Player"}</strong>
+                      </span>
 
-                const status = req.status || "pending";
+                      <div className="d-flex gap-1">
+                        <button
+                          className="btn btn-success btn-sm"
+                          onClick={() => handleDecision(req.id, "accept")}
+                        >
+                          ✓
+                        </button>
+                        <button
+                          className="btn btn-danger btn-sm"
+                          onClick={() => handleDecision(req.id, "deny")}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
-                return (
-                  <li
-                    key={`req-${req.id}`}
-                    className="list-group-item d-flex justify-content-between align-items-center px-2 py-2"
-                    style={{
-                      backgroundColor: "#111",
-                      color: "#f8f9fa",
-                      borderRadius: "0.35rem",
-                      marginBottom: "4px",
-                    }}
+            {/* RIGHT COLUMN — CHALLENGE REQUESTS */}
+            <div
+              className="p-3 rounded"
+              style={{
+                backgroundColor: "#1a1a1a",
+                border: "1px solid #333",
+                flex: "1 1 300px",
+                maxWidth: "420px",
+              }}
+            >
+              <h4 className="mb-3 text-light">⚔️ Challenge Requests</h4>
+
+              {challengeRequests.length === 0 ? (
+                <p className="text-light small">No challenge requests.</p>
+              ) : (
+                challengeRequests.map((req) => (
+                  <div
+                    key={req.id}
+                    className="p-3 mb-2 border rounded bg-dark text-light shadow-sm"
+                    style={{ borderColor: "#555" }}
                   >
-                    <span>
-                      <strong>{name}</strong>
-                      <span className="text-muted small"> ({status})</span>
-                    </span>
+                    <p className="mb-2">
+                      <strong>{req.requester_team_name}</strong> has challenged your team (Week{" "}
+                      {req.week}).
+                    </p>
 
-                    <div className="d-flex gap-1">
-                      <button
-                        className="btn btn-success btn-sm"
-                        onClick={() => handleDecision(req.id, "accept")}
-                      >
-                        ✓
-                      </button>
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => handleDecision(req.id, "deny")}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
+                    <button
+                      className="btn btn-success btn-sm me-2"
+                      onClick={() => respondChallenge(req.id, true)}
+                    >
+                      Accept
+                    </button>
 
-            </ul>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => respondChallenge(req.id, false)}
+                    >
+                      Deny
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
         {/* 📅 Active Matches */}

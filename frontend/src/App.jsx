@@ -23,6 +23,23 @@ function App() {
   const [loadingUser, setLoadingUser] = useState(true);
 
   useEffect(() => {
+    // Restore scroll on load
+    const savedScroll = sessionStorage.getItem("scroll-position");
+    if (savedScroll !== null) {
+      window.scrollTo(0, Number(savedScroll));
+    }
+
+    // Save scroll location on every scroll
+    const onScroll = () => {
+      sessionStorage.setItem("scroll-position", window.scrollY);
+    };
+
+    window.addEventListener("scroll", onScroll);
+
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
     // Fetch user (session-based)
     fetch(`${import.meta.env.VITE_API_URL}/api/me`, {
       credentials: "include",

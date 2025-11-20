@@ -91,3 +91,25 @@ INSERT INTO settings (id, roster_locked)
 VALUES (1, FALSE)
 ON CONFLICT (id) DO NOTHING;
 
+CREATE TABLE IF NOT EXISTS challenge_requests (
+    id SERIAL PRIMARY KEY,
+
+    requester_team_id INT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    target_team_id INT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+
+    week INT NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'Pending',
+
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS league_settings (
+    id SERIAL PRIMARY KEY,
+    current_week INT NOT NULL DEFAULT 1,
+    weekly_challenge_limit INT NOT NULL DEFAULT 1
+);
+
+-- Ensure row with ID = 1 exists
+INSERT INTO league_settings (id, current_week, weekly_challenge_limit)
+VALUES (1, 1, 1)
+ON CONFLICT (id) DO NOTHING;

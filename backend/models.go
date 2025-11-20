@@ -41,14 +41,16 @@ type TeamJoinRequest struct {
 
 // --- Team ---
 type Team struct {
-	ID          uint   `gorm:"primaryKey" json:"id"`
-	Name        string `gorm:"unique" json:"name"`
-	Status      string `json:"status"`
-	JoinAllowed bool   `json:"join_allowed" gorm:"default:true"`
-	Rating      int    `json:"rating"`
-	Wins        int    `json:"wins"`
-	Losses      int    `json:"losses"`
-	Matches     int    `json:"matches"`
+	ID                   uint   `gorm:"primaryKey" json:"id"`
+	Name                 string `gorm:"unique" json:"name"`
+	Status               string `json:"status"`
+	JoinAllowed          bool   `json:"join_allowed" gorm:"default:true"`
+	Rating               int    `json:"rating"`
+	Wins                 int    `json:"wins"`
+	Losses               int    `json:"losses"`
+	Matches              int    `json:"matches"`
+	WeeklyChallengesUsed int    `json:"weekly_challenges_used" gorm:"default:0"`
+	AllowChallenges      bool   `json:"allow_challenges" gorm:"default:true"`
 }
 
 // --- Team Member ---
@@ -87,6 +89,7 @@ type Match struct {
 	MapScores              datatypes.JSON `json:"map_scores" gorm:"type:jsonb;default:'[]'"`
 	LeagueSubA             *int64         `json:"league_sub_a"`
 	LeagueSubB             *int64         `json:"league_sub_b"`
+	CoinFlip               string         `json:"coin_flip" gorm:"default:''"`
 }
 
 // --- Match Score ---
@@ -115,4 +118,21 @@ type MyTeamResponse struct {
 	Matches  interface{} `json:"matches"`
 	Requests interface{} `json:"requests"`
 	MyRole   string      `json:"myRole"`
+}
+
+type LeagueSettings struct {
+	ID                   uint `gorm:"primaryKey"`
+	CurrentWeek          int  `json:"current_week"`
+	WeeklyChallengeLimit int  `json:"weekly_challenge_limit"`
+}
+
+type ChallengeRequest struct {
+	ID              uint `gorm:"primaryKey"`
+	RequesterTeamID uint
+	TargetTeamID    uint
+	Week            int
+	Status          string
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

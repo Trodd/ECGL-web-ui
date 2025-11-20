@@ -531,8 +531,12 @@ func main() {
 	r.HandleFunc("/api/match/schedule", HandleScheduleMatch).Methods("POST")
 	r.HandleFunc("/api/match/submit-score", HandleSubmitScore).Methods("POST")
 	r.HandleFunc("/api/match/cast", HandleRequestCast).Methods("POST")
+	r.HandleFunc("/api/match/confirm-coinflip", HandleConfirmCoinFlip).Methods("POST")
 	r.HandleFunc("/api/matches/public", HandlePublicMatches).Methods("GET")
 	r.HandleFunc("/api/settings", GetSettings).Methods("GET")
+	r.HandleFunc("/api/challenge/request", HandleChallengeRequest).Methods("POST")
+	r.HandleFunc("/api/challenge/respond", HandleChallengeRespond).Methods("POST")
+	r.HandleFunc("/api/team/toggle-challenges", HandleToggleChallenges).Methods("POST")
 
 	// League Mod routes (all requireLeagueMod inside handlers)
 	r.HandleFunc("/api/mod/match/reset", ModMatchReset).Methods("POST")

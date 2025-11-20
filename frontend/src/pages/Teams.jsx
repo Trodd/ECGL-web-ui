@@ -84,17 +84,30 @@ export default function Teams() {
             >
               <Link
                 to={`/teams/${t.id}`}
-                className="text-decoration-none text-light fw-semibold"
+                className="text-decoration-none text-light fw-semibold d-flex align-items-center"
               >
                 {t.name}
+
+                {t.allow_challenges && (
+                  <span
+                    style={{
+                      marginLeft: "8px",
+                      color: "#ffd700", // gold trophy
+                      fontSize: "1.2rem",
+                    }}
+                    title="This team is accepting challenge matches"
+                  >
+                    🏆
+                  </span>
+                )}
               </Link>
 
               <span
                 className={`badge ${t.status === "Active"
-                    ? "bg-success"
-                    : t.status === "Disbanded"
-                      ? "bg-danger"
-                      : "bg-secondary"
+                  ? "bg-success"
+                  : t.status === "Disbanded"
+                    ? "bg-danger"
+                    : "bg-secondary"
                   }`}
               >
                 {t.status || "Unknown"}

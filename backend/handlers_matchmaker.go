@@ -149,6 +149,29 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// --- Step X: Update global league week + reset challenge usage ---
+	var ls LeagueSettings
+	if err := DB.First(&ls, 1).Error; err != nil {
+		ls = LeagueSettings{
+			ID:                   1,
+			CurrentWeek:          req.Week,
+			WeeklyChallengeLimit: 1, // default if missing
+		}
+		DB.Create(&ls)
+	} else {
+		ls.CurrentWeek = req.Week
+		DB.Save(&ls)
+	}
+
+	log.Printf("📅 Updated LeagueSettings.CurrentWeek = %d", ls.CurrentWeek)
+
+	// Reset weekly challenges used for all teams
+	if err := DB.Model(&Team{}).Update("weekly_challenges_used", 0).Error; err != nil {
+		log.Printf("⚠️ Failed to reset weekly_challenges_used: %v", err)
+	} else {
+		log.Printf("🔄 Reset weekly_challenges_used for all teams")
+	}
+
 	respondJSON(w, map[string]any{
 		"success": true,
 		"week":    req.Week,

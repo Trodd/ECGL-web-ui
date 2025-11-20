@@ -5,24 +5,81 @@ import axios from "axios";
 export default function TeamDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const urlBase = import.meta.env.VITE_API_URL;
+
+  // ───────────────────────────────────────────────
+  // 🔹 STATE
+  // ───────────────────────────────────────────────
   const [team, setTeam] = useState(null);
   const [selectedSeason, setSelectedSeason] = useState("All");
   const [currentSeason, setCurrentSeason] = useState("Preseason");
   const [error, setError] = useState(null);
 
-  // --- Fetch team details ---
+  const [settings, setSettings] = useState(null);
+  const [teamSettings, setTeamSettings] = useState(null);
+
+  // 🔹 Needed for challenge button rules
+  const [myTeam, setMyTeam] = useState(null);
+  const [myTeamID, setMyTeamID] = useState(null);
+  const [isCaptain, setIsCaptain] = useState(false);
+
+  // ───────────────────────────────────────────────
+  // 🔸 LOAD GLOBAL SETTINGS + MY TEAM INFO
+  // ───────────────────────────────────────────────
+  useEffect(() => {
+    // League settings
+    axios
+      .get(`${urlBase}/api/settings`, { withCredentials: true })
+      .then((res) => setSettings(res.data))
+      .catch(() => setSettings(null));
+
+    // My team + role
+    axios
+      .get(`${urlBase}/api/myteam`, { withCredentials: true })
+      .then((res) => {
+        setMyTeam(res.data.team || null);
+        setMyTeamID(res.data.team?.id || null);
+        setIsCaptain(
+          res.data.myRole === "Captain" || res.data.myRole === "Co-Captain"
+        );
+      })
+      .catch(() => {
+        setMyTeam(null);
+        setMyTeamID(null);
+        setIsCaptain(false);
+      });
+  }, []);
+
+  // ───────────────────────────────────────────────
+  // 🔸 LOAD TEAM'S OWN SETTINGS (allow_challenges)
+  // ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!team?.id) return;
+
+    axios
+      .get(`${urlBase}/api/team/${team.id}`, { withCredentials: true })
+      .then((res) => setTeamSettings(res.data))
+      .catch(() => setTeamSettings(null));
+  }, [team?.id]);
+
+  // ───────────────────────────────────────────────
+  // 🔸 LOAD TEAM PAGE INFO
+  // ───────────────────────────────────────────────
   useEffect(() => {
     setError(null);
+
     axios
-      .get(`${import.meta.env.VITE_API_URL}/api/team/${id}`)
+      .get(`${urlBase}/api/team/${id}`)
       .then((res) => setTeam(res.data))
       .catch(() => setError("Failed to load team details"));
   }, [id]);
 
-  // --- Fetch current season from backend (.env-driven) ---
+  // ───────────────────────────────────────────────
+  // 🔸 LOAD CURRENT SEASON
+  // ───────────────────────────────────────────────
   useEffect(() => {
     axios
-      .get(`${import.meta.env.VITE_API_URL}/api/season`)
+      .get(`${urlBase}/api/season`)
       .then((res) => {
         if (res.data?.season) {
           let s = res.data.season.toString().trim();
@@ -33,18 +90,26 @@ export default function TeamDetail() {
       .catch(() => setCurrentSeason("Preseason"));
   }, []);
 
+  // ───────────────────────────────────────────────
+  // 🔸 SAFETY HANDLING
+  // ───────────────────────────────────────────────
   const matches = Array.isArray(team?.matches) ? team.matches : [];
   const roster = Array.isArray(team?.roster) ? team.roster : [];
 
-  // --- Build dynamic season filter ---
+  // ───────────────────────────────────────────────
+  // 🔸 BUILD SEASON FILTER OPTIONS
+  // ───────────────────────────────────────────────
   const allSeasons = useMemo(() => {
     const base = ["Preseason"];
     if (currentSeason && !base.includes(currentSeason))
       base.push(currentSeason);
+
     return ["All", ...base];
   }, [currentSeason]);
 
-  // --- Filter matches ---
+  // ───────────────────────────────────────────────
+  // 🔸 MATCH FILTERING (unchanged)
+  // ───────────────────────────────────────────────
   const filteredMatches = useMemo(() => {
     if (!matches.length) return [];
 
@@ -53,31 +118,65 @@ export default function TeamDetail() {
     return matches.filter((m) => {
       const code = (m.match_code || "").toLowerCase();
 
-      // --- PRESEASON MATCHES ---
-      // Preseason codes look like: "week1-m032"
-      // OR sometimes "preseason-week3-m028"
       if (selectedSeason === "Preseason") {
         return code.startsWith("week") || code.startsWith("preseason");
       }
 
-      // --- REGULAR SEASONS ---
-      // Convert "Season 1" → "1"
       const num = selectedSeason.replace(/[^0-9]/g, "");
       if (!num) return false;
 
-      // Season codes look like: "1-week2-m015"
       return code.startsWith(`${num}-`);
     });
   }, [matches, selectedSeason]);
 
+  // ───────────────────────────────────────────────
+  // 🔸 SEND CHALLENGE REQUEST
+  // ───────────────────────────────────────────────
+  async function handleChallengeRequest() {
+    if (!myTeamID || !team?.id) return alert("Invalid team selection.");
+
+    try {
+      await axios.post(
+        `${urlBase}/api/challenge/request`,
+        {
+          requester_team_id: myTeamID,
+          target_team_id: team.id,
+        },
+        { withCredentials: true }
+      );
+
+      alert("Challenge request sent!");
+    } catch (err) {
+      alert(err.response?.data || "Failed to send challenge request.");
+    }
+  }
+
+  // ───────────────────────────────────────────────
+  // 🔸 UI BASE CHECKS
+  // ───────────────────────────────────────────────
   if (error) return <p className="text-danger">{error}</p>;
   if (!team) return <p className="text-light">Loading team...</p>;
 
+  // ───────────────────────────────────────────────
+  // 🔥 CHALLENGE BUTTON VISIBILITY LOGIC
+  // ───────────────────────────────────────────────
+  const canChallenge =
+    isCaptain &&
+    myTeamID &&
+    team.id !== myTeamID &&
+    teamSettings?.allow_challenges &&
+    (myTeam?.weekly_challenges_used ?? 0) <
+    (settings?.weekly_challenge_limit ?? 999);
+
+  // ───────────────────────────────────────────────
+  // 🔸 RENDER
+  // ───────────────────────────────────────────────
   return (
     <div>
       <h2 className="text-light">{team.name}</h2>
+
       <p>
-        Status:{' '}
+        Status:{" "}
         <span
           className={
             team.status === "Disbanded"
@@ -90,6 +189,18 @@ export default function TeamDetail() {
           {team.status}
         </span>
       </p>
+
+      {/* ===========================
+          ⚔️ CHALLENGE BUTTON SHOWS HERE
+          =========================== */}
+      {canChallenge && (
+        <button
+          className="btn btn-warning mt-3"
+          onClick={handleChallengeRequest}
+        >
+          ⚔️ Challenge This Team
+        </button>
+      )}
 
       <h3>Roster</h3>
       {roster.length ? (
@@ -146,37 +257,24 @@ export default function TeamDetail() {
                   className="match-row"
                   style={{ cursor: "pointer" }}
                   onClick={() => navigate(`/match/${m.id}`)}
-                  title="View match details"
                 >
                   <td>{idx + 1}</td>
                   <td className="fw-semibold">
-                    {m.opponent ? (
-                      <a
-                        href={`/teams/${m.opponent_id}`}
-                        className={`text-decoration-none ${m.result === "Win"
-                          ? "text-success"
-                          : m.result === "Loss"
-                            ? "text-danger"
-                            : "text-warning"
-                          }`}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {m.opponent}
-                      </a>
-                    ) : (
-                      "Unknown"
-                    )}
+                    {m.opponent || "Unknown"}
                   </td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    {m.date ? new Date(m.date).toLocaleDateString() : "-"}
+                  <td>
+                    {m.date
+                      ? new Date(m.date).toLocaleDateString()
+                      : "-"}
                   </td>
                   <td
-                    className={`fw-bold ${m.result === "Win"
-                      ? "text-success"
-                      : m.result === "Loss"
-                        ? "text-danger"
-                        : "text-warning"
-                      }`}
+                    className={
+                      m.result === "Win"
+                        ? "text-success fw-bold"
+                        : m.result === "Loss"
+                          ? "text-danger fw-bold"
+                          : "text-warning fw-bold"
+                    }
                   >
                     {m.result || "Pending"}
                   </td>
@@ -187,9 +285,7 @@ export default function TeamDetail() {
           </table>
         </div>
       ) : (
-        <p className="text-light">
-          No matches found for {selectedSeason}.
-        </p>
+        <p className="text-light">No matches found for {selectedSeason}.</p>
       )}
     </div>
   );

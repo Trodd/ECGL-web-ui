@@ -9,6 +9,9 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
     const [scores, setScores] = useState({});
     const [msg, setMsg] = useState("");
     const [editing, setEditing] = useState(false);
+    const [coinFlipConfirmed, setCoinFlipConfirmed] = useState(false);
+    const [coinFlipResult, setCoinFlipResult] = useState(null);
+    const [coinFlipCall, setCoinFlipCall] = useState("");
 
     const isTeamA = match.team_a_id === team.id;
     const isTeamB = match.team_b_id === team.id;
@@ -229,6 +232,65 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
             {match.date && isCaptain && (
                 <div className="mt-3">
                     <h6 className="text-light mb-2">🎯 Confirm Scores</h6>
+
+                    {/* 🎲 Coin Flip Section */}
+                    <div className="mb-3">
+                        <label className="form-label text-light fw-bold">🎲 Coin Flip — Your Call</label>
+
+                        <div className="d-flex align-items-center gap-2">
+                            <select
+                                className="form-select bg-dark text-light"
+                                value={coinFlipCall}
+                                disabled={coinFlipConfirmed}   // lock after confirming
+                                onChange={(e) => {
+                                    setCoinFlipCall(e.target.value);
+                                    setCoinFlipConfirmed(false); // reset if changed
+                                }}
+                                style={{ maxWidth: 200 }}
+                            >
+                                <option value="">Select...</option>
+                                <option value="HEADS">Heads</option>
+                                <option value="TAILS">Tails</option>
+                            </select>
+
+                            {/* Confirm Button */}
+                            {!coinFlipConfirmed && (
+                                <button
+                                    className="btn btn-sm btn-primary"
+                                    disabled={!coinFlipCall}
+                                    onClick={async () => {
+                                        try {
+                                            const res = await axios.post(
+                                                `${urlBase}/api/match/confirm-coinflip`,
+                                                {
+                                                    match_id: match.id,
+                                                    team_id: team.id,
+                                                    coin_flip_call: coinFlipCall,
+                                                },
+                                                { withCredentials: true }
+                                            );
+
+                                            setCoinFlipConfirmed(true);
+                                            setCoinFlipResult(res.data?.winner || null);
+                                            alert("🎲 Coin flip confirmed!");
+                                        } catch (err) {
+                                            console.error("Coin flip confirm error:", err);
+                                            alert("Failed to confirm coin flip.");
+                                        }
+                                    }}
+                                >
+                                    Confirm Flip
+                                </button>
+                            )}
+
+                            {/* Show result if confirmed */}
+                            {coinFlipConfirmed && (
+                                <span className="text-success fw-bold">
+                                    ✔ Flip Confirmed
+                                </span>
+                            )}
+                        </div>
+                    </div>
 
                     {/* 🧍 League Subs */}
                     <div className="d-flex flex-wrap align-items-center gap-3 mb-3">

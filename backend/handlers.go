@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"regexp"
@@ -104,16 +105,38 @@ func contains(slice []uint, val uint) bool {
 // --- GET /api/settings ---
 // Provides global configuration and state values for the frontend (roster lock, team size limits, etc.)
 func GetSettings(w http.ResponseWriter, r *http.Request) {
-	// Safe defaults
+	// Load league settings (current week + challenge limit)
+	var s LeagueSettings
+	if err := DB.First(&s, 1).Error; err != nil {
+		// Fallback defaults if table empty or missing row
+		s.CurrentWeek = 1
+		s.WeeklyChallengeLimit = 1
+	}
+
+	// Safe defaults from .env
 	minPlayers := getEnvInt("MIN_TEAM_PLAYERS", 3)
 	maxPlayers := getEnvInt("MAX_TEAM_PLAYERS", 6)
 
-	// respondJSON is your existing helper (used elsewhere in handlers)
 	respondJSON(w, map[string]any{
-		"roster_locked":    rosterLocked, // from global variable or DB table
-		"min_team_players": minPlayers,
-		"max_team_players": maxPlayers,
+		"roster_locked":          rosterLocked,
+		"min_team_players":       minPlayers,
+		"max_team_players":       maxPlayers,
+		"current_week":           s.CurrentWeek,
+		"weekly_challenge_limit": s.WeeklyChallengeLimit,
 	})
+}
+
+func GetGlobalCurrentWeek() int {
+	var s LeagueSettings
+
+	// Load the row with ID 1 (the single global settings row)
+	err := DB.First(&s, 1).Error
+	if err == nil && s.CurrentWeek > 0 {
+		return s.CurrentWeek
+	}
+
+	// If DB row missing or invalid, fallback to week 1
+	return 1
 }
 
 // Returns BOTH captain + co-captain pings for a team
@@ -338,11 +361,13 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, map[string]any{
-		"id":      team.ID,
-		"name":    team.Name,
-		"status":  team.Status,
-		"roster":  roster,
-		"matches": matches,
+		"id":                     team.ID,
+		"name":                   team.Name,
+		"status":                 team.Status,
+		"roster":                 roster,
+		"matches":                matches,
+		"allow_challenges":       team.AllowChallenges,
+		"weekly_challenges_used": team.WeeklyChallengesUsed,
 	})
 }
 
@@ -465,11 +490,12 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 
 	if result.RowsAffected == 0 {
 		respondJSON(w, map[string]any{
-			"team":     nil,
-			"roster":   []any{},
-			"matches":  []any{},
-			"requests": []any{},
-			"myRole":   "",
+			"team":               nil,
+			"roster":             []any{},
+			"matches":            []any{},
+			"requests":           []any{},
+			"challenge_requests": []any{},
+			"myRole":             "",
 		})
 		return
 	}
@@ -493,17 +519,15 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 
 	// --- Load matches ---
 	type MatchWithMaps struct {
-		ID        uint       `json:"id"`
-		MatchCode string     `json:"match_code"`
-		Opponent  string     `json:"opponent"`
-		Date      *time.Time `json:"date"`
-		Result    string     `json:"result"`
-		Status    string     `json:"status"`
-		Season    string     `json:"season"`
-		TeamAID   uint       `json:"team_a_id"`
-		TeamBID   uint       `json:"team_b_id"`
-
-		// 🔒 Send as JSON strings so JS doesn't corrupt 64-bit IDs
+		ID         uint         `json:"id"`
+		MatchCode  string       `json:"match_code"`
+		Opponent   string       `json:"opponent"`
+		Date       *time.Time   `json:"date"`
+		Result     string       `json:"result"`
+		Status     string       `json:"status"`
+		Season     string       `json:"season"`
+		TeamAID    uint         `json:"team_a_id"`
+		TeamBID    uint         `json:"team_b_id"`
 		LeagueSubA *string      `json:"league_sub_a"`
 		LeagueSubB *string      `json:"league_sub_b"`
 		Maps       []MatchScore `json:"maps"`
@@ -512,23 +536,23 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 	var matches []MatchWithMaps
 
 	rows, err := DB.Raw(`
-		SELECT
-			m.id, m.match_code,
-			CASE WHEN m.team_a_id = @tid THEN t2.name ELSE t1.name END AS opponent,
-			m.scheduled_date,
-			CASE
-				WHEN m.winner_id = @tid THEN 'Win'
-				WHEN m.loser_id = @tid THEN 'Loss'
-				ELSE 'Pending'
-			END AS result,
-			m.status,
-			m.team_a_id, m.team_b_id
-		FROM matches m
-		JOIN teams t1 ON m.team_a_id = t1.id
-		JOIN teams t2 ON m.team_b_id = t2.id
-		WHERE m.team_a_id = @tid OR m.team_b_id = @tid
-		ORDER BY m.scheduled_date DESC NULLS LAST
-	`, sql.Named("tid", membership.TeamID)).Rows()
+        SELECT
+            m.id, m.match_code,
+            CASE WHEN m.team_a_id = @tid THEN t2.name ELSE t1.name END AS opponent,
+            m.scheduled_date,
+            CASE
+                WHEN m.winner_id = @tid THEN 'Win'
+                WHEN m.loser_id = @tid THEN 'Loss'
+                ELSE 'Pending'
+            END AS result,
+            m.status,
+            m.team_a_id, m.team_b_id
+        FROM matches m
+        JOIN teams t1 ON m.team_a_id = t1.id
+        JOIN teams t2 ON m.team_b_id = t2.id
+        WHERE m.team_a_id = @tid OR m.team_b_id = @tid
+        ORDER BY m.scheduled_date DESC NULLS LAST
+    `, sql.Named("tid", membership.TeamID)).Rows()
 
 	if err == nil {
 		defer rows.Close()
@@ -541,7 +565,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// attach league subs from full Match (int64 -> string)
+			// attach league subs from full Match
 			var fullMatch Match
 			if err := DB.First(&fullMatch, m.ID).Error; err == nil {
 				if fullMatch.LeagueSubA != nil {
@@ -554,7 +578,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// extract season from match_code
+			// extract season
 			parts := strings.Split(m.MatchCode, "-")
 			if len(parts) > 1 && regexp.MustCompile(`^\d+$`).MatchString(parts[0]) {
 				m.Season = parts[0]
@@ -562,7 +586,6 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 				m.Season = "0"
 			}
 
-			// load maps
 			DB.Where("match_id = ?", m.ID).Find(&m.Maps)
 			matches = append(matches, m)
 		}
@@ -589,9 +612,9 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 
 	matches = append(active, past...)
 
-	// --- Load roster (player list) ---
+	// --- Load roster ---
 	type RosterPlayer struct {
-		ID          string `json:"id"` // string to avoid precision issues
+		ID          string `json:"id"`
 		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
 		Role        string `json:"role"`
@@ -601,67 +624,91 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 	var roster []RosterPlayer
 	if err := DB.Table("team_members").
 		Select(`
-				CAST(players.id AS text) AS id,
-				players.username,
-				players.display_name,
-				team_members.role,
-				players.rating`).
+                CAST(players.id AS text) AS id,
+                players.username,
+                players.display_name,
+                team_members.role,
+                players.rating`).
 		Joins("JOIN players ON players.id = team_members.player_id").
 		Where("team_members.team_id = ?", team.ID).
 		Scan(&roster).Error; err != nil {
-
 		log.Printf("❌ GetMyTeam: roster query failed for team %d: %v", team.ID, err)
 		roster = []RosterPlayer{}
 	}
 
-	// Fallback: use player_history if no active roster found
 	if len(roster) == 0 {
 		DB.Raw(`
-				SELECT
-					CAST(p.id AS text) AS id,
-					p.username,
-					p.display_name,
-					ph.role,
-					p.rating
-				FROM player_history ph
-				JOIN players p ON p.id = ph.player_id
-				WHERE ph.team_id = ? AND ph.season = ?
-			`, team.ID, currentSeason).Scan(&roster)
+                SELECT
+                    CAST(p.id AS text) AS id,
+                    p.username,
+                    p.display_name,
+                    ph.role,
+                    p.rating
+                FROM player_history ph
+                JOIN players p ON p.id = ph.player_id
+                WHERE ph.team_id = ? AND ph.season = ?
+            `, team.ID, currentSeason).Scan(&roster)
 	}
 
 	if roster == nil {
 		roster = []RosterPlayer{}
 	}
 
-	// --- Load Join Requests (SAFE ALWAYS ARRAY) ---
+	// --- Load Join Requests ---
 	var joinRequests []map[string]any
+	var challengeRequests []map[string]any
 	errReq := DB.Raw(`
-		SELECT r.id, r.player_id,
-		       p.username,
-		       COALESCE(p.display_name, '') AS display_name,
-		       r.status
-		FROM team_join_requests r
-		JOIN players p ON p.id = r.player_id
-		WHERE r.team_id = ? AND r.status = 'pending'
-		ORDER BY r.id ASC
-	`, team.ID).Scan(&joinRequests).Error
+        SELECT r.id, r.player_id,
+               p.username,
+               COALESCE(p.display_name, '') AS display_name,
+               r.status
+        FROM team_join_requests r
+        JOIN players p ON p.id = r.player_id
+        WHERE r.team_id = ? AND r.status = 'pending'
+        ORDER BY r.id ASC
+    `, team.ID).Scan(&joinRequests).Error
 
 	if errReq != nil || joinRequests == nil {
 		joinRequests = []map[string]any{}
 	}
 
+	// --- NEW: Load Challenge Requests ---
+	var challengeRows []ChallengeRequest
+
+	DB.Where("target_team_id = ? AND status = 'Pending'", team.ID).
+		Find(&challengeRows)
+
+	// IMPORTANT — assign, do NOT redeclare
+	challengeRequests = []map[string]any{}
+
+	for _, ch := range challengeRows {
+		var requesterTeam Team
+		DB.First(&requesterTeam, ch.RequesterTeamID)
+
+		challengeRequests = append(challengeRequests, map[string]any{
+			"id":                  ch.ID,
+			"requester_team_id":   ch.RequesterTeamID,
+			"requester_team_name": requesterTeam.Name,
+			"week":                ch.Week,
+			"status":              ch.Status,
+		})
+	}
+
 	// --- final response ---
 	respondJSON(w, map[string]any{
 		"team": map[string]any{
-			"id":           team.ID,
-			"name":         team.Name,
-			"status":       team.Status,
-			"join_allowed": team.JoinAllowed,
+			"id":                     team.ID,
+			"name":                   team.Name,
+			"status":                 team.Status,
+			"join_allowed":           team.JoinAllowed,
+			"allow_challenges":       team.AllowChallenges,
+			"weekly_challenges_used": team.WeeklyChallengesUsed,
 		},
-		"roster":   roster,
-		"matches":  matches,
-		"requests": joinRequests,
-		"myRole":   membership.Role,
+		"roster":             roster,
+		"matches":            matches,
+		"requests":           joinRequests,
+		"challenge_requests": challengeRequests,
+		"myRole":             membership.Role,
 	})
 }
 
@@ -1737,11 +1784,12 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 // One team enters or edits scores. Resets confirmations until both re-confirm.
 func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		MatchID    uint        `json:"match_id"`
-		TeamID     uint        `json:"team_id"`
-		LeagueSubA *FlexibleID `json:"league_sub_a"`
-		LeagueSubB *FlexibleID `json:"league_sub_b"`
-		Maps       []struct {
+		MatchID      uint        `json:"match_id"`
+		TeamID       uint        `json:"team_id"`
+		LeagueSubA   *FlexibleID `json:"league_sub_a"`
+		LeagueSubB   *FlexibleID `json:"league_sub_b"`
+		CoinFlipCall string      `json:"coin_flip_call"`
+		Maps         []struct {
 			MapNumber  int    `json:"map_number"`
 			Gamemode   string `json:"gamemode"`
 			TeamAScore int    `json:"team_a_score"`
@@ -1769,6 +1817,71 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	if err := DB.First(&match, req.MatchID).Error; err != nil {
 		http.Error(w, "Match not found", http.StatusNotFound)
 		return
+	}
+
+	// Load team names safely
+	var teamA, teamB Team
+
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+
+	// ⭐ Perform Coin Flip (HEADS/TAILS)
+	call := strings.ToUpper(strings.TrimSpace(req.CoinFlipCall))
+
+	if call == "HEADS" || call == "TAILS" {
+
+		// Random flip result
+		sides := []string{"HEADS", "TAILS"}
+		result := sides[rand.Intn(2)]
+
+		// Determine winner (team that made the correct call)
+		winner := ""
+		if result == call {
+			// calling team wins
+			if req.TeamID == match.TeamAID {
+				winner = "A"
+			} else {
+				winner = "B"
+			}
+		} else {
+			// non-calling team wins
+			if req.TeamID == match.TeamAID {
+				winner = "B"
+			} else {
+				winner = "A"
+			}
+		}
+
+		// Save winner to DB
+		match.CoinFlip = winner
+		DB.Model(&match).Update("coin_flip", winner)
+
+		// Build readable winner
+		winnerName := ""
+		if winner == "A" {
+			winnerName = teamA.Name
+		} else {
+			winnerName = teamB.Name
+		}
+
+		// Log to Discord
+		LogGeneral(fmt.Sprintf(
+			"🎲 **Coin Flip Performed**\n"+
+				"Caller: **%s** (%s)\n"+
+				"Call: **%s**\n"+
+				"Result: **%s**\n"+
+				"Winner: **%s**",
+			func() string {
+				if req.TeamID == match.TeamAID {
+					return teamA.Name
+				}
+				return teamB.Name
+			}(),
+			map[bool]string{req.TeamID == match.TeamAID: "Team A", req.TeamID == match.TeamBID: "Team B"}[true],
+			call,
+			result,
+			winnerName,
+		))
 	}
 
 	isTeamA := req.TeamID == match.TeamAID
@@ -4472,4 +4585,346 @@ func buildMentionList(a []TeamMember, b []TeamMember) string {
 		text += fmt.Sprintf("<@%d> ", tm.PlayerID)
 	}
 	return text
+}
+
+func HandleConfirmCoinFlip(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MatchID      uint   `json:"match_id"`
+		TeamID       uint   `json:"team_id"`
+		CoinFlipCall string `json:"coin_flip_call"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Load match
+	var match Match
+	if err := DB.First(&match, req.MatchID).Error; err != nil {
+		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
+	// Load teams
+	var teamA, teamB Team
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+
+	call := strings.ToUpper(strings.TrimSpace(req.CoinFlipCall))
+	if call != "HEADS" && call != "TAILS" {
+		http.Error(w, "Invalid coin flip call", http.StatusBadRequest)
+		return
+	}
+
+	// Random flip result
+	sides := []string{"HEADS", "TAILS"}
+	result := sides[rand.Intn(2)]
+
+	// Determine winner
+	var winner string
+	if result == call {
+		if req.TeamID == match.TeamAID {
+			winner = "A"
+		} else {
+			winner = "B"
+		}
+	} else {
+		if req.TeamID == match.TeamAID {
+			winner = "B"
+		} else {
+			winner = "A"
+		}
+	}
+
+	// Save winner
+	match.CoinFlip = winner
+	DB.Model(&match).Update("coin_flip", winner)
+
+	// Winner readable
+	winnerName := teamA.Name
+	if winner == "B" {
+		winnerName = teamB.Name
+	}
+
+	// ==============================
+	// ⭐ Load roster + build mentions
+	// ==============================
+	var rosterA []TeamMember
+	var rosterB []TeamMember
+	DB.Where("team_id = ?", match.TeamAID).Find(&rosterA)
+	DB.Where("team_id = ?", match.TeamBID).Find(&rosterB)
+
+	mentionsA := ""
+	for _, p := range rosterA {
+		mentionsA += fmt.Sprintf("<@%d> ", p.PlayerID)
+	}
+
+	mentionsB := ""
+	for _, p := range rosterB {
+		mentionsB += fmt.Sprintf("<@%d> ", p.PlayerID)
+	}
+
+	// Caller readable
+	callerName := teamA.Name
+	if req.TeamID == match.TeamBID {
+		callerName = teamB.Name
+	}
+
+	// Discord Log Message
+	LogGeneral(fmt.Sprintf(
+		"🎲 **Coin Flip Performed**\n"+
+			"📌 **Match:** %s (#%d)\n"+
+			"🙋 **Caller:** %s \n"+
+			"🪙 **Call:** %s\n"+
+			"🎰 **Result:** %s\n"+
+			"🏆 **Flip Winner:** %s\n\n"+
+			"**%s Team:** %s\n"+
+			"**%s Team:** %s",
+		match.MatchCode, match.ID, // match info
+		callerName,               // who called
+		call, result, winnerName, // flip outcome
+		teamA.Name, mentionsA, // team A pings
+		teamB.Name, mentionsB, // team B pings
+	))
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"result":  result,
+		"winner":  winnerName,
+	})
+}
+
+func HandleChallengeRequest(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RequesterTeamID uint `json:"requester_team_id"`
+		TargetTeamID    uint `json:"target_team_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.RequesterTeamID == 0 || req.TargetTeamID == 0 {
+		http.Error(w, "Missing team IDs", http.StatusBadRequest)
+		return
+	}
+
+	// Load teams
+	var requester, target Team
+	if err := DB.First(&requester, req.RequesterTeamID).Error; err != nil {
+		http.Error(w, "Requester team not found", http.StatusNotFound)
+		return
+	}
+	if err := DB.First(&target, req.TargetTeamID).Error; err != nil {
+		http.Error(w, "Target team not found", http.StatusNotFound)
+		return
+	}
+
+	// Cannot challenge self
+	if requester.ID == target.ID {
+		http.Error(w, "Cannot challenge your own team", http.StatusBadRequest)
+		return
+	}
+
+	// Check if target allows challenges
+	if !target.AllowChallenges {
+		http.Error(w, "Target team does not allow challenges", http.StatusForbidden)
+		return
+	}
+
+	// Load global league settings (weekly challenge limit)
+	var settings LeagueSettings
+	if err := DB.First(&settings, 1).Error; err != nil {
+		settings.WeeklyChallengeLimit = 1 // safe fallback
+	}
+
+	// Weekly challenge limit check (CORRECT FIELD)
+	if requester.WeeklyChallengesUsed >= settings.WeeklyChallengeLimit {
+		http.Error(w, "Weekly challenge limit reached", http.StatusForbidden)
+		return
+	}
+
+	// Prevent duplicate pending
+	var exists int64
+	DB.Model(&ChallengeRequest{}).
+		Where("requester_team_id = ? AND target_team_id = ? AND status = 'Pending'",
+			requester.ID, target.ID).
+		Count(&exists)
+	if exists > 0 {
+		http.Error(w, "Challenge already pending", http.StatusConflict)
+		return
+	}
+
+	// Create challenge
+	challenge := ChallengeRequest{
+		RequesterTeamID: requester.ID,
+		TargetTeamID:    target.ID,
+		Week:            GetGlobalCurrentWeek(),
+		Status:          "Pending",
+	}
+	DB.Create(&challenge)
+
+	// Notify target captains
+	var captains []TeamMember
+	DB.Where("team_id = ? AND role IN ?", target.ID, []string{"Captain", "Co-Captain"}).Find(&captains)
+
+	mentions := ""
+	for _, c := range captains {
+		mentions += fmt.Sprintf("<@%d> ", c.PlayerID)
+	}
+
+	LogGeneral(fmt.Sprintf(
+		"⚠️ **Challenge Match Requested!**\n"+
+			"**%s** has challenged **%s**.\n"+
+			"📣 Captains: %s\n"+
+			"Check **My Team → Requests** to accept or deny.",
+		requester.Name,
+		target.Name,
+		mentions,
+	))
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "Challenge request sent.",
+	})
+}
+
+func HandleChallengeRespond(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ChallengeID uint `json:"challenge_id"`
+		Accept      bool `json:"accept"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	var ch ChallengeRequest
+	if err := DB.First(&ch, req.ChallengeID).Error; err != nil {
+		http.Error(w, "Challenge not found", http.StatusNotFound)
+		return
+	}
+
+	if ch.Status != "Pending" {
+		http.Error(w, "Challenge already resolved", http.StatusBadRequest)
+		return
+	}
+
+	// Load teams
+	var requester, target Team
+	DB.First(&requester, ch.RequesterTeamID)
+	DB.First(&target, ch.TargetTeamID)
+
+	if req.Accept {
+		// Accept the challenge
+		ch.Status = "Accepted"
+		DB.Save(&ch)
+
+		// Add a new match into weekly flow
+		CreateWeeklyChallengeMatch(requester.ID, target.ID, ch.Week)
+
+		// Increment requester weekly challenge count
+		requester.WeeklyChallengesUsed++
+		DB.Save(&requester)
+
+		LogGeneral(fmt.Sprintf(
+			"⚔️ **Challenge Accepted!**\n"+
+				"**%s** vs **%s** has been added to Week %d matchups.",
+			requester.Name,
+			target.Name,
+			ch.Week,
+		))
+
+	} else {
+		ch.Status = "Denied"
+		DB.Save(&ch)
+
+		LogGeneral(fmt.Sprintf(
+			"❌ **Challenge Denied**\n"+
+				"%s denied challenge from %s.",
+			target.Name,
+			requester.Name,
+		))
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"status":  ch.Status,
+	})
+}
+
+func HandleToggleChallenges(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TeamID uint `json:"team_id"`
+		Allow  bool `json:"allow"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	var team Team
+	if err := DB.First(&team, req.TeamID).Error; err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	// ✅ FIX — update allow_challenges (NOT join_allowed)
+	team.AllowChallenges = req.Allow
+	DB.Save(&team)
+
+	LogGeneral(fmt.Sprintf(
+		"🔧 **Challenge Setting Updated**\n"+
+			"Team **%s** has **%s** challenge requests.",
+		team.Name,
+		map[bool]string{true: "ENABLED", false: "DISABLED"}[req.Allow],
+	))
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"allow":   req.Allow,
+	})
+}
+
+func CreateWeeklyChallengeMatch(teamAID, teamBID uint, week int) error {
+	// --- Normalize season ---
+	season := strings.TrimSpace(currentSeason)
+	if season == "" || !regexp.MustCompile(`^\d+$`).MatchString(season) {
+		season = "0" // fallback = preseason
+	}
+
+	// --- Normalize week ---
+	if week <= 0 {
+		week = 1
+	}
+	weekStr := strconv.Itoa(week)
+
+	now := time.Now()
+	systemID := int64(0)
+
+	// --- ALWAYS VALID FORMAT ---
+	matchCode := fmt.Sprintf(
+		"%s-Week%s-CHAL-%03dvs%03d",
+		season, weekStr, teamAID, teamBID,
+	)
+
+	match := Match{
+		TeamAID:      teamAID,
+		TeamBID:      teamBID,
+		Season:       season,
+		Week:         weekStr,
+		Status:       "Scheduled",
+		ProposedDate: &now,
+		ProposerID:   &systemID,
+		MatchCode:    matchCode,
+	}
+
+	if err := DB.Create(&match).Error; err != nil {
+		log.Printf("❌ Failed to create challenge match: %v", err)
+		return err
+	}
+
+	log.Printf("⚔️ Challenge match created: %s (%d vs %d)", match.MatchCode, teamAID, teamBID)
+	return nil
 }
