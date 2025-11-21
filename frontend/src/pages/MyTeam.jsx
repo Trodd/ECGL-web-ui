@@ -509,13 +509,6 @@ export default function MyTeam() {
                         ⚠️ Team is <b>Inactive</b>. Challenge matches are disabled automatically.
                       </p>
                     )}
-
-                    {/* Global disabled message */}
-                    {!globalChallengesEnabled && (
-                      <p className="text-warning small mt-2 mb-0">
-                        ⚠️ League mods have <b>disabled all challenge matches</b> across the league.
-                      </p>
-                    )}
                   </div>
                 </div>
               </div>
