@@ -124,6 +124,7 @@ type LeagueSettings struct {
 	ID                   uint `gorm:"primaryKey"`
 	CurrentWeek          int  `json:"current_week"`
 	WeeklyChallengeLimit int  `json:"weekly_challenge_limit"`
+	ChallengesEnabled    bool `json:"challenges_enabled" gorm:"default:true"`
 }
 
 type ChallengeRequest struct {

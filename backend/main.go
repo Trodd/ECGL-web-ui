@@ -330,7 +330,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		Timezone:    req.Timezone,
 	}
 
-	// ✅ Ensure baseline ELO rating from .env
+	// ✅ Default rating
 	if player.Rating == 0 {
 		player.Rating = getEnvInt("DEFAULT_PLAYER_RATING", 800)
 	}
@@ -347,12 +347,33 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	DB.First(&player, discordID)
+
+	// ⭐ NEW — Discord role handling
+	rolePlayer := os.Getenv("DISCORD_PLAYER_ROLE_ID")
+	roleSub := os.Getenv("DISCORD_LEAGUE_SUB_ROLE_ID")
+
+	// Cleanup previous roles
+	go DiscordRemoveRole(discordIDStr, rolePlayer)
+	go DiscordRemoveRole(discordIDStr, roleSub)
+
+	// Assign correct role
+	if req.Role == "Player" {
+		go DiscordAddRole(discordIDStr, rolePlayer)
+	}
+	if req.Role == "League Sub" {
+		go DiscordAddRole(discordIDStr, roleSub)
+	}
+
 	player.Registered = true
+
+	// Log registration
 	SendDiscordLog(
 		fmt.Sprintf("🟢 **<@%s>** has signed up as a **%s** in timezone **%s**",
 			discordIDStr, player.Role, player.Timezone,
 		),
 	)
+
 	respondJSON(w, player)
 }
 
@@ -362,7 +383,7 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Always get the Discord ID from session
+	// get Discord ID
 	session, _ := store.Get(r, "session")
 	discordIDStr, ok := session.Values["discord_id"].(string)
 	if !ok || discordIDStr == "" {
@@ -371,15 +392,23 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 	}
 	discordID, _ := strconv.ParseInt(discordIDStr, 10, 64)
 
-	// 🔎 Remove memberships
+	// Discord role IDs
+	rolePlayer := os.Getenv("DISCORD_PLAYER_ROLE_ID")
+	roleSub := os.Getenv("DISCORD_LEAGUE_SUB_ROLE_ID")
+	roleCaptain := os.Getenv("DISCORD_CAPTAIN_ROLE_ID")
+	roleCoCaptain := os.Getenv("DISCORD_CO_CAPTAIN_ROLE_ID")
+
+	// load memberships
 	var memberships []TeamMember
 	if err := DB.Where("player_id = ?", discordID).Find(&memberships).Error; err == nil {
 		for _, m := range memberships {
+
 			role := m.Role
 
-			// log history
 			var team Team
 			DB.First(&team, m.TeamID)
+
+			// log history
 			DB.Create(&PlayerHistory{
 				PlayerID: discordID,
 				TeamID:   m.TeamID,
@@ -388,35 +417,59 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 				Season:   currentSeason,
 			})
 
-			// remove player from team
+			// ⭐ Remove Discord Captain / Co-Captain roles when unregistering
+			if role == "Captain" {
+				go DiscordRemoveRole(discordIDStr, roleCaptain)
+			}
+			if role == "Co-Captain" {
+				go DiscordRemoveRole(discordIDStr, roleCoCaptain)
+			}
+
+			// remove from team
 			DB.Delete(&TeamMember{}, "player_id = ? AND team_id = ?", discordID, m.TeamID)
 
-			// check if team is empty → auto-disband
+			// check remaining members
 			var remaining []TeamMember
 			DB.Where("team_id = ?", m.TeamID).Find(&remaining)
+
+			// auto-disband if empty
 			if len(remaining) == 0 {
 				DB.Delete(&Team{}, m.TeamID)
 
-				// ⭐ DISCORD LOG — Auto-disband ⭐
-				SendDiscordLog(
-					fmt.Sprintf(
-						"🗑️ **Team Disbanded:** **%s (#%d)** — last member unregistered",
-						team.Name,
-						team.ID,
-					),
-				)
-
+				SendDiscordLog(fmt.Sprintf(
+					"🗑️ **Team Disbanded:** **%s (#%d)** — last member unregistered",
+					team.Name, team.ID,
+				))
 				continue
 			}
 
-			// promote new captain if captain left
+			// ⭐ CAPTAIN LEFT → AUTO PROMOTION (and Discord role updates)
 			if role == "Captain" {
+
 				var next TeamMember
-				// try co-captain first
-				if err := DB.Where("team_id = ? AND role = ?", m.TeamID, "Co-Captain").First(&next).Error; err == nil {
+
+				// Promote Co-Captain first
+				if err := DB.Where("team_id = ? AND role = ?", m.TeamID, "Co-Captain").
+					First(&next).Error; err == nil {
+
 					DB.Model(&next).Update("role", "Captain")
-				} else if err := DB.Where("team_id = ?", m.TeamID).First(&next).Error; err == nil {
+
+					nextDiscordID := strconv.FormatInt(next.PlayerID, 10)
+
+					// Discord role changes
+					go DiscordAddRole(nextDiscordID, roleCaptain)
+					go DiscordRemoveRole(nextDiscordID, roleCoCaptain)
+
+				} else if err := DB.Where("team_id = ?", m.TeamID).
+					First(&next).Error; err == nil {
+
+					// No co-captain, promote first member
 					DB.Model(&next).Update("role", "Captain")
+
+					nextDiscordID := strconv.FormatInt(next.PlayerID, 10)
+
+					go DiscordAddRole(nextDiscordID, roleCaptain)
+					go DiscordRemoveRole(nextDiscordID, roleCoCaptain)
 				}
 			}
 		}
@@ -425,7 +478,7 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 	// ❌ Clear pending join requests
 	DB.Where("player_id = ?", discordID).Delete(&TeamJoinRequest{})
 
-	// ✅ Reset registration fields but keep stats
+	// Reset registration fields (keep stats)
 	if err := DB.Model(&Player{}).Where("id = ?", discordID).
 		Updates(map[string]any{
 			"role":     "",
@@ -437,10 +490,12 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ⭐ DISCORD LOG — Player unregistered ⭐
-	SendDiscordLog(
-		fmt.Sprintf("🔴 <@%s> has left the league", discordIDStr),
-	)
+	// ⭐ Remove Player / Sub roles after unregister
+	go DiscordRemoveRole(discordIDStr, rolePlayer)
+	go DiscordRemoveRole(discordIDStr, roleSub)
+
+	// log
+	SendDiscordLog(fmt.Sprintf("🔴 <@%s> has left the league", discordIDStr))
 
 	respondJSON(w, map[string]any{
 		"success":    true,
@@ -572,6 +627,9 @@ func main() {
 	r.HandleFunc("/api/mod/roster/status", GetRosterLockStatus).Methods("GET")
 	r.HandleFunc("/api/mod/team/history", ModTeamHistory).Methods("GET")
 	r.HandleFunc("/api/mod/team/add-player", ModAddPlayerToTeam).Methods("POST")
+	r.HandleFunc("/api/mod/sync-roles", HandleModSyncRoles).Methods("POST")
+	r.HandleFunc("/api/mod/challenges/enable", HandleEnableGlobalChallenges).Methods("POST")
+	r.HandleFunc("/api/mod/challenges/disable", HandleDisableGlobalChallenges).Methods("POST")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()

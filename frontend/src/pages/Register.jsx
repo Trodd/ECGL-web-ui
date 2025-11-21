@@ -99,6 +99,7 @@ export default function Register() {
   async function handleUnregister() {
     try {
       await axios.post(`${urlBase}/api/unregister`, {}, { withCredentials: true });
+      window.location.reload();
       const res = await axios.get(`${urlBase}/api/me`, { withCredentials: true });
       setMe(res.data);
       setTeam(null);

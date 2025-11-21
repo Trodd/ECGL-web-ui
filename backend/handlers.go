@@ -21,6 +21,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var GlobalChallengesEnabled = true
+
 func getEnvInt(key string, def int) int {
 	val := os.Getenv(key)
 	if val == "" {
@@ -105,15 +107,13 @@ func contains(slice []uint, val uint) bool {
 // --- GET /api/settings ---
 // Provides global configuration and state values for the frontend (roster lock, team size limits, etc.)
 func GetSettings(w http.ResponseWriter, r *http.Request) {
-	// Load league settings (current week + challenge limit)
 	var s LeagueSettings
 	if err := DB.First(&s, 1).Error; err != nil {
-		// Fallback defaults if table empty or missing row
 		s.CurrentWeek = 1
 		s.WeeklyChallengeLimit = 1
+		s.ChallengesEnabled = true
 	}
 
-	// Safe defaults from .env
 	minPlayers := getEnvInt("MIN_TEAM_PLAYERS", 3)
 	maxPlayers := getEnvInt("MAX_TEAM_PLAYERS", 6)
 
@@ -123,6 +123,7 @@ func GetSettings(w http.ResponseWriter, r *http.Request) {
 		"max_team_players":       maxPlayers,
 		"current_week":           s.CurrentWeek,
 		"weekly_challenge_limit": s.WeeklyChallengeLimit,
+		"challenges_enabled":     s.ChallengesEnabled,
 	})
 }
 
@@ -885,6 +886,8 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		Season:   currentSeason,
 	})
 
+	go DiscordAddRole(discordID, os.Getenv("DISCORD_CAPTAIN_ROLE_ID"))
+
 	// confirm
 	var check TeamMember
 	if err := DB.Where("player_id = ? AND team_id = ?", playerID, team.ID).First(&check).Error; err != nil {
@@ -1107,7 +1110,7 @@ func HandleLeaveTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Player comes from session
+	// session user
 	session, _ := store.Get(r, "session")
 	discordIDStr, ok := session.Values["discord_id"].(string)
 	if !ok || discordIDStr == "" {
@@ -1116,33 +1119,42 @@ func HandleLeaveTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	playerID, _ := strconv.ParseInt(discordIDStr, 10, 64)
 
-	// Load team (for name)
+	// Load team
 	var team Team
 	if err := DB.First(&team, req.TeamID).Error; err != nil {
 		http.Error(w, "Team not found", http.StatusNotFound)
 		return
 	}
 
-	// Verify membership
+	// Load membership
 	var member TeamMember
 	err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, playerID).First(&member).Error
-
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		log.Printf("ℹ️ Player %d is not a member of team %d", playerID, req.TeamID)
 		http.Error(w, "Not a team member", http.StatusForbidden)
 		return
 	}
-
 	if err != nil {
 		log.Printf("❌ DB error verifying membership: %v", err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
 
-	// Save role before leaving
+	// Save role before removal
 	role := member.Role
 
-	// Remove from team
+	// Discord role IDs
+	roleCaptain := os.Getenv("DISCORD_CAPTAIN_ROLE_ID")
+	roleCoCaptain := os.Getenv("DISCORD_CO_CAPTAIN_ROLE_ID")
+
+	// ⭐ ALWAYS remove Discord roles for the leaving member
+	if role == "Captain" {
+		go DiscordRemoveRole(discordIDStr, roleCaptain)
+	}
+	if role == "Co-Captain" {
+		go DiscordRemoveRole(discordIDStr, roleCoCaptain)
+	}
+
+	// Remove the member
 	if err := DB.Delete(&member).Error; err != nil {
 		http.Error(w, "Failed to leave team", http.StatusInternalServerError)
 		return
@@ -1152,48 +1164,68 @@ func HandleLeaveTeam(w http.ResponseWriter, r *http.Request) {
 	var remaining []TeamMember
 	DB.Where("team_id = ?", req.TeamID).Find(&remaining)
 
-	// If empty, auto-disband team
+	// ------------------------------------------------------------
+	// EMPTY TEAM → AUTO DISBAND
+	// ------------------------------------------------------------
 	if len(remaining) == 0 {
 
 		DB.Model(&Team{}).
 			Where("id = ?", req.TeamID).
 			Update("status", "Disbanded")
 
-		log.Printf("🏴‍☠️ Team %s (#%d) auto-disbanded (last member left)", team.Name, team.ID)
-
-		// ⭐ DISCORD LOG — Auto Disband
+		// Log
 		SendDiscordLog(
 			fmt.Sprintf(
 				"🗑️ **Team Disbanded:** **%s (#%d)** — last member left",
-				team.Name,
-				team.ID,
+				team.Name, team.ID,
 			),
 		)
 
-	} else if role == "Captain" {
-		// Captain left → promote next person
+		respondJSON(w, map[string]any{"success": true, "message": "Team disbanded"})
+		return
+	}
+
+	// ------------------------------------------------------------
+	// CAPTAIN LEFT → AUTO-PROMOTE SOMEONE
+	// ------------------------------------------------------------
+	if role == "Captain" {
+
 		var next TeamMember
 
-		if err := DB.Where("team_id = ? AND role = ?", req.TeamID, "Co-Captain").
-			First(&next).Error; err == nil {
+		// Prefer Co-Captain
+		if err := DB.Where("team_id = ? AND role = ?", req.TeamID, "Co-Captain").First(&next).Error; err == nil {
 
 			DB.Model(&next).Update("role", "Captain")
-			log.Printf("👑 Promoted Co-Captain %d to Captain (team %d)", next.PlayerID, req.TeamID)
+
+			nextDiscordID := strconv.FormatInt(next.PlayerID, 10)
+
+			// ⭐ Discord roles
+			go DiscordAddRole(nextDiscordID, roleCaptain)
+			go DiscordRemoveRole(nextDiscordID, roleCoCaptain)
+
+			log.Printf("👑 Promoted Co-Captain %d → Captain (team %d)", next.PlayerID, req.TeamID)
 
 		} else if err := DB.Where("team_id = ?", req.TeamID).First(&next).Error; err == nil {
 
 			DB.Model(&next).Update("role", "Captain")
-			log.Printf("👑 Promoted Member %d to Captain (team %d)", next.PlayerID, req.TeamID)
+
+			nextDiscordID := strconv.FormatInt(next.PlayerID, 10)
+
+			// ⭐ Discord roles
+			go DiscordAddRole(nextDiscordID, roleCaptain)
+			go DiscordRemoveRole(nextDiscordID, roleCoCaptain)
+
+			log.Printf("👑 Promoted Member %d → Captain (team %d)", next.PlayerID, req.TeamID)
 		}
 	}
 
-	// ⭐ DISCORD LOG — Player Left
+	// ------------------------------------------------------------
+	// LOG + RESPONSE
+	// ------------------------------------------------------------
 	SendDiscordLog(
 		fmt.Sprintf(
 			"🚪 <@%s> has left team **%s (#%d)**",
-			discordIDStr,
-			team.Name,
-			team.ID,
+			discordIDStr, team.Name, team.ID,
 		),
 	)
 
@@ -1439,7 +1471,7 @@ func HandleKickMember(w http.ResponseWriter, r *http.Request) {
 func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TeamID   uint       `json:"team_id"`
-		PlayerID FlexibleID `json:"player_id"` // ✅ flexible
+		PlayerID FlexibleID `json:"player_id"`
 		Role     string     `json:"role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1456,8 +1488,8 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 	}
 	requesterID, _ := strconv.ParseInt(discordID, 10, 64)
 
-	// target (keep same as last working version)
-	playerID := req.PlayerID.Int64() // ✅ always valid int64 now
+	// target
+	playerID := req.PlayerID.Int64()
 
 	if req.Role != "Captain" && req.Role != "Co-Captain" {
 		http.Error(w, "Invalid role", http.StatusBadRequest)
@@ -1477,16 +1509,47 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ⭐ ENV role IDs
+	roleCaptain := os.Getenv("DISCORD_CAPTAIN_ROLE_ID")
+	roleCoCaptain := os.Getenv("DISCORD_CO_CAPTAIN_ROLE_ID")
+	targetDiscordID := strconv.FormatInt(playerID, 10)
+
+	// ⭐ If promoting to Captain:
 	if req.Role == "Captain" {
-		DB.Model(&TeamMember{}).
-			Where("team_id = ? AND role = ?", req.TeamID, "Captain").
-			Update("role", "Co-Captain")
+		// demote existing captain → Co-Captain
+		var oldCap TeamMember
+		if err := DB.Where("team_id = ? AND role = ?", req.TeamID, "Captain").
+			First(&oldCap).Error; err == nil {
+
+			oldCapID := strconv.FormatInt(oldCap.PlayerID, 10)
+
+			DB.Model(&TeamMember{}).
+				Where("team_id = ? AND player_id = ?", req.TeamID, oldCap.PlayerID).
+				Update("role", "Co-Captain")
+
+			// Discord roles: demote captain
+			go DiscordRemoveRole(oldCapID, roleCaptain)
+			go DiscordAddRole(oldCapID, roleCoCaptain)
+		}
+
+		// New captain gets captain role
+		go DiscordAddRole(targetDiscordID, roleCaptain)
+		go DiscordRemoveRole(targetDiscordID, roleCoCaptain)
 	}
 
+	// ⭐ If promoting to Co-Captain:
+	if req.Role == "Co-Captain" {
+		// give co-captain, remove captain if they had it
+		go DiscordAddRole(targetDiscordID, roleCoCaptain)
+		go DiscordRemoveRole(targetDiscordID, roleCaptain)
+	}
+
+	// update DB for the target member
 	DB.Model(&TeamMember{}).
 		Where("team_id = ? AND player_id = ?", req.TeamID, playerID).
 		Update("role", req.Role)
 
+	// history tracking
 	var existing PlayerHistory
 	if err := DB.Where("player_id = ? AND team_id = ? AND season = ? AND role = ?",
 		playerID, req.TeamID, currentSeason, req.Role).
@@ -1499,7 +1562,7 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// 🔔 Discord log for promotion
+	// log
 	SendDiscordLog(fmt.Sprintf(
 		"⬆️ **Promotion:** <@%d> is now **%s** on **Team #%d**",
 		playerID,
@@ -1543,6 +1606,15 @@ func HandleToggleTeamStatus(w http.ResponseWriter, r *http.Request) {
 	if err := DB.Model(&Team{}).Where("id = ?", req.TeamID).Update("status", req.Status).Error; err != nil {
 		http.Error(w, "Failed to update team status", http.StatusInternalServerError)
 		return
+	}
+
+	// --- If team becomes inactive, force-disable challenge requests ---
+	if req.Status == "Inactive" {
+		DB.Model(&Team{}).
+			Where("id = ?", req.TeamID).
+			Updates(map[string]any{
+				"allow_challenges": false,
+			})
 	}
 
 	var team Team
@@ -3860,7 +3932,12 @@ func HandleModSetTeamInactive(w http.ResponseWriter, r *http.Request) {
 
 	if err := DB.Model(&Team{}).
 		Where("id = ?", req.TeamID).
-		Update("status", "Inactive").Error; err != nil {
+		Updates(map[string]any{
+			"status":                 "Inactive",
+			"allow_challenges":       false,
+			"weekly_challenges_used": 0,
+		}).Error; err != nil {
+
 		http.Error(w, "failed to update team", http.StatusInternalServerError)
 		return
 	}
@@ -4870,9 +4947,36 @@ func HandleToggleChallenges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ FIX — update allow_challenges (NOT join_allowed)
-	team.AllowChallenges = req.Allow
-	DB.Save(&team)
+	// 🔒 GLOBAL OVERRIDE — block all toggles if global challenges disabled
+	var settings LeagueSettings
+	DB.First(&settings)
+
+	if !settings.ChallengesEnabled {
+		// Force team challenge toggle OFF
+		DB.Model(&team).Update("allow_challenges", false)
+
+		respondJSON(w, map[string]any{
+			"success": false,
+			"allow":   false,
+			"message": "Challenge matches are currently globally disabled by league moderators.",
+		})
+		return
+	}
+
+	// 🔒 TEAM-LEVEL LOCK — inactive teams cannot toggle
+	if team.Status != "Active" {
+		DB.Model(&team).Update("allow_challenges", false)
+
+		respondJSON(w, map[string]any{
+			"success": false,
+			"allow":   false,
+			"message": "Inactive teams cannot enable challenge requests.",
+		})
+		return
+	}
+
+	// ✅ Apply toggle normally when allowed
+	DB.Model(&team).Update("allow_challenges", req.Allow)
 
 	LogGeneral(fmt.Sprintf(
 		"🔧 **Challenge Setting Updated**\n"+
@@ -4884,6 +4988,7 @@ func HandleToggleChallenges(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{
 		"success": true,
 		"allow":   req.Allow,
+		"message": "Team challenge setting updated.",
 	})
 }
 
@@ -4927,4 +5032,206 @@ func CreateWeeklyChallengeMatch(teamAID, teamBID uint, week int) error {
 
 	log.Printf("⚔️ Challenge match created: %s (%d vs %d)", match.MatchCode, teamAID, teamBID)
 	return nil
+}
+
+func HandleModSyncRoles(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	rolePlayer := os.Getenv("DISCORD_PLAYER_ROLE_ID")
+	roleSub := os.Getenv("DISCORD_LEAGUE_SUB_ROLE_ID")
+	roleCaptain := os.Getenv("DISCORD_CAPTAIN_ROLE_ID")
+	roleCoCaptain := os.Getenv("DISCORD_CO_CAPTAIN_ROLE_ID")
+
+	guildID := os.Getenv("DISCORD_GUILD_ID")
+	botToken := os.Getenv("DISCORD_BOT_TOKEN")
+
+	if guildID == "" || botToken == "" {
+		http.Error(w, "Missing Discord bot env vars", http.StatusInternalServerError)
+		return
+	}
+
+	// Load players
+	var players []Player
+	DB.Find(&players)
+
+	// Load team roles
+	var members []TeamMember
+	DB.Find(&members)
+
+	teamRole := map[int64]string{}
+	for _, m := range members {
+		teamRole[m.PlayerID] = m.Role
+	}
+
+	for _, p := range players {
+		pid := strconv.FormatInt(p.ID, 10)
+
+		// Queue worker: fetch member → compute → update
+		queueRoleJob(func() {
+			// 1. Fetch existing roles
+			url := "https://discord.com/api/v10/guilds/" + guildID + "/members/" + pid
+			req, _ := http.NewRequest("GET", url, nil)
+			req.Header.Set("Authorization", "Bot "+botToken)
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				log.Println("❌ Failed fetching Discord member:", err)
+				return
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == 404 {
+				log.Println("⚠️ Member", pid, "not in guild — skipping")
+				return
+			}
+
+			var member struct {
+				Roles []string `json:"roles"`
+			}
+			json.NewDecoder(resp.Body).Decode(&member)
+
+			have := map[string]bool{}
+			for _, r := range member.Roles {
+				have[r] = true
+			}
+
+			// 2. Determine which roles they SHOULD have
+			need := map[string]bool{}
+
+			if p.Role == "Player" {
+				need[rolePlayer] = true
+			}
+			if p.Role == "League Sub" {
+				need[roleSub] = true
+			}
+
+			switch teamRole[p.ID] {
+			case "Captain":
+				need[roleCaptain] = true
+			case "Co-Captain":
+				need[roleCoCaptain] = true
+			}
+
+			// 3. Compute roles to add/remove
+			for role := range need {
+				if !have[role] {
+					r := role
+					queueRoleJob(func() {
+						DiscordAddRole(pid, r)
+					})
+				}
+			}
+
+			for role := range have {
+				if role == rolePlayer || role == roleSub || role == roleCaptain || role == roleCoCaptain {
+					if !need[role] {
+						r := role
+						queueRoleJob(func() {
+							DiscordRemoveRole(pid, r)
+						})
+					}
+				}
+			}
+		})
+	}
+
+	// SendDiscordLog("🔄 **Discord Roles Synced** — All roles recalculated safely.")
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "Role sync started — may take ~1 minute depending on player count",
+	})
+}
+
+func LoadLeagueSettings() {
+	var s LeagueSettings
+	if err := DB.First(&s).Error; err != nil {
+		// create default row
+		s.ChallengesEnabled = true
+		DB.Create(&s)
+	}
+	GlobalChallengesEnabled = s.ChallengesEnabled
+}
+
+func HandleModSetChallenges(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	GlobalChallengesEnabled = req.Enabled
+
+	// Save to DB
+	DB.Model(&LeagueSettings{}).Where("id = 1").Update("challenges_enabled", req.Enabled)
+
+	if !req.Enabled {
+		// 🔥 force-disable all team challenge settings
+		DB.Model(&Team{}).Update("allow_challenges", false)
+	}
+
+	if req.Enabled {
+		SendDiscordLog("⚔️ **Global Challenges Enabled** — Teams may toggle their challenge settings again.")
+	} else {
+		SendDiscordLog("🛑 **Global Challenges Disabled** — All team challenge toggles have been turned off.")
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "Global challenge settings updated.",
+	})
+}
+
+func HandleEnableGlobalChallenges(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	DB.Model(&LeagueSettings{}).Where("id = 1").Update("challenges_enabled", true)
+
+	LogGeneral("⚔️ **Global Challenges Enabled** — teams may toggle challenges again.")
+	respondJSON(w, map[string]any{"success": true})
+}
+
+func HandleDisableGlobalChallenges(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	// Disable global toggle value
+	DB.Model(&LeagueSettings{}).Where("id = 1").Update("challenges_enabled", false)
+
+	// Force ALL teams' challenge toggle OFF (GORM-safe)
+	DB.Model(&Team{}).Where("1 = 1").Update("allow_challenges", false)
+
+	LogGeneral("🛑 **Global Challenges Disabled** — Challenge requests cleared for ALL teams.")
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "Global challenges disabled; all teams reset to not accepting challenges.",
+	})
+}
+
+func HandleGetLeagueSettings(w http.ResponseWriter, r *http.Request) {
+	var s LeagueSettings
+
+	if err := DB.First(&s).Error; err != nil {
+		// fallback default
+		respondJSON(w, map[string]any{
+			"challenges_enabled": true,
+		})
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"challenges_enabled": s.ChallengesEnabled,
+	})
 }

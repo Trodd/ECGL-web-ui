@@ -19,6 +19,7 @@ export default function MyTeam() {
   const [teamSettings, setTeamSettings] = useState({});
   const [challengeRequests, setChallengeRequests] = useState([]);
   const [allowChallenges, setAllowChallenges] = useState(true);
+  const [globalChallengesEnabled, setGlobalChallengesEnabled] = useState(true);
 
   const urlBase = import.meta.env.VITE_API_URL;
   const sectionStyle = {
@@ -54,6 +55,20 @@ export default function MyTeam() {
       }
     }
     loadRosterLockStatus();
+  }, []);
+
+  // 🔄 Load global challenge setting
+  useEffect(() => {
+    axios
+      .get(`${urlBase}/api/settings`, { withCredentials: true })
+      .then(res => {
+        if (res.data?.challenges_enabled !== undefined) {
+          setGlobalChallengesEnabled(res.data.challenges_enabled);
+        }
+      })
+      .catch(() => {
+        setGlobalChallengesEnabled(true);
+      });
   }, []);
 
   useEffect(() => {
@@ -442,31 +457,65 @@ export default function MyTeam() {
                       </label>
                     </div>
                   </div>
-                  {/* 🔒 Allow Challenges */}
-                  <div className="form-check form-switch mb-3">
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      checked={teamSettings.allow_challenges ?? true}
-                      onChange={async (e) => {
-                        const checked = e.target.checked;
-                        setAllowChallenges(checked);
-                        setTeamSettings(prev => ({ ...prev, allow_challenges: checked }));
+                  {/* 🏆 Challenge Match Availability */}
+                  <div className="mb-4 border-bottom border-secondary pb-3">
+                    <h6 className="text-info mb-2">🏆 Challenge Match Availability</h6>
 
-                        try {
-                          await axios.post(
-                            `${urlBase}/api/team/toggle-challenges`,
-                            { team_id: team.id, allow: checked },
-                            { withCredentials: true }
-                          );
-                        } catch {
-                          alert("Failed to update challenge settings.");
-                        }
-                      }}
-                    />
-                    <label className="form-check-label text-light">
-                      Allow Other Teams to Challenge Us
-                    </label>
+                    <div className="d-flex align-items-center gap-2">
+                      <div className="form-check form-switch m-0">
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          checked={allowChallenges}
+                          disabled={
+                            team.status !== "Active" ||           // Team inactive
+                            !globalChallengesEnabled              // Global disabled
+                          }
+                          onChange={async (e) => {
+                            if (!globalChallengesEnabled)
+                              return alert("🚫 League mods have globally disabled challenge matches.");
+
+                            if (team.status !== "Active") return;
+
+                            const next = e.target.checked;
+
+                            try {
+                              await axios.post(
+                                `${urlBase}/api/team/toggle-challenges`,
+                                { team_id: team.id, allow: next },
+                                { withCredentials: true }
+                              );
+                              setAllowChallenges(next);
+                            } catch (err) {
+                              console.error("Toggle challenges failed:", err);
+                              alert("❌ Failed to update challenge toggle.");
+                            }
+                          }}
+                        />
+                      </div>
+
+                      <label className="form-check-label text-light small ms-2">
+                        {!globalChallengesEnabled
+                          ? "⛔ Challenge Matches Disabled by League Mods"
+                          : allowChallenges
+                            ? "✅ Accepting Challenge Matches"
+                            : "🚫 Not Accepting Challenges"}
+                      </label>
+                    </div>
+
+                    {/* Inactive team message */}
+                    {team.status !== "Active" && (
+                      <p className="text-warning small mt-2 mb-0">
+                        ⚠️ Team is <b>Inactive</b>. Challenge matches are disabled automatically.
+                      </p>
+                    )}
+
+                    {/* Global disabled message */}
+                    {!globalChallengesEnabled && (
+                      <p className="text-warning small mt-2 mb-0">
+                        ⚠️ League mods have <b>disabled all challenge matches</b> across the league.
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

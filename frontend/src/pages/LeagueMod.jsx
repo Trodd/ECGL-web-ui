@@ -1372,6 +1372,56 @@ export default function LeagueMod() {
                                     </button>
                                 </div>
                             </div>
+                            {/* === Global Challenge Controls === */}
+                            <div
+                                className="p-3 rounded-3 mt-3"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h6 className="text-danger mb-2">⚔️ Challenge Controls</h6>
+
+                                <p className="text-light small mb-2">
+                                    Toggle **ALL team challenge requests** ON or OFF.
+                                    <br />
+                                    • When <b>disabled</b>: Teams cannot toggle challenges in their settings and cannot receive challenge requests.
+                                    <br />
+                                    • When <b>enabled</b>: Teams may toggle challenge requests normally, but all remain OFF until the captain turns it on.
+                                </p>
+
+                                <div className="d-flex flex-wrap gap-2">
+
+                                    {/* Enable ALL Challenges */}
+                                    <button
+                                        className="btn btn-outline-success btn-sm"
+                                        onClick={async () => {
+                                            if (!confirm("Enable challenges globally? Teams will be able to toggle challenges again.")) return;
+                                            await safePost(
+                                                "/api/mod/challenges/enable",
+                                                {},
+                                                "Enabled all team challenges globally",
+                                                true
+                                            );
+                                        }}
+                                    >
+                                        ✅ Enable Global Challenges
+                                    </button>
+
+                                    {/* Disable ALL Challenges */}
+                                    <button
+                                        className="btn btn-outline-danger btn-sm"
+                                        onClick={async () => {
+                                            if (!confirm("Disable ALL challenges? This will block all team challenge toggles.")) return;
+                                            await safePost(
+                                                "/api/mod/challenges/disable",
+                                                {},
+                                                "Disabled all team challenges globally",
+                                                true
+                                            );
+                                        }}
+                                    >
+                                        🛑 Disable Global Challenges
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     }
                 />
@@ -1548,10 +1598,56 @@ export default function LeagueMod() {
                     title="📦 Data Tools"
                     children={
                         <div className="d-flex flex-wrap gap-2">
-                            <button className="btn btn-outline-secondary btn-sm" onClick={handleArchiveSeason}>Archive Season</button>
-                            <button className="btn btn-outline-warning btn-sm" onClick={handleResetLeaderboard}>Reset Leaderboard</button>
-                            <button className="btn btn-outline-success btn-sm" onClick={handleSyncHistory}>Sync Player History</button>
-                            <button className="btn btn-outline-info btn-sm" onClick={handleRebuildELO}>Rebuild ELO</button>
+
+                            <button
+                                className="btn btn-outline-secondary btn-sm"
+                                onClick={handleArchiveSeason}
+                            >
+                                Archive Season
+                            </button>
+
+                            <button
+                                className="btn btn-outline-warning btn-sm"
+                                onClick={handleResetLeaderboard}
+                            >
+                                Reset Leaderboard
+                            </button>
+
+                            <button
+                                className="btn btn-outline-success btn-sm"
+                                onClick={handleSyncHistory}
+                            >
+                                Sync Player History
+                            </button>
+
+                            <button
+                                className="btn btn-outline-info btn-sm"
+                                onClick={handleRebuildELO}
+                            >
+                                Rebuild ELO
+                            </button>
+
+                            {/* 🔄 NEW: Sync Discord Roles */}
+                            <button
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={async () => {
+                                    if (!confirm("Sync all player Discord roles?")) return;
+                                    try {
+                                        await axios.post(
+                                            `${urlBase}/api/mod/sync-roles`,
+                                            {},
+                                            { withCredentials: true }
+                                        );
+                                        alert("✅ Discord roles synced successfully!");
+                                    } catch (err) {
+                                        console.error("Sync roles failed:", err);
+                                        alert("❌ Failed to sync Discord roles");
+                                    }
+                                }}
+                            >
+                                🔄 Sync Roles
+                            </button>
+
                         </div>
                     }
                 />
