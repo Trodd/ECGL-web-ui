@@ -20,6 +20,8 @@ type Player struct {
 	Losses      int    `json:"losses"`
 	Matches     int    `json:"matches"`
 	Registered  bool   `json:"registered" gorm:"-"`
+	IsCaster    bool   `json:"is_caster" gorm:"-"`
+	IsMod       bool   `json:"is_mod" gorm:"-"`
 }
 
 // --- Registered Player ---
@@ -136,4 +138,22 @@ type ChallengeRequest struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type CastLog struct {
+	ID        uint `gorm:"primaryKey"`
+	MatchID   uint
+	TeamAID   uint
+	TeamBID   uint
+	CasterID  int64
+	CameraID  int64
+	CreatedAt time.Time
+}
+
+type CastLogMulti struct {
+	ID        uint           `gorm:"primaryKey"`
+	MatchID   uint           `json:"match_id"`
+	Casters   datatypes.JSON `json:"casters" gorm:"type:jsonb"`
+	CameraID  int64          `json:"camera_id"`
+	CreatedAt time.Time      `json:"created_at"`
 }

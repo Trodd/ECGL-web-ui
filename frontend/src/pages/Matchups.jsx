@@ -29,6 +29,15 @@ export default function Matchups() {
             .finally(() => setLoading(false));
     }, []);
 
+    useEffect(() => {
+        if (localStorage.getItem("refresh_matchups") === "1") {
+            axios
+                .get(`${import.meta.env.VITE_API_URL}/api/matches/public`)
+                .then((res) => setMatches(res.data.matches))
+                .finally(() => localStorage.removeItem("refresh_matchups"));
+        }
+    }, []);
+
     // --- Build season + week options dynamically and reactively ---
     const [availableWeeks, setAvailableWeeks] = useState(["All"]);
 
@@ -185,7 +194,18 @@ export default function Matchups() {
                                                 </span>
                                             </div>
 
-                                            <div className="text-end small text-light">
+                                            <div className="text-end small text-light d-flex align-items-center">
+                                                {/* ⭐ CAST INDICATOR */}
+                                                {m.cast_active && (
+                                                    <span
+                                                        className="me-2"
+                                                        title="This match is casted"
+                                                        style={{ fontSize: "1.1rem" }}
+                                                    >
+                                                        🔴 Casted
+                                                    </span>
+                                                )}
+
                                                 {m.scheduled_date
                                                     ? new Date(m.scheduled_date).toLocaleString([], {
                                                         dateStyle: "short",

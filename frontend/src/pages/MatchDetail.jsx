@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
+import CastModal from "../components/CastModal";
 
 export default function MatchDetail() {
     const { id } = useParams();
@@ -8,24 +9,39 @@ export default function MatchDetail() {
     const [loading, setLoading] = useState(true);
     const [me, setMe] = useState(null);
     const [players, setPlayers] = useState([]);
+    const [showCastModal, setShowCastModal] = useState(false);
+    const [existingCast, setExistingCast] = useState(null);
 
+    // -----------------------------------------------------
+    // LOAD ALL PLAYERS
+    // -----------------------------------------------------
     useEffect(() => {
         axios
             .get(`${import.meta.env.VITE_API_URL}/api/players`, { withCredentials: true })
-            .then((res) => setPlayers(res.data || []))
+            .then((res) => {
+                const list = Array.isArray(res.data) ? res.data : [];
+
+                // IMPORTANT FIX → stringify IDs
+                const normalized = list.map(p => ({
+                    ...p,
+                    id: String(p.id),
+                }));
+
+                setPlayers(normalized);
+            })
             .catch(() => setPlayers([]));
     }, []);
 
-    // Lookup helper
+    // Helper: Safe name lookup
     function getPlayerName(id) {
         if (!id) return "None";
         const p = players.find((x) => String(x.id) === String(id));
         return p ? p.display_name || p.username : "Unknown";
     }
 
-    // ⭐ NEW: read current configured week
-    const currentWeek = import.meta.env.VITE_CURRENT_WEEK;
-
+    // -----------------------------------------------------
+    // LOAD MATCH DETAILS
+    // -----------------------------------------------------
     useEffect(() => {
         axios
             .get(`${import.meta.env.VITE_API_URL}/api/match/${id}`)
@@ -40,6 +56,9 @@ export default function MatchDetail() {
             .finally(() => setLoading(false));
     }, [id]);
 
+    // -----------------------------------------------------
+    // LOAD USER (CASTER, MOD, ETC.)
+    // -----------------------------------------------------
     useEffect(() => {
         axios
             .get(`${import.meta.env.VITE_API_URL}/api/me`, { withCredentials: true })
@@ -47,32 +66,40 @@ export default function MatchDetail() {
             .catch(() => setMe(null));
     }, []);
 
-    async function handleCastRequest() {
-        try {
-            const res = await axios.post(
-                `${import.meta.env.VITE_API_URL}/api/match/cast`,
-                { match_id: Number(id) },
-                { withCredentials: true }
-            );
+    // -----------------------------------------------------
+    // INITIAL LOAD — CAST INFO
+    // -----------------------------------------------------
+    useEffect(() => {
+        axios
+            .get(`${import.meta.env.VITE_API_URL}/api/match/cast/get/${id}`, {
+                withCredentials: true,
+            })
+            .then((res) => setExistingCast(res.data || null))
+            .catch(() => setExistingCast(null));
+    }, [id]);
 
-            if (res?.data?.channel_id) {
-                alert("🎥 Cast channel created!");
+    // -----------------------------------------------------
+    // RELOAD CAST DATA AFTER PLAYERS LOAD
+    // -----------------------------------------------------
+    useEffect(() => {
+        if (!players.length) return;
 
-                const guildID = import.meta.env.VITE_DISCORD_GUILD_ID;
-            }
-        } catch (err) {
-            console.error("❌ Cast Error:", err);
-            alert(err.response?.data || "Failed to create cast channel.");
-        }
-    }
+        axios
+            .get(`${import.meta.env.VITE_API_URL}/api/match/cast/get/${id}`, {
+                withCredentials: true,
+            })
+            .then((res) => setExistingCast(res.data || null))
+            .catch(() => { });
+    }, [players]);
 
     if (loading) return <p className="text-light">Loading match details...</p>;
     if (!matchData) return <p className="text-danger">⚠️ Match not found.</p>;
 
-    // --- Normalize data ---
+    // -----------------------------------------------------
+    // NORMALIZE MATCH DATA
+    // -----------------------------------------------------
     const match = matchData.match || {};
     const teams = matchData.teams || {};
-    const maps = Array.isArray(matchData.maps) ? matchData.maps : [];
     const rosterA = Array.isArray(matchData.roster?.a) ? matchData.roster.a : [];
     const rosterB = Array.isArray(matchData.roster?.b) ? matchData.roster.b : [];
 
@@ -89,44 +116,58 @@ export default function MatchDetail() {
                 ? "text-warning"
                 : "text-muted";
 
+    // -----------------------------------------------------
+    // NORMALIZE CAST (STRING IDs SO LOOKUP ALWAYS MATCHES)
+    // -----------------------------------------------------
+    const cast = matchData.cast || {};
+    const castCasters = (cast.casters || []).map(String);
+    const castCamera = cast.camera ? String(cast.camera) : "";
+
     return (
         <div className="container py-3 text-light">
             {/* --- Page Title & Caster Button --- */}
             <div className="d-flex justify-content-between align-items-center mb-3">
                 <h2 className="mb-0 text-light">
-                    Match Details{" "}
-                    <small className="text-light ms-2">#{match.id || id}</small>
+                    Match Details <small className="ms-2">#{match.id || id}</small>
                 </h2>
 
-                {/* ⭐ Caster-only button */}
-                {me?.is_caster &&
-                    match.status === "Scheduled" && (
-                        <button
-                            className="btn btn-info btn-sm"
-                            onClick={handleCastRequest}
-                            style={{ whiteSpace: "nowrap" }}
-                        >
-                            🎥 Cast Match
-                        </button>
-                    )}
+                {me?.is_caster && match.status === "Scheduled" && (
+                    <button
+                        className="btn btn-info btn-sm"
+                        onClick={() => setShowCastModal(true)}
+                    >
+                        🎥 Cast Match
+                    </button>
+                )}
             </div>
+
+            <CastModal
+                show={showCastModal}
+                onClose={() => setShowCastModal(false)}
+                matchID={id}
+                existingCast={existingCast}
+                urlBase={import.meta.env.VITE_API_URL}
+                onSaved={() => {
+                    axios.get(`${import.meta.env.VITE_API_URL}/api/match/${id}`)
+                        .then((res) => setMatchData(res.data));
+                    axios.get(`${import.meta.env.VITE_API_URL}/api/match/${id}`)
+                        .then((res) => setMatchData(res.data));  // <-- refresh matchData.cast
+
+                    axios.get(`${import.meta.env.VITE_API_URL}/api/match/cast/get/${id}`)
+                        .then((res) => setExistingCast(res.data));
+                }}
+            />
 
             {/* --- Header --- */}
             <div className="card bg-dark border-secondary mb-4 shadow-sm">
                 <div className="card-body text-center">
                     <h4 className="mb-3">
-                        <Link
-                            to={`/teams/${teamA.id || ""}`}
-                            className="text-decoration-none text-light fw-bold"
-                        >
-                            {teamA.name || "Unknown"}
+                        <Link to={`/teams/${teamA.id}`} className="text-light fw-bold">
+                            {teamA.name}
                         </Link>{" "}
                         <span className="text-secondary">vs</span>{" "}
-                        <Link
-                            to={`/teams/${teamB.id || ""}`}
-                            className="text-decoration-none text-light fw-bold"
-                        >
-                            {teamB.name || "Unknown"}
+                        <Link to={`/teams/${teamB.id}`} className="text-light fw-bold">
+                            {teamB.name}
                         </Link>
                     </h4>
                     <p className={`mb-2 fw-bold ${statusColor}`}>
@@ -135,6 +176,32 @@ export default function MatchDetail() {
                     <p className="text-muted mb-0">Scheduled: {formattedDate}</p>
                 </div>
             </div>
+
+            {/* 🎥 CAST INFO */}
+            {cast?.active && (
+                <div className="card bg-dark border-info shadow-sm mb-4">
+                    <div className="card-header border-info text-info fw-bold d-flex align-items-center">
+                        <span style={{ fontSize: "1.4rem", marginRight: "8px" }}>🎥</span>
+                        Match Cast Information
+                    </div>
+
+                    <div className="card-body text-light">
+                        <p className="mb-2">
+                            <strong className="text-info">Casters:</strong><br />
+                            {castCasters.length > 0
+                                ? castCasters.map((id) => getPlayerName(id)).join(", ")
+                                : "No casters assigned"}
+                        </p>
+
+                        <p className="mb-0">
+                            <strong className="text-warning">Camera Operator:</strong><br />
+                            {castCamera
+                                ? getPlayerName(castCamera)
+                                : "None assigned"}
+                        </p>
+                    </div>
+                </div>
+            )}
 
             {/* --- Map Scores --- */}
             <h4 className="text-light mb-3">🗺️ Map Scores</h4>
@@ -161,6 +228,7 @@ export default function MatchDetail() {
                 const totalB = validMaps.filter(
                     (m) => m.team_b_score > m.team_a_score
                 ).length;
+
                 const winner =
                     totalA > totalB
                         ? teamA.name
@@ -194,29 +262,15 @@ export default function MatchDetail() {
                                     {validMaps.map((m, i) => {
                                         const aWin = m.team_a_score > m.team_b_score;
                                         const bWin = m.team_b_score > m.team_a_score;
-                                        const mode =
-                                            m.mode && m.mode.trim() !== ""
-                                                ? m.mode
-                                                : "Unknown";
 
                                         return (
                                             <tr key={i}>
                                                 <td>Map {m.map ?? i + 1}</td>
-                                                <td>{mode}</td>
-                                                <td className={`fw-bold ${aWin
-                                                    ? "text-success"
-                                                    : bWin
-                                                        ? "text-danger"
-                                                        : "text-light"
-                                                    }`}>
+                                                <td>{m.mode || "Unknown"}</td>
+                                                <td className={`fw-bold ${aWin ? "text-success" : bWin ? "text-danger" : "text-light"}`}>
                                                     {m.team_a_score}
                                                 </td>
-                                                <td className={`fw-bold ${bWin
-                                                    ? "text-success"
-                                                    : aWin
-                                                        ? "text-danger"
-                                                        : "text-light"
-                                                    }`}>
+                                                <td className={`fw-bold ${bWin ? "text-success" : aWin ? "text-danger" : "text-light"}`}>
                                                     {m.team_b_score}
                                                 </td>
                                                 <td>
@@ -229,9 +283,7 @@ export default function MatchDetail() {
                                                             ✅ {teamB.name}
                                                         </span>
                                                     ) : (
-                                                        <span className="text-secondary">
-                                                            Tie
-                                                        </span>
+                                                        <span className="text-secondary">Tie</span>
                                                     )}
                                                 </td>
                                             </tr>
@@ -249,25 +301,19 @@ export default function MatchDetail() {
 
             <div className="card bg-dark border-secondary mb-4 shadow-sm">
                 <div className="card-body">
-
                     <p className="mb-2">
                         <strong className="text-info">{teamA.name} Sub:</strong>{" "}
-                        {match.league_sub_a ? (
-                            <span className="text-light">{getPlayerName(String(match.league_sub_a))}</span>
-                        ) : (
-                            <span className="text-light">None</span>
-                        )}
+                        {match.league_sub_a
+                            ? getPlayerName(String(match.league_sub_a))
+                            : "None"}
                     </p>
 
                     <p className="mb-0">
                         <strong className="text-warning">{teamB.name} Sub:</strong>{" "}
-                        {match.league_sub_b ? (
-                            <span className="text-light">{getPlayerName(String(match.league_sub_b))}</span>
-                        ) : (
-                            <span className="text-light">None</span>
-                        )}
+                        {match.league_sub_b
+                            ? getPlayerName(String(match.league_sub_b))
+                            : "None"}
                     </p>
-
                 </div>
             </div>
 
@@ -279,16 +325,16 @@ export default function MatchDetail() {
                         <div className="col-md-6 mb-3" key={i}>
                             <div className="card bg-dark border-secondary">
                                 <div className="card-header text-center text-light fw-bold">
-                                    {team.name || `Team ${i === 0 ? "A" : "B"}`}
+                                    {team.name}
                                 </div>
                                 <ul className="list-group list-group-flush">
                                     {roster.length ? (
-                                        roster.map((p) => (
+                                        roster.map((p, idx) => (
                                             <li
-                                                key={p.player_id || p.username || i}
+                                                key={idx}
                                                 className="list-group-item bg-dark text-light d-flex justify-content-between align-items-center"
                                             >
-                                                <span>{p.display_name || p.username || "Unknown"}</span>
+                                                <span>{p.display_name || p.username}</span>
                                                 <span>{p.role || "-"}</span>
                                             </li>
                                         ))
@@ -306,8 +352,8 @@ export default function MatchDetail() {
 
             {/* --- Back Button --- */}
             <div className="mt-4">
-                <Link to={`/teams/${teamA.id || ""}`} className="btn btn-secondary">
-                    ← Back to {teamA.name || "Teams"}
+                <Link to={`/teams/${teamA.id}`} className="btn btn-secondary">
+                    ← Back to {teamA.name}
                 </Link>
             </div>
         </div>

@@ -576,6 +576,12 @@ func main() {
 		})
 	})
 
+	// Cast system routes
+	r.HandleFunc("/api/match/cast", HandleSetCast).Methods("POST")
+	r.HandleFunc("/api/match/cast/get/{id}", HandleGetCast).Methods("GET")
+	r.HandleFunc("/api/match/cast/delete", HandleDeleteCast).Methods("POST")
+	r.HandleFunc("/api/match/cast/request", HandleRequestCast).Methods("POST")
+
 	// Auth routes
 	r.HandleFunc("/login", handleLogin).Methods("GET")
 	r.HandleFunc("/callback", handleCallback).Methods("GET")
@@ -585,7 +591,6 @@ func main() {
 	r.HandleFunc("/api/match/confirm-score", HandleConfirmScore).Methods("POST")
 	r.HandleFunc("/api/match/schedule", HandleScheduleMatch).Methods("POST")
 	r.HandleFunc("/api/match/submit-score", HandleSubmitScore).Methods("POST")
-	r.HandleFunc("/api/match/cast", HandleRequestCast).Methods("POST")
 	r.HandleFunc("/api/match/confirm-coinflip", HandleConfirmCoinFlip).Methods("POST")
 	r.HandleFunc("/api/matches/public", HandlePublicMatches).Methods("GET")
 	r.HandleFunc("/api/settings", GetSettings).Methods("GET")

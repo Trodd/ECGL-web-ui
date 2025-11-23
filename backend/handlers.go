@@ -82,6 +82,17 @@ func (f *FlexibleID) UnmarshalJSON(b []byte) error {
 	return fmt.Errorf("invalid FlexibleID payload: %s", string(b))
 }
 
+func lookupName(id int64) string {
+	var p Player
+	if err := DB.First(&p, "id = ?", id).Error; err == nil {
+		if p.DisplayName != "" {
+			return p.DisplayName
+		}
+		return p.Username
+	}
+	return fmt.Sprint(id) // fallback to ID
+}
+
 func (f *FlexibleID) Int64() int64 {
 	if f.value == nil {
 		return 0
@@ -198,6 +209,46 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, frontend, http.StatusSeeOther)
 }
 
+// --- Helper: Check if a user has a Discord role ---
+func userHasDiscordRole(discordIDStr string, roleID string) bool {
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	botToken := getEnv("DISCORD_BOT_TOKEN", "")
+
+	if guildID == "" || botToken == "" || roleID == "" {
+		return false
+	}
+
+	req, _ := http.NewRequest("GET",
+		fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s",
+			guildID, discordIDStr),
+		nil)
+
+	req.Header.Set("Authorization", "Bot "+botToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		return false
+	}
+
+	defer resp.Body.Close()
+
+	var member struct {
+		Roles []string `json:"roles"`
+	}
+
+	if json.NewDecoder(resp.Body).Decode(&member) != nil {
+		return false
+	}
+
+	for _, r := range member.Roles {
+		if r == roleID {
+			return true
+		}
+	}
+
+	return false
+}
+
 // --- Players ---
 func GetPlayers(w http.ResponseWriter, r *http.Request) {
 	type raw struct {
@@ -217,14 +268,12 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 		Where("display_name <> ''").
 		Where("role IS NOT NULL AND role <> '' AND role <> 'Unregistered'")
 
-	// ✅ Apply role filter if provided (case-insensitive)
 	if roleFilter != "" {
 		query = query.Where("LOWER(role) = LOWER(?)", roleFilter)
 	}
 
 	var rows []raw
 	if err := query.Scan(&rows).Error; err != nil {
-		// Always return JSON, even on error
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -233,21 +282,29 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	//casterRoleID := getEnv("DISCORD_CASTER_ROLE_ID", "")
+	//modRoleID := getEnv("DISCORD_LEAGUE_MOD_ROLE_ID", "")
+
 	players := make([]map[string]any, 0, len(rows))
+
 	for _, r := range rows {
+		// Convert ID to string because Discord IDs are string-based
+		idStr := strconv.FormatInt(r.ID, 10)
+
+		// 🔥 Reuse the exact same Discord role logic as /api/me
+		isCaster := false
+		isMod := false
+
 		players = append(players, map[string]any{
-			"id":           strconv.FormatInt(r.ID, 10),
+			"id":           idStr,
 			"username":     r.Username,
 			"display_name": r.DisplayName,
 			"role":         r.Role,
 			"device":       r.Device,
 			"timezone":     r.Timezone,
+			"is_caster":    isCaster,
+			"is_mod":       isMod,
 		})
-	}
-
-	// ✅ Always return an array, even if empty
-	if players == nil {
-		players = []map[string]any{}
 	}
 
 	respondJSON(w, players)
@@ -1304,6 +1361,7 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 		Status        string     `json:"status"`
 		WinnerID      *uint      `json:"winner_id"`
 		LoserID       *uint      `json:"loser_id"`
+		CastActive    bool       `json:"cast_active"`
 	}
 
 	var normalized []PublicMatch
@@ -1316,6 +1374,11 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 		if weekLabel == "" {
 			weekLabel = "?"
 		}
+
+		var cast CastLogMulti
+		DB.Where("match_id = ?", m.ID).First(&cast)
+
+		castActive := cast.ID != 0
 
 		normalized = append(normalized, PublicMatch{
 			ID:            m.ID,
@@ -1330,6 +1393,7 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 			Status:        m.Status,
 			WinnerID:      m.WinnerID,
 			LoserID:       m.LoserID,
+			CastActive:    castActive,
 		})
 	}
 
@@ -1970,12 +2034,21 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save league subs
-	match.LeagueSubA = subA
-	match.LeagueSubB = subB
+	switch req.TeamID {
+	case match.TeamAID:
+		match.LeagueSubA = subA
+		match.LeagueSubB = subB
+	case match.TeamBID:
+		match.LeagueSubA = subB
+		match.LeagueSubB = subA
+	default:
+		http.Error(w, "Team not part of this match", http.StatusForbidden)
+		return
+	}
 
 	DB.Model(&match).Updates(map[string]any{
-		"league_sub_a": subA,
-		"league_sub_b": subB,
+		"league_sub_a": match.LeagueSubA,
+		"league_sub_b": match.LeagueSubB,
 	})
 
 	// Get existing score-set
@@ -2191,6 +2264,32 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 		leagueSubB = strconv.FormatInt(*match.LeagueSubB, 10)
 	}
 
+	// --- Load Cast Info ---
+	var cast CastLogMulti
+	castErr := DB.Where("match_id = ?", match.ID).First(&cast).Error
+
+	var casterIDs []int64
+	if castErr == nil {
+		_ = json.Unmarshal(cast.Casters, &casterIDs)
+	}
+
+	// 🔁 Convert IDs to strings for JSON (match /api/players & avoid JS precision loss)
+	casterStrs := make([]string, 0, len(casterIDs))
+	for _, id := range casterIDs {
+		casterStrs = append(casterStrs, strconv.FormatInt(id, 10))
+	}
+
+	cameraStr := ""
+	if castErr == nil && cast.CameraID != 0 {
+		cameraStr = strconv.FormatInt(cast.CameraID, 10)
+	}
+
+	castData := map[string]any{
+		"active":  castErr == nil && len(casterStrs) > 0,
+		"casters": casterStrs,
+		"camera":  cameraStr,
+	}
+
 	// Final Response
 	respondJSON(w, map[string]any{
 		"match": map[string]any{
@@ -2205,8 +2304,8 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 			"loser_id":               match.LoserID,
 			"team_a_score_confirmed": match.TeamAScoreConfirmed,
 			"team_b_score_confirmed": match.TeamBScoreConfirmed,
-			"league_sub_a":           leagueSubA, // <-- FIXED
-			"league_sub_b":           leagueSubB, // <-- FIXED
+			"league_sub_a":           leagueSubA,
+			"league_sub_b":           leagueSubB,
 		},
 		"teams":      map[string]any{"a": teamA, "b": teamB},
 		"map_scores": filtered,
@@ -2214,6 +2313,7 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 			"a": stringifyRosterPlayers(rosterA),
 			"b": stringifyRosterPlayers(rosterB),
 		},
+		"cast": castData,
 	})
 
 }
@@ -4525,8 +4625,7 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var teamA Team
-	var teamB Team
+	var teamA, teamB Team
 	DB.First(&teamA, match.TeamAID)
 	DB.First(&teamB, match.TeamBID)
 
@@ -4547,16 +4646,19 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 		PermReadMessageHistory = 1 << 16 // 65536
 	)
 
+	// -----------------------
+	// Permission overwrites
+	// -----------------------
 	overwrites := []map[string]any{
 		{
 			"id":   guildID,
 			"type": 0,
-			"deny": PermViewChannel, // int, not string
+			"deny": fmt.Sprint(PermViewChannel),
 		},
 		{
 			"id":    casterRoleID,
 			"type":  0,
-			"allow": PermViewChannel | PermSendMessages | PermReadMessageHistory,
+			"allow": fmt.Sprint(PermViewChannel | PermSendMessages | PermReadMessageHistory),
 		},
 	}
 
@@ -4565,15 +4667,16 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 		overwrites = append(overwrites, map[string]any{
 			"id":    modRoleID,
 			"type":  0,
-			"allow": PermViewChannel | PermReadMessageHistory,
+			"allow": fmt.Sprint(PermViewChannel | PermReadMessageHistory),
 		})
 	}
 
+	// Add roster players
 	for _, tm := range append(rosterA, rosterB...) {
 		overwrites = append(overwrites, map[string]any{
 			"id":    fmt.Sprint(tm.PlayerID),
 			"type":  1,
-			"allow": PermViewChannel | PermReadMessageHistory,
+			"allow": fmt.Sprint(PermViewChannel | PermReadMessageHistory),
 		})
 	}
 
@@ -4613,17 +4716,32 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(resp3.Body).Decode(&created)
 
-	// ==========================================================
-	// SEND MESSAGE INSIDE THE CAST CHANNEL
-	// ==========================================================
+	// ----------------------
+	// Send message inside channel
+	// ----------------------
+	var cast CastLogMulti
+	DB.Where("match_id = ?", req.MatchID).First(&cast)
+
+	var casterIDs []int64
+	_ = json.Unmarshal(cast.Casters, &casterIDs)
+
 	msgBody := map[string]any{
 		"content": fmt.Sprintf(
-			"📣 **This match is being casted!**\n\n"+
-				"**%s vs %s**\n\n"+
-				"🔗 **Post all Taxi Links here**\n\n"+
-				"wait for casters greenlight before starting the match.\n\n%s",
+			"🔴 **LIVE CAST MATCH** 🔴\n"+
+				"====================================\n"+
+				"**%s vs %s**\n"+
+				"**Match Code:** `%s`\n"+
+				"**Scheduled Time:** <t:%d:f> (<t:%d:R>)\n"+
+				"====================================\n\n"+
+				"Casters will join shortly.\n\n"+
+				"🔗 **TEAMS:** Please post all Taxi Links here.\n"+
+				"⚠️ **Do NOT start the match** until casters give the green light.\n\n"+
+				"%s",
 			teamA.Name,
 			teamB.Name,
+			match.MatchCode,
+			match.ScheduledDate.Unix(),
+			match.ScheduledDate.Unix(),
 			buildMentionList(rosterA, rosterB),
 		),
 	}
@@ -5233,5 +5351,171 @@ func HandleGetLeagueSettings(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, map[string]any{
 		"challenges_enabled": s.ChallengesEnabled,
+	})
+}
+
+func HandleSetCast(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MatchID  uint     `json:"match_id"`
+		Casters  []string `json:"casters"`
+		CameraID string   `json:"camera_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.MatchID == 0 || len(req.Casters) == 0 || strings.TrimSpace(req.CameraID) == "" {
+		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+
+	// 🧱 Convert casters → int64 slice (DB-safe)
+	casterIDs := make([]int64, 0, len(req.Casters))
+	for _, idStr := range req.Casters {
+		idStr = strings.TrimSpace(idStr)
+		if idStr == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid caster ID", http.StatusBadRequest)
+			return
+		}
+		casterIDs = append(casterIDs, id)
+	}
+
+	if len(casterIDs) == 0 {
+		http.Error(w, "No valid caster IDs", http.StatusBadRequest)
+		return
+	}
+
+	// 🧱 Convert camera ID to int64
+	camID, err := strconv.ParseInt(strings.TrimSpace(req.CameraID), 10, 64)
+	if err != nil || camID == 0 {
+		http.Error(w, "Invalid camera ID", http.StatusBadRequest)
+		return
+	}
+
+	// Marshal caster array as JSON (stored as JSONB)
+	castersJSON, err := json.Marshal(casterIDs)
+	if err != nil {
+		http.Error(w, "Failed to encode casters", http.StatusInternalServerError)
+		return
+	}
+
+	// Remove legacy single-cast record (if any)
+	DB.Where("match_id = ?", req.MatchID).Delete(&CastLog{})
+
+	// Upsert CastLogMulti
+	var existing CastLogMulti
+	dbErr := DB.Where("match_id = ?", req.MatchID).First(&existing).Error
+
+	if errors.Is(dbErr, gorm.ErrRecordNotFound) {
+		// Insert new
+		if err := DB.Create(&CastLogMulti{
+			MatchID:   req.MatchID,
+			Casters:   castersJSON,
+			CameraID:  camID,
+			CreatedAt: time.Now(),
+		}).Error; err != nil {
+			http.Error(w, "Failed to save cast", http.StatusInternalServerError)
+			return
+		}
+	} else if dbErr == nil {
+		// Update existing
+		existing.MatchID = req.MatchID
+		existing.Casters = castersJSON
+		existing.CameraID = camID
+		if err := DB.Save(&existing).Error; err != nil {
+			http.Error(w, "Failed to update cast", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "Cast saved.",
+	})
+}
+
+func HandleGetCast(w http.ResponseWriter, r *http.Request) {
+	idStr := mux.Vars(r)["id"]
+	matchID, err := strconv.Atoi(idStr)
+	if err != nil || matchID <= 0 {
+		http.Error(w, "Invalid match ID", http.StatusBadRequest)
+		return
+	}
+
+	// Priority: Multi-caster log
+	var multi CastLogMulti
+	if err := DB.Where("match_id = ?", matchID).First(&multi).Error; err == nil {
+		var casterIDs []int64
+		_ = json.Unmarshal(multi.Casters, &casterIDs)
+
+		// 🔁 Convert to strings for JSON (avoid JS precision issues)
+		casterStrs := make([]string, 0, len(casterIDs))
+		for _, id := range casterIDs {
+			casterStrs = append(casterStrs, strconv.FormatInt(id, 10))
+		}
+
+		cameraStr := ""
+		if multi.CameraID != 0 {
+			cameraStr = strconv.FormatInt(multi.CameraID, 10)
+		}
+
+		respondJSON(w, map[string]any{
+			"match_id": matchID,
+			"casters":  casterStrs,
+			"camera":   cameraStr,
+		})
+		return
+	}
+
+	// Legacy fallback
+	var legacy CastLog
+	if err := DB.Where("match_id = ?", matchID).First(&legacy).Error; err == nil {
+		casterStr := strconv.FormatInt(legacy.CasterID, 10)
+		cameraStr := ""
+		if legacy.CameraID != 0 {
+			cameraStr = strconv.FormatInt(legacy.CameraID, 10)
+		}
+
+		respondJSON(w, map[string]any{
+			"match_id": matchID,
+			"casters":  []string{casterStr},
+			"camera":   cameraStr,
+		})
+		return
+	}
+
+	respondJSON(w, nil)
+}
+
+func HandleDeleteCast(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MatchID uint `json:"match_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.MatchID == 0 {
+		http.Error(w, "Missing match ID", http.StatusBadRequest)
+		return
+	}
+
+	DB.Where("match_id = ?", req.MatchID).Delete(&CastLogMulti{})
+	DB.Where("match_id = ?", req.MatchID).Delete(&CastLog{})
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "Cast removed.",
 	})
 }

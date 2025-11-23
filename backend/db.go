@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +13,21 @@ import (
 )
 
 var DB *gorm.DB
+
+// --- Custom logger to silence ONLY ErrRecordNotFound ---
+type SilentRecordNotFoundLogger struct {
+	logger.Interface
+}
+
+func (l SilentRecordNotFoundLogger) Error(ctx context.Context, msg string, data ...interface{}) {
+	// Skip noisy “record not found” logs
+	if len(data) > 0 {
+		if err, ok := data[0].(error); ok && err == gorm.ErrRecordNotFound {
+			return
+		}
+	}
+	l.Interface.Error(ctx, msg, data...)
+}
 
 func InitDB() {
 	dsn := fmt.Sprintf(
@@ -25,19 +41,21 @@ func InitDB() {
 
 	var err error
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Error), // ✅ only show errors, not "record not found"
+		Logger: logger.Default.LogMode(logger.Silent), // 🔇 disables ALL SQL logging
 	})
 	if err != nil {
 		log.Fatal("❌ Failed to connect to Postgres:", err)
 	}
 
 	// Auto-migrate schema
-	err = DB.AutoMigrate(&Player{}, &Team{}, &TeamMember{}, &TeamJoinRequest{}, &Match{}, &MatchScore{}, &PlayerHistory{})
+	err = DB.AutoMigrate(
+		&Player{}, &Team{}, &TeamMember{}, &TeamJoinRequest{},
+		&Match{}, &MatchScore{}, &PlayerHistory{}, &CastLog{}, &CastLogMulti{},
+	)
 	if err != nil {
 		log.Fatal("❌ Migration failed:", err)
 	}
 
-	// Configure connection pool
 	sqlDB, _ := DB.DB()
 	sqlDB.SetMaxIdleConns(10)
 	sqlDB.SetMaxOpenConns(100)
