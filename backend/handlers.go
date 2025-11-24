@@ -93,6 +93,13 @@ func lookupName(id int64) string {
 	return fmt.Sprint(id) // fallback to ID
 }
 
+func IsPlayerOnCooldown(player Player, ls LeagueSettings) bool {
+	if player.LastLeftTeamAt == nil || ls.LastMatchGeneration == nil {
+		return false
+	}
+	return player.LastLeftTeamAt.After(*ls.LastMatchGeneration)
+}
+
 func (f *FlexibleID) Int64() int64 {
 	if f.value == nil {
 		return 0
@@ -345,18 +352,25 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 
 	// --- Load roster (include display_name, fallback to player_history) ---
 	type RosterPlayer struct {
-		ID          uint   `json:"id"`
+		ID          string `json:"id"`
 		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
 		Role        string `json:"role"`
 		Rating      int    `json:"rating"`
+		OnCooldown  bool   `json:"on_cooldown"`
 	}
 
 	var roster []RosterPlayer
 
-	// 🧩 Try primary live roster
+	// 🧩 Primary live roster
 	err = DB.Table("team_members").
-		Select("players.id, players.username, players.display_name, team_members.role, players.rating").
+		Select(`
+			CAST(players.id AS TEXT) AS id,
+			players.username,
+			players.display_name,
+			team_members.role,
+			players.rating
+		`).
 		Joins("JOIN players ON players.id = team_members.player_id").
 		Where("team_members.team_id = ?", teamID).
 		Scan(&roster).Error
@@ -366,19 +380,34 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 		roster = []RosterPlayer{}
 	}
 
-	// 🧩 Fallback: use player_history if no active roster found
+	// 🧩 Fallback: player_history
 	if len(roster) == 0 {
 		DB.Raw(`
-			SELECT p.id, p.username, p.display_name, ph.role, p.rating
+			SELECT
+				CAST(p.id AS TEXT) AS id,
+				p.username,
+				p.display_name,
+				ph.role,
+				p.rating
 			FROM player_history ph
 			JOIN players p ON p.id = ph.player_id
 			WHERE ph.team_id = ? AND ph.season = ?
 		`, teamID, currentSeason).Scan(&roster)
 	}
 
+	// --- Apply cooldown
+	var ls LeagueSettings
+	DB.First(&ls, 1)
+
+	for i := range roster {
+		var p Player
+		pid, _ := strconv.ParseInt(roster[i].ID, 10, 64)
+		DB.First(&p, pid)
+		roster[i].OnCooldown = IsPlayerOnCooldown(p, ls)
+	}
 	// --- Load match history (include numeric ID and MatchCode) ---
 	type MatchRow struct {
-		ID         uint       `json:"id"`
+		ID         string     `json:"id"`
 		MatchCode  string     `json:"match_code"`
 		OpponentID uint       `json:"opponent_id"`
 		Opponent   string     `json:"opponent"`
@@ -677,6 +706,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 		DisplayName string `json:"display_name"`
 		Role        string `json:"role"`
 		Rating      int    `json:"rating"`
+		OnCooldown  bool   `json:"on_cooldown"`
 	}
 
 	var roster []RosterPlayer
@@ -750,6 +780,17 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 			"week":                ch.Week,
 			"status":              ch.Status,
 		})
+	}
+
+	var ls LeagueSettings
+	DB.First(&ls, 1)
+
+	for i := range roster {
+		var p Player
+		pid, _ := strconv.ParseInt(roster[i].ID, 10, 64)
+		DB.First(&p, pid)
+
+		roster[i].OnCooldown = IsPlayerOnCooldown(p, ls)
 	}
 
 	// --- final response ---
@@ -909,13 +950,17 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ✅ Create team with default ELO from .env
+	var ls LeagueSettings
+	DB.First(&ls, 1)
+
 	team := Team{
-		Name:    req.Name,
-		Status:  "Active",
-		Rating:  getEnvInt("DEFAULT_TEAM_RATING", 1000),
-		Wins:    0,
-		Losses:  0,
-		Matches: 0,
+		Name:            req.Name,
+		Status:          "Active",
+		Rating:          getEnvInt("DEFAULT_TEAM_RATING", 1000),
+		Wins:            0,
+		Losses:          0,
+		Matches:         0,
+		AllowChallenges: ls.ChallengesEnabled, // ⬅ IMPORTANT FIX
 	}
 	if err := DB.Create(&team).Error; err != nil {
 		http.Error(w, "Failed to create team", http.StatusInternalServerError)
@@ -1215,6 +1260,14 @@ func HandleLeaveTeam(w http.ResponseWriter, r *http.Request) {
 	if err := DB.Delete(&member).Error; err != nil {
 		http.Error(w, "Failed to leave team", http.StatusInternalServerError)
 		return
+	}
+
+	// ⭐ Set cooldown timestamp so player cannot play until next matchup generation
+	now := time.Now()
+	if err := DB.Model(&Player{}).
+		Where("id = ?", playerID).
+		Update("last_left_team_at", now).Error; err != nil {
+		log.Printf("⚠️ Failed to update player cooldown timestamp: %v", err)
 	}
 
 	// Count remaining members
@@ -4905,7 +4958,7 @@ func HandleChallengeRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load teams
+	// Load both teams
 	var requester, target Team
 	if err := DB.First(&requester, req.RequesterTeamID).Error; err != nil {
 		http.Error(w, "Requester team not found", http.StatusNotFound)
@@ -4916,31 +4969,47 @@ func HandleChallengeRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cannot challenge self
+	// 🔥 Global challenge enable check
+	var settings LeagueSettings
+	if err := DB.First(&settings, 1).Error; err != nil {
+		settings.ChallengesEnabled = true
+	}
+	if !settings.ChallengesEnabled {
+		http.Error(w, "Challenge matches are disabled league-wide", http.StatusForbidden)
+		return
+	}
+
+	// ❌ Cannot challenge yourself
 	if requester.ID == target.ID {
 		http.Error(w, "Cannot challenge your own team", http.StatusBadRequest)
 		return
 	}
 
-	// Check if target allows challenges
+	// ❌ Reject if requester team is inactive or disbanded
+	if requester.Status != "Active" {
+		http.Error(w, "Your team must be active to issue challenges.", http.StatusForbidden)
+		return
+	}
+
+	// ❌ Reject if target team is inactive or disbanded
+	if target.Status != "Active" {
+		http.Error(w, "That team is not active and cannot receive challenges.", http.StatusForbidden)
+		return
+	}
+
+	// ❌ Reject if target has challenge toggle off
 	if !target.AllowChallenges {
 		http.Error(w, "Target team does not allow challenges", http.StatusForbidden)
 		return
 	}
 
-	// Load global league settings (weekly challenge limit)
-	var settings LeagueSettings
-	if err := DB.First(&settings, 1).Error; err != nil {
-		settings.WeeklyChallengeLimit = 1 // safe fallback
-	}
-
-	// Weekly challenge limit check (CORRECT FIELD)
+	// 🔥 Weekly challenge limit
 	if requester.WeeklyChallengesUsed >= settings.WeeklyChallengeLimit {
 		http.Error(w, "Weekly challenge limit reached", http.StatusForbidden)
 		return
 	}
 
-	// Prevent duplicate pending
+	// Prevent duplicate pending challenges
 	var exists int64
 	DB.Model(&ChallengeRequest{}).
 		Where("requester_team_id = ? AND target_team_id = ? AND status = 'Pending'",
@@ -4984,7 +5053,6 @@ func HandleChallengeRequest(w http.ResponseWriter, r *http.Request) {
 		"message": "Challenge request sent.",
 	})
 }
-
 func HandleChallengeRespond(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ChallengeID uint `json:"challenge_id"`

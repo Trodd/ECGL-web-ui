@@ -164,7 +164,10 @@ export default function TeamDetail() {
     isCaptain &&
     myTeamID &&
     team.id !== myTeamID &&
-    teamSettings?.allow_challenges &&
+    settings?.challenges_enabled === true &&
+    team.status === "Active" &&                 // 🔥 target team must be active
+    myTeam?.status === "Active" &&              // 🔥 requester team must be active
+    teamSettings?.allow_challenges === true &&
     (myTeam?.weekly_challenges_used ?? 0) <
     (settings?.weekly_challenge_limit ?? 999);
 
@@ -193,16 +196,47 @@ export default function TeamDetail() {
       {/* ===========================
           ⚔️ CHALLENGE BUTTON SHOWS HERE
           =========================== */}
-      {canChallenge && (
-        <button
-          className="btn btn-warning mt-3"
-          onClick={handleChallengeRequest}
-        >
-          ⚔️ Challenge This Team
-        </button>
+      {/* Challenge Button */}
+      {settings?.challenges_enabled ? (
+        team.status !== "Active" ? (
+          <p className="text-warning small mt-2">
+            🔒 This team is not active and cannot receive challenges.
+          </p>
+        ) : myTeam?.status !== "Active" ? (
+          <p className="text-warning small mt-2">
+            🔒 Your team must be active to issue challenges.
+          </p>
+        ) : canChallenge ? (
+          <button
+            className="btn btn-warning mt-3"
+            onClick={handleChallengeRequest}
+          >
+            ⚔️ Challenge This Team
+          </button>
+        ) : (
+          <p className="text-secondary small mt-2">
+            {teamSettings?.allow_challenges !== true
+              ? "🚫 This team is not accepting challenges."
+              : (myTeam?.weekly_challenges_used ?? 0) >=
+                (settings?.weekly_challenge_limit ?? 999)
+                ? "⚠️ Your team has used all weekly challenge attempts."
+                : !isCaptain
+                  ? "⛔ Only the captain or co-captain may issue challenges."
+                  : ""}
+          </p>
+        )
+      ) : (
+        <p className="text-warning small mt-2">
+          ⛔ Challenge matches are currently disabled league-wide.
+        </p>
       )}
 
       <h3>Roster</h3>
+      {roster.some(p => p.on_cooldown) && (
+        <p className="text-warning small mt-2 mb-1">
+          ⏳ Players on cooldown cannot participate in matches until the next matchup generation.
+        </p>
+      )}
       {roster.length ? (
         <ul className="list-group roster-list">
           {roster.map((p) => (
@@ -210,10 +244,19 @@ export default function TeamDetail() {
               key={p.id ?? Math.random()}
               className="list-group-item d-flex justify-content-between align-items-center"
             >
-              <strong>{p.display_name || p.username || "Unknown"}</strong>
-              <span className={`roster-role ${p.role?.toLowerCase() || ""}`}>
-                {p.role || "-"}
-              </span>
+              <div className="d-flex align-items-center gap-2">
+                <strong>{p.display_name || p.username || "Unknown"}</strong>
+                <span className={`roster-role ${p.role?.toLowerCase() || ""}`}>
+                  {p.role || "-"}
+                </span>
+
+                {/* ⭐ Cooldown Badge */}
+                {p.on_cooldown && (
+                  <span className="badge bg-warning text-dark">
+                    ⏳ Cooldown
+                  </span>
+                )}
+              </div>
             </li>
           ))}
         </ul>

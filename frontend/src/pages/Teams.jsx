@@ -6,6 +6,14 @@ export default function Teams() {
   const [teams, setTeams] = useState([]);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [settings, setSettings] = useState(null);
+
+  useEffect(() => {
+    axios
+      .get(`${import.meta.env.VITE_API_URL}/api/settings`)
+      .then(res => setSettings(res.data))
+      .catch(() => setSettings({ challenges_enabled: true }));
+  }, []);
 
   useEffect(() => {
     let canceled = false;
@@ -88,16 +96,27 @@ export default function Teams() {
               >
                 {t.name}
 
-                {t.allow_challenges && (
+                {/* 🏆 Only show trophy if team is Active AND allows challenges */}
+                {t.status === "Active" && settings?.challenges_enabled && t.allow_challenges && (
                   <span
                     style={{
                       marginLeft: "8px",
-                      color: "#ffd700", // gold trophy
+                      color: "#ffd700",
                       fontSize: "1.2rem",
                     }}
                     title="This team is accepting challenge matches"
                   >
                     🏆
+                  </span>
+                )}
+
+                {/* 🚫 Indicate inactive/disbanded */}
+                {t.status !== "Active" && (
+                  <span
+                    style={{ marginLeft: "8px", color: "#ff4444", fontSize: "1.1rem" }}
+                    title="This team cannot receive or issue challenges"
+                  >
+                    🔒
                   </span>
                 )}
               </Link>

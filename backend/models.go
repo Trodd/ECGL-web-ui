@@ -8,20 +8,22 @@ import (
 
 // --- Player ---
 type Player struct {
-	ID          int64  `json:"-" gorm:"primaryKey"` // internal only
-	IDStr       string `json:"id" gorm:"-"`         // exposed as string in JSON
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	Role        string `json:"role"`
-	Timezone    string `json:"timezone"`
-	Device      string `json:"device"`
-	Rating      int    `json:"rating"`
-	Wins        int    `json:"wins"`
-	Losses      int    `json:"losses"`
-	Matches     int    `json:"matches"`
-	Registered  bool   `json:"registered" gorm:"-"`
-	IsCaster    bool   `json:"is_caster" gorm:"-"`
-	IsMod       bool   `json:"is_mod" gorm:"-"`
+	ID             int64      `json:"-" gorm:"primaryKey"` // internal only
+	IDStr          string     `json:"id" gorm:"-"`         // exposed as string in JSON
+	Username       string     `json:"username"`
+	DisplayName    string     `json:"display_name"`
+	Role           string     `json:"role"`
+	Timezone       string     `json:"timezone"`
+	Device         string     `json:"device"`
+	Rating         int        `json:"rating"`
+	Wins           int        `json:"wins"`
+	Losses         int        `json:"losses"`
+	Matches        int        `json:"matches"`
+	Registered     bool       `json:"registered" gorm:"-"`
+	IsCaster       bool       `json:"is_caster" gorm:"-"`
+	IsMod          bool       `json:"is_mod" gorm:"-"`
+	LastLeftTeamAt *time.Time `json:"last_left_team_at"`
+	OnCooldown     bool       `gorm:"-" json:"on_cooldown"`
 }
 
 // --- Registered Player ---
@@ -123,10 +125,11 @@ type MyTeamResponse struct {
 }
 
 type LeagueSettings struct {
-	ID                   uint `gorm:"primaryKey"`
-	CurrentWeek          int  `json:"current_week"`
-	WeeklyChallengeLimit int  `json:"weekly_challenge_limit"`
-	ChallengesEnabled    bool `json:"challenges_enabled" gorm:"default:true"`
+	ID                   uint       `gorm:"primaryKey"`
+	CurrentWeek          int        `json:"current_week"`
+	WeeklyChallengeLimit int        `json:"weekly_challenge_limit"`
+	ChallengesEnabled    bool       `json:"challenges_enabled" gorm:"default:true"`
+	LastMatchGeneration  *time.Time `json:"last_match_generation"`
 }
 
 type ChallengeRequest struct {

@@ -129,6 +129,7 @@ export default function MyTeam() {
   }, []);
 
   const { team, roster, matches, requests, myRole } = data;
+  const isCaptain = myRole === "Captain" || myRole === "Co-Captain";
 
   // 🔄 Load current season label (from backend)
   useEffect(() => {
@@ -272,6 +273,12 @@ export default function MyTeam() {
       <div style={{ maxWidth: "900px", width: "100%" }}>
         <h2>🧑{team.name}</h2>
         <p>Status: {team.status || "Active"}</p>
+
+        {roster.some(p => p.on_cooldown && p.role === myRole) && (
+          <div className="alert alert-warning small mt-2">
+            ⏳ You recently left a team. You cannot play matches for your new team until the next matchup cycle.
+          </div>
+        )}
 
         {msg && (
           <div
@@ -461,6 +468,13 @@ export default function MyTeam() {
                   <div className="mb-4 border-bottom border-secondary pb-3">
                     <h6 className="text-info mb-2">🏆 Challenge Match Availability</h6>
 
+                    {/* Global State Display */}
+                    {!globalChallengesEnabled && (
+                      <p className="text-warning small mb-2">
+                        ⚠️ Challenge matches are currently <b>disabled league-wide</b>.
+                      </p>
+                    )}
+
                     <div className="d-flex align-items-center gap-2">
                       <div className="form-check form-switch m-0">
                         <input
@@ -468,14 +482,22 @@ export default function MyTeam() {
                           type="checkbox"
                           checked={allowChallenges}
                           disabled={
-                            team.status !== "Active" ||           // Team inactive
-                            !globalChallengesEnabled              // Global disabled
+                            team.status !== "Active" ||               // Team inactive
+                            !globalChallengesEnabled ||         // Global disabled
+                            !isCaptain                                // Only captains can toggle
                           }
                           onChange={async (e) => {
-                            if (!globalChallengesEnabled)
+                            if (!globalChallengesEnabled) {
                               return alert("🚫 League mods have globally disabled challenge matches.");
+                            }
 
-                            if (team.status !== "Active") return;
+                            if (team.status !== "Active") {
+                              return alert("🚫 Your team must be active to enable challenges.");
+                            }
+
+                            if (!isCaptain) {
+                              return alert("⛔ Only the captain or co-captain can toggle this.");
+                            }
 
                             const next = e.target.checked;
 
@@ -503,7 +525,7 @@ export default function MyTeam() {
                       </label>
                     </div>
 
-                    {/* Inactive team message */}
+                    {/* Inactive Team Warning */}
                     {team.status !== "Active" && (
                       <p className="text-warning small mt-2 mb-0">
                         ⚠️ Team is <b>Inactive</b>. Challenge matches are disabled automatically.
@@ -538,6 +560,12 @@ export default function MyTeam() {
                     >
                       {m.role || "-"}
                     </span>
+                    {/* ⭐ Cooldown Badge */}
+                    {m.on_cooldown && (
+                      <span className="badge bg-warning text-dark ms-2">
+                        ⏳ Cooldown
+                      </span>
+                    )}
                   </span>
 
                   {myRole === "Captain" && m.role !== "Captain" && (

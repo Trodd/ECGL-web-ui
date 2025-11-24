@@ -12,6 +12,7 @@ import (
 
 	"github.com/lib/pq"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 // --- Utility: deterministic shuffle ---
@@ -81,7 +82,7 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 	// --- Step 1.5: Auto double-forfeit only previous week's unfinished matches (same season only) ---
 
 	previousWeek := req.Week - 1
-	if previousWeek > 0 {
+	if req.Week > 1 {
 		log.Printf("🔍 Auto-forfeit check for Season %s Week %d", currentSeason, previousWeek)
 
 		// Find all matches from previous week that are unfinished
@@ -109,6 +110,8 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 					previousWeek, old.ID, old.TeamAID, old.TeamBID)
 			}
 		}
+	} else {
+		log.Printf("🛑 Week 1 generation → skipping all auto-forfeit checks.")
 	}
 
 	// Step 2: Validate and insert each match from preview
@@ -151,22 +154,35 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 
 	// --- Step X: Update global league week + reset challenge usage ---
 	var ls LeagueSettings
+	now = time.Now()
+
 	if err := DB.First(&ls, 1).Error; err != nil {
 		ls = LeagueSettings{
 			ID:                   1,
 			CurrentWeek:          req.Week,
-			WeeklyChallengeLimit: 1, // default if missing
+			WeeklyChallengeLimit: 1,
+			LastMatchGeneration:  &now,
 		}
 		DB.Create(&ls)
 	} else {
 		ls.CurrentWeek = req.Week
+		ls.LastMatchGeneration = &now
 		DB.Save(&ls)
 	}
+
+	// Clear cooldown for all players who left before this generation
+	DB.Model(&Player{}).
+		Where("last_left_team_at < ?", now).
+		Update("last_left_team_at", nil)
 
 	log.Printf("📅 Updated LeagueSettings.CurrentWeek = %d", ls.CurrentWeek)
 
 	// Reset weekly challenges used for all teams
-	if err := DB.Model(&Team{}).Update("weekly_challenges_used", 0).Error; err != nil {
+	if err := DB.
+		Session(&gorm.Session{AllowGlobalUpdate: true}).
+		Model(&Team{}).
+		Update("weekly_challenges_used", 0).Error; err != nil {
+
 		log.Printf("⚠️ Failed to reset weekly_challenges_used: %v", err)
 	} else {
 		log.Printf("🔄 Reset weekly_challenges_used for all teams")
