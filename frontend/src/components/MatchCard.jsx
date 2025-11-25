@@ -160,10 +160,6 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
             }}
         >
             <div className="d-flex justify-content-between align-items-center mb-2">
-                <h5 className="mb-0">
-                    {match.match_code || `Match #${match.id}`} –{" "}
-                    <span className="text-info">vs {match.opponent}</span>
-                </h5>
             </div>
 
             <p className="text-muted mb-2">
@@ -172,22 +168,6 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
 
             {/* 🗓️ Step 1: Schedule / Edit or View Time */}
             <div className="mb-3">
-                <h6 className="text-light mb-2">🗓️ Match Time</h6>
-
-                {/* 🧭 Always show the scheduled time if it exists */}
-                {match.date ? (
-                    <p className="small mb-2 text-light">
-                        🕒 Scheduled:&nbsp;
-                        <strong>
-                            {new Date(match.date).toLocaleString([], {
-                                dateStyle: "medium",
-                                timeStyle: "short",
-                            })}
-                        </strong>
-                    </p>
-                ) : (
-                    <p className="small mb-2 text-light">🕒 Not scheduled yet</p>
-                )}
 
                 {/* 🧑 Captains get edit controls */}
                 {isCaptain && (

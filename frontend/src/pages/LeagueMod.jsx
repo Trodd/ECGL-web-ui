@@ -38,6 +38,108 @@ export default function LeagueMod() {
         mode3: "",
     });
     const [newTeamName, setNewTeamName] = useState("");
+    const [newRating, setNewRating] = useState("");
+    const [newWins, setNewWins] = useState("");
+    const [newLosses, setNewLosses] = useState("");
+    const [newGP, setNewGP] = useState("");
+    const [players, setPlayers] = useState([]);
+    const [teamMembers, setTeamMembers] = useState([]);
+    // Player Rating Editor State
+    const [statSearch, setStatSearch] = useState("");
+    const [statPlayerID, setStatPlayerID] = useState("");
+    const [statSuggestions, setStatSuggestions] = useState([]);
+
+    const [pRating, setPRating] = useState("");
+    const [pWins, setPWins] = useState("");
+    const [pLosses, setPLosses] = useState("");
+    const [pMatches, setPMatches] = useState("");
+
+
+    useEffect(() => {
+        async function loadPlayers() {
+            try {
+                const res = await axios.get(`${urlBase}/api/players`, { withCredentials: true });
+                setPlayers(Array.isArray(res.data) ? res.data : []);
+            } catch (err) {
+                console.error("❌ Failed to load players:", err);
+                setPlayers([]);
+            }
+        }
+        loadPlayers();
+    }, []);
+
+    useEffect(() => {
+        async function loadStats() {
+            if (!playerID) return;
+
+            try {
+                const res = await axios.get(`${urlBase}/api/mod/player/stats?id=${playerID}`, {
+                    withCredentials: true,
+                });
+
+                const d = res.data;
+
+                // Auto-fill the stat editor
+                setPRating(d.rating ?? 0);
+                setPWins(d.wins ?? 0);
+                setPLosses(d.losses ?? 0);
+                setPMatches(d.matches ?? 0);
+
+            } catch (err) {
+                console.error("❌ Failed to load player stats:", err);
+                setMsg("⚠️ Could not load player stats.");
+            }
+        }
+
+        loadStats();
+    }, [playerID]);
+
+    useEffect(() => {
+        async function loadTeamStats() {
+            if (!teamID) return;
+
+            try {
+                const res = await axios.get(`${urlBase}/api/mod/team/stats?id=${teamID}`, {
+                    withCredentials: true,
+                });
+
+                const d = res.data;
+
+                // Auto-fill fields
+                setNewRating(d.rating ?? 0);
+                setNewWins(d.wins ?? 0);
+                setNewLosses(d.losses ?? 0);
+                setNewGP(d.matches ?? 0);
+
+            } catch (err) {
+                console.error("❌ Failed to load team stats:", err);
+                setMsg("⚠️ Could not load team stats.");
+            }
+        }
+
+        loadTeamStats();
+    }, [teamID]);
+
+    useEffect(() => {
+        async function loadMembers() {
+            if (!teamID) {
+                setTeamMembers([]);
+                return;
+            }
+
+            try {
+                const res = await axios.get(`${urlBase}/api/mod/team/members?id=${teamID}`, {
+                    withCredentials: true,
+                });
+                setTeamMembers(res.data || []);
+            } catch (err) {
+                console.error("Failed to load team members:", err);
+                setTeamMembers([]);
+            }
+        }
+
+        loadMembers();
+    }, [teamID]);
 
     // Search filters
     const [teamSearch, setTeamSearch] = useState("");
@@ -120,6 +222,50 @@ export default function LeagueMod() {
     }
 
     // --- Helpers ---
+    const handleAdjustTeamStats = async () => {
+        if (!teamID) return setMsg("⚠️ Select a team first.");
+
+        await safePost(
+            "/api/mod/team/adjust-stats",
+            {
+                team_id: parseInt(teamID),
+                rating: parseInt(newRating || 0),
+                wins: parseInt(newWins || 0),
+                losses: parseInt(newLosses || 0),
+                matches: parseInt(newGP || 0), // NEW
+            },
+            `Updated stats for ${getTeamLabel(teamID)}`,
+            true
+        );
+
+        setNewRating("");
+        setNewWins("");
+        setNewLosses("");
+        setNewGP("");
+    };
+
+    const handleAdjustPlayerStats = async () => {
+        if (!playerID) return setMsg("⚠️ Select a player first.");
+
+        await safePost(
+            "/api/mod/player/adjust-stats",
+            {
+                player_id: parseInt(playerID),
+                rating: parseInt(pRating || 0),
+                wins: parseInt(pWins || 0),
+                losses: parseInt(pLosses || 0),
+                matches: parseInt(pMatches || 0),
+            },
+            `Updated player #${playerID} stats`,
+            true
+        );
+
+        setPRating("");
+        setPWins("");
+        setPLosses("");
+        setPMatches("");
+    };
+
     const getTeamLabel = (id) => {
         const t = teams.find((x) => x.id === parseInt(id));
         return t ? `${t.name} (#${t.id})` : `Team #${id}`;
@@ -726,45 +872,57 @@ export default function LeagueMod() {
                     title="🏁 Match Tools"
                     children={
                         <>
-                            {/* --- Match Admin Tools --- */}
-                            <h6>🕒 Select Match (Current Season)</h6>
-                            <input
-                                type="text"
-                                placeholder="Search match..."
-                                className="form-control bg-dark text-light mb-2"
-                                value={matchSearch}
-                                onChange={(e) => setMatchSearch(e.target.value)}
-                                style={{ maxWidth: 400 }}
-                            />
-                            <select
-                                className="form-select bg-dark text-light mb-3"
-                                value={matchID}
-                                onChange={(e) => {
-                                    setMatchID(e.target.value);
-                                    setTeamID(""); // ✅ auto-reset winner when match changes
-                                }}
-                                style={{ maxWidth: 400 }}
-                            >
-                                <option value="">Select Match...</option>
-                                {filteredMatches.map((m) => (
-                                    <option key={m.id} value={m.id}>
-                                        {m.match_code}: {m.team_a} vs {m.team_b}
-                                    </option>
-                                ))}
-                            </select>
-
-                            {/* --- Forfeit Tools --- */}
                             <div
-                                className="p-3 mb-3 rounded"
+                                className="p-3 rounded mb-3"
                                 style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
                             >
-                                <h6 className="text-danger mb-2">🏳️ Forfeit Controls</h6>
+                                <h5 className="text-info mb-2">🎯 Match Selector</h5>
                                 <p className="small text-light mb-2">
-                                    Select the winning team for this match, then click <b>Forfeit</b>.
+                                    Search and select a match to manage administrative actions.
                                 </p>
 
-                                <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-                                    {/* Winning Team Select – filtered to only the 2 teams from the chosen match */}
+                                <input
+                                    type="text"
+                                    placeholder="🔍 Search match..."
+                                    className="form-control bg-dark text-light mb-2"
+                                    value={matchSearch}
+                                    onChange={(e) => setMatchSearch(e.target.value)}
+                                    style={{ maxWidth: 450 }}
+                                />
+
+                                <select
+                                    className="form-select bg-dark text-light mb-2"
+                                    value={matchID}
+                                    onChange={(e) => {
+                                        setMatchID(e.target.value);
+                                        setTeamID("");
+                                    }}
+                                    style={{ maxWidth: 450 }}
+                                >
+                                    <option value="">Select Match...</option>
+                                    {filteredMatches.map((m) => (
+                                        <option key={m.id} value={m.id}>
+                                            {m.match_code}: {m.team_a} vs {m.team_b}
+                                        </option>
+                                    ))}
+                                </select>
+
+                                {!matchID && (
+                                    <p className="small text-warning mt-1">⚠️ Please select a match first.</p>
+                                )}
+                            </div>
+
+                            {/* --- FORFEIT TOOLS CARD --- */}
+                            <div
+                                className="p-3 rounded mb-3"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h5 className="text-danger mb-2">🏳️ Forfeit Controls</h5>
+                                <p className="small text-light mb-3">
+                                    Choose which team wins by forfeit. Only the two teams involved are shown.
+                                </p>
+
+                                <div className="d-flex flex-column flex-md-row align-items-start gap-2">
                                     <select
                                         className="form-select bg-dark text-light"
                                         value={teamID}
@@ -779,15 +937,15 @@ export default function LeagueMod() {
                                             const match = matches.find((m) => m.id === parseInt(matchID));
                                             if (!match) return null;
 
-                                            // Only show the two teams from this match
                                             return [match.team_a, match.team_b].map((teamName) => {
-                                                const team = teams.find(
-                                                    (t) => t.name.toLowerCase() === teamName.toLowerCase()
+                                                const t = teams.find(
+                                                    (x) => x.name.toLowerCase() === teamName.toLowerCase()
                                                 );
-                                                if (!team) return null;
+                                                if (!t) return null;
+
                                                 return (
-                                                    <option key={team.id} value={team.id}>
-                                                        {team.name} (#{team.id})
+                                                    <option key={t.id} value={t.id}>
+                                                        {t.name} (#{t.id})
                                                     </option>
                                                 );
                                             });
@@ -798,54 +956,71 @@ export default function LeagueMod() {
                                         className="btn btn-outline-danger btn-sm"
                                         disabled={!matchID || !teamID}
                                         onClick={async () => {
-                                            if (!matchID || !teamID) {
-                                                setMsg("⚠️ Select both a match and a winning team first.");
-                                                return;
-                                            }
-
                                             await safePost(
                                                 "/api/mod/match/forfeit",
                                                 {
                                                     match_id: parseInt(matchID),
                                                     winner_team_id: parseInt(teamID),
                                                 },
-                                                `Applied forfeit for ${getMatchLabel(matchID)} → Winner: ${getTeamLabel(
-                                                    teamID
-                                                )}`
+                                                `Forfeit applied → Winner: ${getTeamLabel(teamID)}`,
+                                                true
                                             );
                                         }}
                                     >
-                                        🏳️ Forfeit
+                                        🏳️ Apply Forfeit
                                     </button>
                                 </div>
                             </div>
 
-                            {/* --- Other Match Actions --- */}
-                            <div className="d-flex flex-wrap gap-2">
-                                <button
-                                    className="btn btn-outline-light btn-sm"
-                                    onClick={handleForceSchedule}
-                                >
-                                    Force Schedule
-                                </button>
-                                <button
-                                    className="btn btn-outline-warning btn-sm"
-                                    onClick={handleDoubleForfeit}
-                                >
-                                    Double Forfeit
-                                </button>
-                                <button
-                                    className="btn btn-outline-secondary btn-sm"
-                                    onClick={handleResetMatch}
-                                >
-                                    Reset Match
-                                </button>
-                                <button
-                                    className="btn btn-outline-danger btn-sm"
-                                    onClick={handleDeleteMatch}
-                                >
-                                    Delete Match
-                                </button>
+                            {/* --- OTHER ACTIONS CARD --- */}
+                            <div
+                                className="p-3 rounded mb-3"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h5 className="text-warning mb-3">⚙️ Match Actions</h5>
+
+                                <div className="d-flex flex-wrap gap-2">
+
+                                    {/* RESET SCHEDULE Button (NEW) */}
+                                    <button
+                                        className="btn btn-outline-info btn-sm"
+                                        disabled={!matchID}
+                                        onClick={async () => {
+                                            await safePost(
+                                                "/api/mod/match/reset-schedule",
+                                                { match_id: parseInt(matchID) },
+                                                `Reset schedule for ${getMatchLabel(matchID)}`,
+                                                true
+                                            );
+                                        }}
+                                    >
+                                        🔄 Reset Schedule
+                                    </button>
+
+                                    <button
+                                        className="btn btn-outline-warning btn-sm"
+                                        disabled={!matchID}
+                                        onClick={handleDoubleForfeit}
+                                    >
+                                        ⚠️ Double Forfeit
+                                    </button>
+
+                                    <button
+                                        className="btn btn-outline-secondary btn-sm"
+                                        disabled={!matchID}
+                                        onClick={handleResetMatch}
+                                    >
+                                        ♻️ Reset Scores
+                                    </button>
+
+                                    <button
+                                        className="btn btn-outline-danger btn-sm"
+                                        disabled={!matchID}
+                                        onClick={handleDeleteMatch}
+                                    >
+                                        🗑️ Delete Match
+                                    </button>
+                                </div>
                             </div>
                         </>
                     }
@@ -1139,123 +1314,283 @@ export default function LeagueMod() {
                                 </div>
                             </div>
 
-                            {/* === Member Management === */}
-                            <div className="border-top border-secondary pt-3 mb-4">
-                                <h6 className="text-info mb-2">👥 Manage Team Members</h6>
+                            {/* === Team Context (Smart Roster Manager) === */}
+                            <div
+                                className="p-3 mb-4 rounded-3"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h6 className="text-info mb-2">👥 Team Context (Roster Manager)</h6>
+                                <p className="small text-light mb-3">
+                                    Select a team to view all members. Click a player to perform kick/promote/demote actions.
+                                </p>
 
-                                {/* Show current team selected */}
-                                {teamID ? (
-                                    <p className="small text-success mb-3">
-                                        ✅ Managing members for <b>{getTeamLabel(teamID)}</b>
-                                    </p>
-                                ) : (
-                                    <p className="small text-warning mb-3">⚠️ No team selected yet</p>
-                                )}
-
-                                <div className="row g-2 align-items-center mb-2 position-relative">
-                                    {/* Player Search Input */}
-                                    <div className="col-md-3 position-relative">
+                                {/* --- Team Search + Picker --- */}
+                                <div className="d-flex flex-column flex-md-row align-items-start gap-3">
+                                    <div>
+                                        <label className="form-label text-light small mb-1">🔍 Search Team</label>
                                         <input
                                             type="text"
-                                            placeholder="Search or ID..."
+                                            placeholder="Type team name..."
                                             className="form-control bg-dark text-light"
-                                            value={addPlayerInput}
-                                            onChange={async (e) => {
-                                                const value = e.target.value;
-                                                setAddPlayerInput(value);
-                                                setAddPlayerID("");
-                                                if (value.trim().length >= 2) {
-                                                    try {
-                                                        const res = await axios.get(`${urlBase}/api/players`);
-                                                        const list = (res.data || []).filter(
-                                                            (p) =>
-                                                                p.username.toLowerCase().includes(value.toLowerCase()) ||
-                                                                p.display_name.toLowerCase().includes(value.toLowerCase())
-                                                        );
-                                                        setFilteredPlayers(list.slice(0, 6));
-                                                    } catch {
-                                                        setFilteredPlayers([]);
-                                                    }
-                                                } else {
-                                                    setFilteredPlayers([]);
-                                                }
-                                            }}
-                                            onBlur={() => setTimeout(() => setFilteredPlayers([]), 150)}
+                                            value={teamSearch}
+                                            onChange={(e) => setTeamSearch(e.target.value)}
+                                            style={{ maxWidth: 250 }}
                                         />
+                                    </div>
 
-                                        {/* Autocomplete dropdown */}
-                                        {filteredPlayers.length > 0 && (
-                                            <ul
-                                                className="list-group position-absolute w-100 mt-1 shadow-sm"
-                                                style={{
-                                                    zIndex: 10,
-                                                    borderRadius: "0.4rem",
-                                                    overflow: "hidden",
-                                                }}
-                                            >
-                                                {filteredPlayers.map((p) => (
-                                                    <li
-                                                        key={p.id}
-                                                        className="list-group-item list-group-item-action bg-dark text-light border-secondary small"
-                                                        style={{ cursor: "pointer" }}
-                                                        onMouseDown={() => {
-                                                            setAddPlayerInput(`${p.display_name} (${p.id})`);
-                                                            setAddPlayerID(p.id);
+                                    <div>
+                                        <label className="form-label text-light small mb-1">🧩 Select Team</label>
+                                        <select
+                                            className="form-select bg-dark text-light"
+                                            value={teamID}
+                                            onChange={(e) => setTeamID(Number(e.target.value) || 0)}
+                                            style={{ maxWidth: 250 }}
+                                        >
+                                            <option value="">Select Team...</option>
+                                            {filteredTeams.map((t) => (
+                                                <option key={t.id} value={t.id}>
+                                                    {t.name} (#{t.id})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {/* --- Add Team Member --- */}
+                                {teamID && (
+                                    <div
+                                        className="mt-4 p-3 rounded"
+                                        style={{ backgroundColor: "#111", border: "1px solid #222" }}
+                                    >
+                                        <h6 className="text-success mb-2">➕ Add Player to Team</h6>
+                                        <p className="small text-light mb-2">
+                                            Search for a player, choose a role, then click <b>Add</b>.
+                                        </p>
+
+                                        {/* Player Search */}
+                                        <div className="d-flex flex-column flex-md-row gap-3 align-items-start">
+
+                                            {/* Search Box */}
+                                            <div className="position-relative" style={{ maxWidth: 300 }}>
+                                                <label className="text-light small mb-1">🔍 Search Player</label>
+                                                <input
+                                                    type="text"
+                                                    className="form-control bg-dark text-light"
+                                                    placeholder="Type player name or ID..."
+                                                    value={addPlayerInput}
+                                                    onChange={async (e) => {
+                                                        const value = e.target.value;
+                                                        setAddPlayerInput(value);
+                                                        setAddPlayerID("");
+
+                                                        if (value.trim().length >= 2) {
+                                                            try {
+                                                                const res = await axios.get(`${urlBase}/api/players`);
+                                                                const list = res.data || [];
+
+                                                                const filtered = list.filter((p) =>
+                                                                    [p.username, p.display_name, String(p.id)]
+                                                                        .join(" ")
+                                                                        .toLowerCase()
+                                                                        .includes(value.toLowerCase())
+                                                                );
+
+                                                                setFilteredPlayers(filtered.slice(0, 8));
+                                                            } catch {
+                                                                setFilteredPlayers([]);
+                                                            }
+                                                        } else {
                                                             setFilteredPlayers([]);
+                                                        }
+                                                    }}
+                                                    onBlur={() => setTimeout(() => setFilteredPlayers([]), 150)}
+                                                />
+
+                                                {/* Suggestions */}
+                                                {filteredPlayers.length > 0 && (
+                                                    <ul
+                                                        className="list-group position-absolute w-100 mt-1 shadow-sm"
+                                                        style={{ zIndex: 10, borderRadius: "0.4rem", overflow: "hidden" }}
+                                                    >
+                                                        {filteredPlayers.map((p) => (
+                                                            <li
+                                                                key={p.id}
+                                                                className="list-group-item list-group-item-action bg-dark text-light border-secondary small"
+                                                                style={{ cursor: "pointer" }}
+                                                                onMouseDown={() => {
+                                                                    setAddPlayerInput(`${p.display_name || p.username} (#${p.id})`);
+                                                                    setAddPlayerID(String(p.id));
+                                                                    setFilteredPlayers([]);
+                                                                }}
+                                                            >
+                                                                {p.display_name || p.username}
+                                                                <span className="text-info"> #{p.id}</span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                            </div>
+
+                                            {/* Role Selector */}
+                                            <div>
+                                                <label className="text-light small mb-1">🧩 Role</label>
+                                                <select
+                                                    className="form-select bg-dark text-light"
+                                                    value={addRole}
+                                                    onChange={(e) => setAddRole(e.target.value)}
+                                                    style={{ maxWidth: 200 }}
+                                                >
+                                                    <option value="Member">Member</option>
+                                                    <option value="Co-Captain">Co-Captain</option>
+                                                    <option value="Captain">Captain</option>
+                                                </select>
+                                            </div>
+
+                                            {/* Add Button */}
+                                            <div className="d-flex align-items-end">
+                                                <button
+                                                    className="btn btn-outline-success btn-sm"
+                                                    disabled={!teamID || !addPlayerID}
+                                                    onClick={async () => {
+                                                        if (!teamID || !addPlayerID) {
+                                                            setMsg("⚠️ Must select a team and player first.");
+                                                            return;
+                                                        }
+
+                                                        await safePost(
+                                                            "/api/mod/team/add-player",
+                                                            {
+                                                                team_id: teamID,
+                                                                player_id: addPlayerID,
+                                                                role: addRole,
+                                                            },
+                                                            `Added ${addPlayerInput} as ${addRole}`,
+                                                            true
+                                                        );
+
+                                                        setAddPlayerInput("");
+                                                        setAddPlayerID("");
+                                                    }}
+                                                >
+                                                    ➕ Add Player
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* --- Roster List --- */}
+                                {teamID && (
+                                    <div
+                                        className="mt-3 p-3 rounded"
+                                        style={{ backgroundColor: "#111", border: "1px solid #222" }}
+                                    >
+                                        <h6 className="text-light mb-2">📋 Team Members</h6>
+
+                                        {teamMembers.length === 0 ? (
+                                            <p className="text-warning small">No players found on this team.</p>
+                                        ) : (
+                                            <ul className="list-group bg-dark">
+                                                {teamMembers.map((m) => (
+                                                    <li
+                                                        key={m.player_id}
+                                                        className="list-group-item d-flex justify-content-between align-items-center bg-dark text-light border-secondary"
+                                                        style={{ cursor: "pointer" }}
+                                                        onClick={() => {
+                                                            setPlayerID(m.player_id);
+                                                            setPlayerSearch(`${m.display_name || m.username} (#${m.player_id})`);
                                                         }}
                                                     >
-                                                        {p.display_name || p.username}{" "}
-                                                        <span className="text-light">#{p.id}</span>
+                                                        <span>
+                                                            <b>{m.display_name || m.username}</b>{" "}
+                                                            <span className="text-info">#{m.player_id}</span>
+                                                            <span className="ms-2 text-warning small">[{m.role}]</span>
+                                                        </span>
+
+                                                        <div className="d-flex gap-2">
+                                                            {/* Promote/Demote Buttons */}
+                                                            <button
+                                                                className="btn btn-outline-primary btn-sm"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    safePost(
+                                                                        "/api/mod/team/promote-captain",
+                                                                        {
+                                                                            team_id: teamID,
+                                                                            player_id: m.player_id,
+                                                                        },
+                                                                        `Promoted ${m.display_name} to Captain`,
+                                                                        true
+                                                                    );
+                                                                }}
+                                                            >
+                                                                👑 Captain
+                                                            </button>
+
+                                                            <button
+                                                                className="btn btn-outline-success btn-sm"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    safePost(
+                                                                        "/api/mod/team/set-role",
+                                                                        {
+                                                                            team_id: teamID,
+                                                                            player_id: m.player_id,
+                                                                            role: "Co-Captain",
+                                                                        },
+                                                                        `Promoted ${m.display_name} to Co-Captain`,
+                                                                        true
+                                                                    );
+                                                                }}
+                                                            >
+                                                                ⭐ Co-Captain
+                                                            </button>
+
+                                                            <button
+                                                                className="btn btn-outline-warning btn-sm"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    safePost(
+                                                                        "/api/mod/team/set-role",
+                                                                        {
+                                                                            team_id: teamID,
+                                                                            player_id: m.player_id,
+                                                                            role: "Member",
+                                                                        },
+                                                                        `Set ${m.display_name} to Member`,
+                                                                        true
+                                                                    );
+                                                                }}
+                                                            >
+                                                                👤 Member
+                                                            </button>
+
+                                                            <button
+                                                                className="btn btn-outline-danger btn-sm"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    safePost(
+                                                                        "/api/mod/team/kick",
+                                                                        {
+                                                                            team_id: teamID,
+                                                                            player_id: m.player_id,
+                                                                        },
+                                                                        `Kicked ${m.display_name} from team`,
+                                                                        true
+                                                                    );
+                                                                }}
+                                                            >
+                                                                🦶 Kick
+                                                            </button>
+                                                        </div>
                                                     </li>
                                                 ))}
                                             </ul>
                                         )}
                                     </div>
-
-                                    {/* Role Dropdown */}
-                                    <div className="col-md-3">
-                                        <select
-                                            className="form-select bg-dark text-light"
-                                            value={addRole}
-                                            onChange={(e) => setAddRole(e.target.value)}
-                                        >
-                                            <option value="Member">Member</option>
-                                            <option value="Co-Captain">Co-Captain</option>
-                                            <option value="Captain">Captain</option>
-                                        </select>
-                                    </div>
-
-                                    {/* Action Buttons */}
-                                    <div className="col-md-6 d-flex gap-2">
-                                        <button
-                                            className="btn btn-outline-success btn-sm flex-fill"
-                                            disabled={!teamID || !addPlayerID}
-                                            onClick={async () => {
-                                                console.log("🧩 ADD DEBUG:", { teamID, addPlayerID, addRole });
-                                                if (!teamID || teamID === 0 || !addPlayerID) {
-                                                    return alert("Select a team and choose a player first");
-                                                }
-                                                try {
-                                                    await axios.post(`${urlBase}/api/team/add-player`, {
-                                                        team_id: teamID,
-                                                        player_id: addPlayerID,
-                                                        role: addRole,
-                                                    }, { withCredentials: true });
-
-                                                    alert(`✅ Player added successfully as ${addRole}!`);
-                                                    setAddPlayerInput("");
-                                                    setAddPlayerID("");
-                                                } catch (err) {
-                                                    console.error("❌ Add player failed:", err);
-                                                    alert(err.response?.data || "Failed to add player");
-                                                }
-                                            }}
-                                        >
-                                            ➕ Add
-                                        </button>
-                                    </div>
-                                </div>
+                                )}
                             </div>
+
                             {/* === Active Controls === */}
                             <div
                                 className="p-3 mb-3 rounded-3"
@@ -1422,6 +1757,80 @@ export default function LeagueMod() {
                                     </button>
                                 </div>
                             </div>
+                            {/* ⭐ TEAM RATING / W-L-GP EDITOR */}
+                            <div
+                                className="p-3 mt-4 rounded"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h6 className="text-warning mb-3">⭐ Edit Team Rating / W-L / Games Played</h6>
+
+                                {/* Select Team */}
+                                <label className="text-light small mb-1">Select Team</label>
+                                <select
+                                    className="form-select bg-dark text-light mb-3"
+                                    value={teamID}
+                                    onChange={(e) => setTeamID(e.target.value)}
+                                    style={{ maxWidth: 260 }}
+                                >
+                                    <option value="">Choose a Team...</option>
+                                    {teams.map((t) => (
+                                        <option key={t.id} value={t.id}>
+                                            {t.name} (#{t.id})
+                                        </option>
+                                    ))}
+                                </select>
+
+                                {/* Rating */}
+                                <label className="text-light small mb-1">Team Rating</label>
+                                <input
+                                    type="number"
+                                    className="form-control bg-dark text-light mb-3"
+                                    placeholder="Rating..."
+                                    value={newRating}
+                                    onChange={(e) => setNewRating(e.target.value)}
+                                    style={{ maxWidth: 180 }}
+                                />
+
+                                {/* Wins */}
+                                <label className="text-light small mb-1">Wins</label>
+                                <input
+                                    type="number"
+                                    className="form-control bg-dark text-light mb-3"
+                                    placeholder="Wins..."
+                                    value={newWins}
+                                    onChange={(e) => setNewWins(e.target.value)}
+                                    style={{ maxWidth: 180 }}
+                                />
+
+                                {/* Losses */}
+                                <label className="text-light small mb-1">Losses</label>
+                                <input
+                                    type="number"
+                                    className="form-control bg-dark text-light mb-3"
+                                    placeholder="Losses..."
+                                    value={newLosses}
+                                    onChange={(e) => setNewLosses(e.target.value)}
+                                    style={{ maxWidth: 180 }}
+                                />
+
+                                {/* Games Played */}
+                                <label className="text-light small mb-1">Games Played</label>
+                                <input
+                                    type="number"
+                                    className="form-control bg-dark text-light mb-3"
+                                    placeholder="Games Played..."
+                                    value={newGP}
+                                    onChange={(e) => setNewGP(e.target.value)}
+                                    style={{ maxWidth: 180 }}
+                                />
+
+                                <button
+                                    className="btn btn-outline-warning btn-sm mt-2"
+                                    onClick={handleAdjustTeamStats}
+                                >
+                                    💾 Save All Stats
+                                </button>
+                            </div>
                         </div>
                     }
                 />
@@ -1491,7 +1900,7 @@ export default function LeagueMod() {
                                                     style={{ cursor: "pointer" }}
                                                     onMouseDown={() => {
                                                         setPlayerSearch(`${p.display_name} (${p.id})`);
-                                                        setPlayerID(p.id); // ✅ correct ID assigned
+                                                        setPlayerID(String(p.id)); // ✅ correct ID assigned
                                                         setPlayerSuggestions([]);
                                                     }}
                                                 >
@@ -1501,50 +1910,6 @@ export default function LeagueMod() {
                                             ))}
                                         </ul>
                                     )}
-                                </div>
-                            </div>
-
-                            {/* === Optional Team Context === */}
-                            <div
-                                className="p-3 mb-4 rounded-3"
-                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
-                            >
-                                <h6 className="text-info mb-2">👥 Team Context (Optional)</h6>
-                                <p className="small text-light mb-3">
-                                    Useful for removing or promoting players. You can filter by team or select manually.
-                                </p>
-
-                                <div className="d-flex flex-column flex-md-row align-items-start gap-3">
-                                    <div>
-                                        <label className="form-label text-light small mb-1">
-                                            🔍 Search by Team Name
-                                        </label>
-                                        <input
-                                            type="text"
-                                            placeholder="Type team name..."
-                                            className="form-control bg-dark text-light"
-                                            value={teamSearch}
-                                            onChange={(e) => setTeamSearch(e.target.value)}
-                                            style={{ maxWidth: 250 }}
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="form-label text-light small mb-1">🧩 Select Team</label>
-                                        <select
-                                            className="form-select bg-dark text-light"
-                                            value={teamID}
-                                            onChange={(e) => setTeamID(Number(e.target.value) || 0)}
-                                            style={{ maxWidth: 250 }}
-                                        >
-                                            <option value="">Select Team...</option>
-                                            {filteredTeams.map((t) => (
-                                                <option key={t.id} value={t.id}>
-                                                    {t.name} (#{t.id})
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
                                 </div>
                             </div>
 
@@ -1587,6 +1952,165 @@ export default function LeagueMod() {
                                         ✅ Unban Player
                                     </button>
                                 </div>
+                            </div>
+                            {/* 🎮 PLAYER RATING / W-L-GP EDITOR (Isolated State) */}
+                            <div
+                                className="p-3 mt-4 rounded"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                            >
+                                <h6 className="text-info mb-3">🎮 Edit Player Rating / Wins / Losses / Games Played</h6>
+
+                                {/* 🔍 Player Search Input */}
+                                <label className="text-light small mb-1">Search Player (name or Discord ID)</label>
+
+                                <div className="position-relative" style={{ maxWidth: 300 }}>
+                                    <input
+                                        type="text"
+                                        className="form-control bg-dark text-light mb-2"
+                                        placeholder="Type to search..."
+                                        value={statSearch}
+                                        onChange={async (e) => {
+                                            const value = e.target.value;
+                                            setStatSearch(value);
+                                            setStatPlayerID(""); // reset selected
+
+                                            if (value.trim().length >= 2) {
+                                                try {
+                                                    const res = await axios.get(`${urlBase}/api/players`);
+                                                    const players = res.data || [];
+
+                                                    const filtered = players.filter((p) =>
+                                                        [p.username, p.display_name, String(p.id)]
+                                                            .join(" ")
+                                                            .toLowerCase()
+                                                            .includes(value.toLowerCase())
+                                                    );
+
+                                                    setStatSuggestions(filtered.slice(0, 8));
+                                                } catch {
+                                                    setStatSuggestions([]);
+                                                }
+                                            } else {
+                                                setStatSuggestions([]);
+                                            }
+                                        }}
+                                        onBlur={() => setTimeout(() => setStatSuggestions([]), 150)}
+                                    />
+
+                                    {/* Autocomplete Dropdown */}
+                                    {statSuggestions.length > 0 && (
+                                        <ul
+                                            className="list-group position-absolute w-100 mt-1 shadow-sm"
+                                            style={{ zIndex: 10, borderRadius: "0.4rem", overflow: "hidden" }}
+                                        >
+                                            {statSuggestions.map((p) => (
+                                                <li
+                                                    key={p.id}
+                                                    className="list-group-item list-group-item-action bg-dark text-light border-secondary small"
+                                                    style={{ cursor: "pointer" }}
+                                                    onMouseDown={() => {
+                                                        setStatSearch(`${p.display_name || p.username} (#${p.id})`);
+                                                        setStatPlayerID(String(p.id));   // IMPORTANT: force string
+                                                        setStatSuggestions([]);
+
+                                                        // Auto-load stats for selected player
+                                                        axios
+                                                            .get(`${urlBase}/api/mod/player/stats?id=${p.id}`)
+                                                            .then((res) => {
+                                                                setPRating(res.data.rating ?? 0);
+                                                                setPWins(res.data.wins ?? 0);
+                                                                setPLosses(res.data.losses ?? 0);
+                                                                setPMatches(res.data.matches ?? 0);
+                                                            })
+                                                            .catch(() => {
+                                                                setPRating("");
+                                                                setPWins("");
+                                                                setPLosses("");
+                                                                setPMatches("");
+                                                            });
+                                                    }}
+                                                >
+                                                    {p.display_name || p.username}
+                                                    <span className="text-info ms-1">#{p.id}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+
+                                {/* 🚫 Disable fields until a player is selected */}
+                                {!statPlayerID && (
+                                    <p className="text-warning small mt-2">
+                                        ⚠️ Select a player from the list to edit stats.
+                                    </p>
+                                )}
+
+                                {statPlayerID && (
+                                    <>
+                                        {/* Rating */}
+                                        <label className="text-light small mb-1 mt-3">Player Rating</label>
+                                        <input
+                                            type="number"
+                                            className="form-control bg-dark text-light mb-3"
+                                            placeholder="Rating..."
+                                            value={pRating}
+                                            onChange={(e) => setPRating(e.target.value)}
+                                            style={{ maxWidth: 180 }}
+                                        />
+
+                                        {/* Wins */}
+                                        <label className="text-light small mb-1">Wins</label>
+                                        <input
+                                            type="number"
+                                            className="form-control bg-dark text-light mb-3"
+                                            placeholder="Wins..."
+                                            value={pWins}
+                                            onChange={(e) => setPWins(e.target.value)}
+                                            style={{ maxWidth: 180 }}
+                                        />
+
+                                        {/* Losses */}
+                                        <label className="text-light small mb-1">Losses</label>
+                                        <input
+                                            type="number"
+                                            className="form-control bg-dark text-light mb-3"
+                                            placeholder="Losses..."
+                                            value={pLosses}
+                                            onChange={(e) => setPLosses(e.target.value)}
+                                            style={{ maxWidth: 180 }}
+                                        />
+
+                                        {/* Games Played */}
+                                        <label className="text-light small mb-1">Games Played</label>
+                                        <input
+                                            type="number"
+                                            className="form-control bg-dark text-light mb-3"
+                                            placeholder="Games Played..."
+                                            value={pMatches}
+                                            onChange={(e) => setPMatches(e.target.value)}
+                                            style={{ maxWidth: 180 }}
+                                        />
+
+                                        <button
+                                            className="btn btn-outline-info btn-sm mt-2"
+                                            onClick={async () => {
+                                                await axios.post(
+                                                    `${urlBase}/api/mod/player/adjust-stats`,
+                                                    {
+                                                        player_id: String(statPlayerID),   // send string
+                                                        rating: Number(pRating),
+                                                        wins: Number(pWins),
+                                                        losses: Number(pLosses),
+                                                        matches: Number(pMatches),
+                                                    }
+                                                );
+                                                alert("✔ Player stats updated!");
+                                            }}
+                                        >
+                                            💾 Save Player Stats
+                                        </button>
+                                    </>
+                                )}
                             </div>
                         </div>
                     }

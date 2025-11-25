@@ -468,13 +468,6 @@ export default function MyTeam() {
                   <div className="mb-4 border-bottom border-secondary pb-3">
                     <h6 className="text-info mb-2">🏆 Challenge Match Availability</h6>
 
-                    {/* Global State Display */}
-                    {!globalChallengesEnabled && (
-                      <p className="text-warning small mb-2">
-                        ⚠️ Challenge matches are currently <b>disabled league-wide</b>.
-                      </p>
-                    )}
-
                     <div className="d-flex align-items-center gap-2">
                       <div className="form-check form-switch m-0">
                         <input
@@ -518,7 +511,7 @@ export default function MyTeam() {
 
                       <label className="form-check-label text-light small ms-2">
                         {!globalChallengesEnabled
-                          ? "⛔ Challenge Matches Disabled by League Mods"
+                          ? "⚠️ Challenge matches are currently disabled league-wide."
                           : allowChallenges
                             ? "✅ Accepting Challenge Matches"
                             : "🚫 Not Accepting Challenges"}

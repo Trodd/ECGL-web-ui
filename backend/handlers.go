@@ -1679,12 +1679,20 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// log
+	// ⭐ Get team name for logging
+	var team Team
+	teamName := fmt.Sprintf("Team #%d", req.TeamID) // fallback
+
+	if err := DB.First(&team, req.TeamID).Error; err == nil && strings.TrimSpace(team.Name) != "" {
+		teamName = team.Name
+	}
+
+	// log (with real team name if available)
 	SendDiscordLog(fmt.Sprintf(
-		"⬆️ **Promotion:** <@%d> is now **%s** on **Team #%d**",
+		"⬆️ **Promotion:** <@%d> is now **%s** on **%s**",
 		playerID,
 		req.Role,
-		req.TeamID,
+		teamName,
 	))
 
 	respondJSON(w, map[string]any{"success": true, "message": "Member promoted to " + req.Role})
@@ -2013,65 +2021,6 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 
 	DB.First(&teamA, match.TeamAID)
 	DB.First(&teamB, match.TeamBID)
-
-	// ⭐ Perform Coin Flip (HEADS/TAILS)
-	call := strings.ToUpper(strings.TrimSpace(req.CoinFlipCall))
-
-	if call == "HEADS" || call == "TAILS" {
-
-		// Random flip result
-		sides := []string{"HEADS", "TAILS"}
-		result := sides[rand.Intn(2)]
-
-		// Determine winner (team that made the correct call)
-		winner := ""
-		if result == call {
-			// calling team wins
-			if req.TeamID == match.TeamAID {
-				winner = "A"
-			} else {
-				winner = "B"
-			}
-		} else {
-			// non-calling team wins
-			if req.TeamID == match.TeamAID {
-				winner = "B"
-			} else {
-				winner = "A"
-			}
-		}
-
-		// Save winner to DB
-		match.CoinFlip = winner
-		DB.Model(&match).Update("coin_flip", winner)
-
-		// Build readable winner
-		winnerName := ""
-		if winner == "A" {
-			winnerName = teamA.Name
-		} else {
-			winnerName = teamB.Name
-		}
-
-		// Log to Discord
-		LogGeneral(fmt.Sprintf(
-			"🎲 **Coin Flip Performed**\n"+
-				"Caller: **%s** (%s)\n"+
-				"Call: **%s**\n"+
-				"Result: **%s**\n"+
-				"Winner: **%s**",
-			func() string {
-				if req.TeamID == match.TeamAID {
-					return teamA.Name
-				}
-				return teamB.Name
-			}(),
-			map[bool]string{req.TeamID == match.TeamAID: "Team A", req.TeamID == match.TeamBID: "Team B"}[true],
-			call,
-			result,
-			winnerName,
-		))
-	}
 
 	isTeamA := req.TeamID == match.TeamAID
 	isTeamB := req.TeamID == match.TeamBID
@@ -4469,85 +4418,63 @@ func ModTeamHistory(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- League Mod: Add player to a team manually (with auto role adjustment) ---
+// POST /api/mod/team/add-player
 func ModAddPlayerToTeam(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireLeagueMod(w, r); !ok {
+	type Body struct {
+		TeamID   uint   `json:"team_id"`
+		PlayerID string `json:"player_id"`
+		Role     string `json:"role"`
+	}
+
+	var req Body
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
-	var req struct {
-		PlayerID int64  `json:"player_id"`
-		TeamID   uint   `json:"team_id"`
-		Role     string `json:"role"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		modJSONErr(w, http.StatusBadRequest, "invalid request")
+	if req.TeamID == 0 || strings.TrimSpace(req.PlayerID) == "" {
+		http.Error(w, "Missing team ID or player ID", http.StatusBadRequest)
 		return
 	}
-	if req.PlayerID == 0 || req.TeamID == 0 {
-		modJSONErr(w, http.StatusBadRequest, "missing player_id or team_id")
+
+	// Convert PlayerID to int64
+	pid, err := strconv.ParseInt(req.PlayerID, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid player ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Check if player already on a team
+	var existing TeamMember
+	if err := DB.Where("player_id = ?", pid).First(&existing).Error; err == nil {
+		http.Error(w, "Player is already on a team", http.StatusBadRequest)
 		return
 	}
 
 	// Normalize role
-	role := strings.Title(strings.ToLower(req.Role))
+	role := strings.TrimSpace(req.Role)
 	if role == "" {
 		role = "Member"
 	}
-	if role != "Member" && role != "Co-Captain" && role != "Captain" {
-		modJSONErr(w, http.StatusBadRequest, "invalid role")
-		return
-	}
 
-	// ✅ Check if player already belongs to a team
-	var existing TeamMember
-	if err := DB.Where("player_id = ?", req.PlayerID).First(&existing).Error; err == nil {
-		modJSONErr(w, http.StatusConflict, "player already on a team")
-		return
-	}
-
-	// ✅ Auto-demote existing captains/co-captains if adding a Captain
-	if role == "Captain" {
-		// Step 1: Demote any current Captain → Co-Captain
-		DB.Model(&TeamMember{}).
-			Where("team_id = ? AND role = ?", req.TeamID, "Captain").
-			Update("role", "Co-Captain")
-
-		// Step 2: Demote any existing Co-Captain → Member
-		DB.Model(&TeamMember{}).
-			Where("team_id = ? AND role = ?", req.TeamID, "Co-Captain").
-			Update("role", "Member")
-	}
-
-	// ✅ Create new membership
-	member := TeamMember{
-		PlayerID: req.PlayerID,
+	// Insert new team membership
+	newMember := TeamMember{
 		TeamID:   req.TeamID,
+		PlayerID: pid,
 		Role:     role,
 	}
-	log.Printf("🧩 ADD DEBUG: team_id=%v player_id=%v role=%v", req.TeamID, req.PlayerID, role)
 
-	if err := DB.Create(&member).Error; err != nil {
-		modJSONErr(w, http.StatusInternalServerError, "failed to add player to team")
+	if err := DB.Create(&newMember).Error; err != nil {
+		http.Error(w, "Failed to add player to team", http.StatusInternalServerError)
 		return
 	}
 
-	log.Println("✅ DB Create succeeded for player:", req.PlayerID)
-
-	// ✅ Log team history
-	var team Team
-	DB.First(&team, req.TeamID)
-	DB.Create(&PlayerHistory{
-		PlayerID: req.PlayerID,
-		TeamID:   team.ID,
-		TeamName: team.Name,
-		Role:     role,
-		Season:   currentSeason,
-	})
-
-	respondJSON(w, map[string]any{
-		"success": true,
-		"message": fmt.Sprintf("Player %d added to %s as %s (roles adjusted)", req.PlayerID, team.Name, role),
+	json.NewEncoder(w).Encode(map[string]any{
+		"success":   true,
+		"team_id":   req.TeamID,
+		"player_id": req.PlayerID,
+		"role":      req.Role,
 	})
 }
 
@@ -4865,19 +4792,23 @@ func HandleConfirmCoinFlip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Random flip result
+	// 🔥 Ensure randomness
+	rand.Seed(time.Now().UnixNano())
 	sides := []string{"HEADS", "TAILS"}
 	result := sides[rand.Intn(2)]
 
 	// Determine winner
 	var winner string
+
 	if result == call {
+		// The caller wins
 		if req.TeamID == match.TeamAID {
 			winner = "A"
 		} else {
 			winner = "B"
 		}
 	} else {
+		// The other team wins
 		if req.TeamID == match.TeamAID {
 			winner = "B"
 		} else {
@@ -5585,5 +5516,404 @@ func HandleDeleteCast(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{
 		"success": true,
 		"message": "Cast removed.",
+	})
+}
+
+// POST /api/mod/team/adjust-stats
+func HandleModAdjustTeamStats(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TeamID  uint `json:"team_id"`
+		Rating  int  `json:"rating"`
+		Wins    int  `json:"wins"`
+		Losses  int  `json:"losses"`
+		Matches int  `json:"matches"` // NEW
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	var team Team
+	if err := DB.First(&team, req.TeamID).Error; err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	team.Rating = req.Rating
+	team.Wins = req.Wins
+	team.Losses = req.Losses
+	team.Matches = req.Matches
+
+	if err := DB.Save(&team).Error; err != nil {
+		http.Error(w, "Failed to save", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"team_id": team.ID,
+	})
+}
+
+// POST /api/mod/player/adjust-stats
+func HandleModAdjustPlayerStats(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PlayerID string `json:"player_id"`
+		Rating   int    `json:"rating"`
+		Wins     int    `json:"wins"`
+		Losses   int    `json:"losses"`
+		Matches  int    `json:"matches"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.PlayerID == "" {
+		http.Error(w, "Player ID required", http.StatusBadRequest)
+		return
+	}
+
+	playerID, err := strconv.ParseInt(req.PlayerID, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid player ID format", http.StatusBadRequest)
+		return
+	}
+
+	var p Player
+	if err := DB.First(&p, "id = ?", playerID).Error; err != nil {
+		http.Error(w, "Player not found", http.StatusNotFound)
+		return
+	}
+
+	p.Rating = req.Rating
+	p.Wins = req.Wins
+	p.Losses = req.Losses
+	p.Matches = req.Matches
+
+	if err := DB.Save(&p).Error; err != nil {
+		http.Error(w, "Failed to update player stats", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"success":   true,
+		"player_id": p.ID,
+	})
+}
+
+// GET /api/mod/player/stats?id=123
+func HandleModGetPlayerStats(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "Missing player ID", http.StatusBadRequest)
+		return
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "Invalid player ID", http.StatusBadRequest)
+		return
+	}
+
+	var p Player
+	if err := DB.First(&p, "id = ?", id).Error; err != nil {
+		http.Error(w, "Player not found", http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"id":      p.ID,
+		"rating":  p.Rating,
+		"wins":    p.Wins,
+		"losses":  p.Losses,
+		"matches": p.Matches,
+	})
+}
+
+// GET /api/mod/team/stats?id=123
+func HandleModGetTeamStats(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "Missing team ID", http.StatusBadRequest)
+		return
+	}
+
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		http.Error(w, "Invalid team ID", http.StatusBadRequest)
+		return
+	}
+
+	var t Team
+	if err := DB.First(&t, id).Error; err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"id":      t.ID,
+		"rating":  t.Rating,
+		"wins":    t.Wins,
+		"losses":  t.Losses,
+		"matches": t.Matches,
+	})
+}
+
+// GET /api/mod/team/members?id=123
+func HandleModGetTeamMembers(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "Missing team ID", http.StatusBadRequest)
+		return
+	}
+
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		http.Error(w, "Invalid team ID", http.StatusBadRequest)
+		return
+	}
+
+	type Member struct {
+		PlayerID    string `json:"player_id"`
+		DisplayName string `json:"display_name"`
+		Username    string `json:"username"`
+		Role        string `json:"role"`
+	}
+
+	members := []Member{}
+
+	err = DB.Raw(`
+        SELECT 
+            CAST(p.id AS TEXT) AS player_id,
+            p.display_name,
+            p.username,
+            tm.role
+        FROM team_members tm
+        JOIN players p ON p.id = tm.player_id
+        WHERE tm.team_id = ?
+        ORDER BY 
+            CASE WHEN tm.role = 'Captain' THEN 1
+                 WHEN tm.role = 'Co-Captain' THEN 2
+                 ELSE 3 END,
+            p.display_name ASC
+    `, id).Scan(&members).Error
+
+	if err != nil {
+		http.Error(w, "Failed to load team members", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(members)
+}
+
+// POST /api/mod/team/set-role
+func HandleModSetTeamRole(w http.ResponseWriter, r *http.Request) {
+	type Body struct {
+		TeamID   uint   `json:"team_id"`
+		PlayerID string `json:"player_id"`
+		Role     string `json:"role"`
+	}
+
+	var req Body
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.TeamID == 0 || strings.TrimSpace(req.PlayerID) == "" {
+		http.Error(w, "Missing team_id or player_id", http.StatusBadRequest)
+		return
+	}
+
+	// Validate role
+	validRoles := map[string]bool{
+		"Captain":    true,
+		"Co-Captain": true,
+		"Member":     true,
+	}
+
+	if !validRoles[req.Role] {
+		http.Error(w, "Invalid role", http.StatusBadRequest)
+		return
+	}
+
+	// Convert player ID to int64 safely
+	pid, err := strconv.ParseInt(req.PlayerID, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid player ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Confirm membership
+	var member TeamMember
+	if err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, pid).First(&member).Error; err != nil {
+		http.Error(w, "Player is not on this team", http.StatusNotFound)
+		return
+	}
+
+	// Update role
+	if err := DB.Model(&member).Update("role", req.Role).Error; err != nil {
+		http.Error(w, "Failed to update role", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"success":   true,
+		"team_id":   req.TeamID,
+		"player_id": req.PlayerID,
+		"new_role":  req.Role,
+	})
+}
+
+// POST /api/mod/team/promote-captain
+func HandleModPromoteToCaptain(w http.ResponseWriter, r *http.Request) {
+	type Body struct {
+		TeamID   uint   `json:"team_id"`
+		PlayerID string `json:"player_id"`
+	}
+
+	var req Body
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.TeamID == 0 || strings.TrimSpace(req.PlayerID) == "" {
+		http.Error(w, "Missing team_id or player_id", http.StatusBadRequest)
+		return
+	}
+
+	// Convert to int64 safely
+	pid, err := strconv.ParseInt(req.PlayerID, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid player ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Load all team members
+	var members []TeamMember
+	if err := DB.Where("team_id = ?", req.TeamID).Find(&members).Error; err != nil {
+		http.Error(w, "Failed to load team members", http.StatusInternalServerError)
+		return
+	}
+
+	if len(members) == 0 {
+		http.Error(w, "Team has no members", http.StatusBadRequest)
+		return
+	}
+
+	var newCaptain *TeamMember
+	var oldCaptain *TeamMember
+
+	for i := range members {
+		if members[i].PlayerID == pid {
+			newCaptain = &members[i]
+		}
+		if members[i].Role == "Captain" {
+			oldCaptain = &members[i]
+		}
+	}
+
+	if newCaptain == nil {
+		http.Error(w, "Player not found on this team", http.StatusNotFound)
+		return
+	}
+
+	// If the selected player is already Captain
+	if newCaptain.Role == "Captain" {
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"message": "Player is already Captain",
+		})
+		return
+	}
+
+	// Demote old captain → Co-Captain
+	if oldCaptain != nil {
+		DB.Model(oldCaptain).Update("role", "Co-Captain")
+	}
+
+	// Promote target → Captain
+	if err := DB.Model(newCaptain).Update("role", "Captain").Error; err != nil {
+		http.Error(w, "Failed to promote to Captain", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"success":     true,
+		"team_id":     req.TeamID,
+		"captain_id":  req.PlayerID,
+		"old_captain": oldCaptain.PlayerID,
+		"message":     "Player promoted to Captain",
+	})
+}
+
+// POST /api/mod/match/reset-schedule
+func ModResetMatchSchedule(w http.ResponseWriter, r *http.Request) {
+	type Body struct {
+		MatchID uint `json:"match_id"`
+	}
+
+	var req Body
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.MatchID == 0 {
+		http.Error(w, "Missing match_id", http.StatusBadRequest)
+		return
+	}
+
+	// Load match
+	var match Match
+	if err := DB.First(&match, req.MatchID).Error; err != nil {
+		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
+	// Reset schedule fields
+	updates := map[string]any{
+		"proposed_date": nil,
+		"scheduled_by":  nil,
+		"proposer_id":   nil,
+		"status":        "Pending",
+	}
+
+	if err := DB.Model(&match).Updates(updates).Error; err != nil {
+		http.Error(w, "Failed to reset schedule", http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch team names for logging
+	var teamA, teamB Team
+	teamAName := fmt.Sprintf("Team #%d", match.TeamAID)
+	teamBName := fmt.Sprintf("Team #%d", match.TeamBID)
+
+	if err := DB.First(&teamA, match.TeamAID).Error; err == nil && teamA.Name != "" {
+		teamAName = teamA.Name
+	}
+	if err := DB.First(&teamB, match.TeamBID).Error; err == nil && teamB.Name != "" {
+		teamBName = teamB.Name
+	}
+
+	// Discord log
+	SendDiscordLog(fmt.Sprintf(
+		"🔄 **Schedule Reset:** Match **%s** (%s vs %s) has been reset to **Pending**.",
+		match.MatchCode,
+		teamAName,
+		teamBName,
+	))
+
+	respondJSON(w, map[string]any{
+		"success":  true,
+		"message":  "Match schedule reset",
+		"match_id": req.MatchID,
 	})
 }

@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
@@ -517,6 +519,7 @@ var rosterLocked bool = false
 func main() {
 	// ✅ Load .env first
 	_ = godotenv.Load()
+	rand.Seed(time.Now().UnixNano())
 
 	// ✅ Set current season from env (with fallback)
 	currentSeason = os.Getenv("CURRENT_SEASON")
@@ -600,6 +603,7 @@ func main() {
 
 	// League Mod routes (all requireLeagueMod inside handlers)
 	r.HandleFunc("/api/mod/match/reset", ModMatchReset).Methods("POST")
+	r.HandleFunc("/api/mod/match/reset-schedule", ModResetMatchSchedule).Methods("POST")
 	r.HandleFunc("/api/mod/match/forfeit", ModMatchForfeit).Methods("POST")
 	r.HandleFunc("/api/mod/match/double-forfeit", ModMatchDoubleForfeit).Methods("POST")
 	r.HandleFunc("/api/mod/match", ModMatchDelete).Methods("DELETE")
@@ -635,6 +639,13 @@ func main() {
 	r.HandleFunc("/api/mod/sync-roles", HandleModSyncRoles).Methods("POST")
 	r.HandleFunc("/api/mod/challenges/enable", HandleEnableGlobalChallenges).Methods("POST")
 	r.HandleFunc("/api/mod/challenges/disable", HandleDisableGlobalChallenges).Methods("POST")
+	r.HandleFunc("/api/mod/team/adjust-stats", HandleModAdjustTeamStats).Methods("POST")
+	r.HandleFunc("/api/mod/team/stats", HandleModGetTeamStats).Methods("GET")
+	r.HandleFunc("/api/mod/player/adjust-stats", HandleModAdjustPlayerStats).Methods("POST")
+	r.HandleFunc("/api/mod/player/stats", HandleModGetPlayerStats).Methods("GET")
+	r.HandleFunc("/api/mod/team/members", HandleModGetTeamMembers).Methods("GET")
+	r.HandleFunc("/api/mod/team/set-role", HandleModSetTeamRole).Methods("POST")
+	r.HandleFunc("/api/mod/team/promote-captain", HandleModPromoteToCaptain).Methods("POST")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()
