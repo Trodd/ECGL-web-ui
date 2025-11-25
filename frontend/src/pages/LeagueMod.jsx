@@ -54,6 +54,12 @@ export default function LeagueMod() {
     const [pLosses, setPLosses] = useState("");
     const [pMatches, setPMatches] = useState("");
 
+    // --- Stats tab ---
+    const [teamRating, setTeamRating] = useState("");
+    const [teamWins, setTeamWins] = useState("");
+    const [teamLosses, setTeamLosses] = useState("");
+    const [teamGames, setTeamGames] = useState("");
+    const [activeTab, setActiveTab] = useState("info");
 
     useEffect(() => {
         async function loadPlayers() {
@@ -99,17 +105,18 @@ export default function LeagueMod() {
             if (!teamID) return;
 
             try {
-                const res = await axios.get(`${urlBase}/api/mod/team/stats?id=${teamID}`, {
-                    withCredentials: true,
-                });
+                const res = await axios.get(
+                    `${urlBase}/api/mod/team/stats?id=${teamID}`,
+                    { withCredentials: true }
+                );
 
                 const d = res.data;
+                console.log("Loaded team stats:", d);
 
-                // Auto-fill fields
-                setNewRating(d.rating ?? 0);
-                setNewWins(d.wins ?? 0);
-                setNewLosses(d.losses ?? 0);
-                setNewGP(d.matches ?? 0);
+                setNewRating(d.rating ?? "");
+                setNewWins(d.wins ?? "");
+                setNewLosses(d.losses ?? "");
+                setNewGP(d.matches ?? "");
 
             } catch (err) {
                 console.error("❌ Failed to load team stats:", err);
@@ -222,6 +229,90 @@ export default function LeagueMod() {
     }
 
     // --- Helpers ---
+    const HandleModPromoteToCaptain = async (playerID, name) => {
+        await safePost(
+            "/api/mod/team/promote-captain",
+            {
+                team_id: parseInt(teamID),
+                player_id: String(playerID),
+            },
+            `Promoted ${name} to Captain`,
+            true
+        );
+    };
+
+    const handleSetRole = async (playerID, role, name) => {
+        await safePost(
+            "/api/mod/team/set-role",
+            {
+                team_id: parseInt(teamID),
+                player_id: String(playerID),
+                role,
+            },
+            `Set ${name}'s role to ${role}`,
+            true
+        );
+    };
+
+    const handleKickMember = async (playerID, name) => {
+        await safePost(
+            "/api/mod/player/kick",
+            {
+                team_id: parseInt(teamID),
+                player_id: String(playerID),
+            },
+            `Kicked ${name} from ${getTeamLabel(teamID)}`,
+            true
+        );
+    };
+
+    const handleAddPlayer = async () => {
+        if (!teamID) return setMsg("⚠️ Select a team first.");
+        if (!addPlayerID) return setMsg("⚠️ Select a player first.");
+
+        await safePost(
+            "/api/mod/team/add-player",
+            {
+                team_id: parseInt(teamID),
+                player_id: String(addPlayerID),
+                role: addRole,
+            },
+            `Added ${addPlayerInput} as ${addRole}`,
+            true
+        );
+
+        setAddPlayerInput("");
+        setAddPlayerID("");
+        setFilteredPlayers([]);
+    };
+
+    const handlePlayerSearchForAdd = async (e) => {
+        const value = e.target.value;
+        setAddPlayerInput(value);
+        setAddPlayerID("");
+
+        if (!value || value.trim().length < 2) {
+            setFilteredPlayers([]);
+            return;
+        }
+
+        try {
+            const res = await axios.get(`${urlBase}/api/players`);
+            const list = res.data || [];
+
+            const filtered = list.filter((p) =>
+                [p.username, p.display_name, String(p.id)]
+                    .join(" ")
+                    .toLowerCase()
+                    .includes(value.toLowerCase())
+            );
+
+            setFilteredPlayers(filtered.slice(0, 8));
+        } catch {
+            setFilteredPlayers([]);
+        }
+    };
+
     const handleAdjustTeamStats = async () => {
         if (!teamID) return setMsg("⚠️ Select a team first.");
 
@@ -232,7 +323,7 @@ export default function LeagueMod() {
                 rating: parseInt(newRating || 0),
                 wins: parseInt(newWins || 0),
                 losses: parseInt(newLosses || 0),
-                matches: parseInt(newGP || 0), // NEW
+                matches: parseInt(newGP || 0),
             },
             `Updated stats for ${getTeamLabel(teamID)}`,
             true
@@ -250,13 +341,13 @@ export default function LeagueMod() {
         await safePost(
             "/api/mod/player/adjust-stats",
             {
-                player_id: parseInt(playerID),
+                player_id: String(playerID),
                 rating: parseInt(pRating || 0),
                 wins: parseInt(pWins || 0),
                 losses: parseInt(pLosses || 0),
                 matches: parseInt(pMatches || 0),
             },
-            `Updated player #${playerID} stats`,
+            `Updated stats for player #${playerID}`,
             true
         );
 
@@ -1196,10 +1287,13 @@ export default function LeagueMod() {
                     title="👥 Team Tools"
                     children={
                         <div className="bg-black text-light p-3 rounded-3 border border-secondary">
-                            {/* === Team Selection === */}
-                            <div className="mb-4">
-                                <h6 className="text-info mb-2">🧩 Select a Team</h6>
-                                <div className="d-flex flex-column flex-md-row gap-2">
+                            {/* 🔧 TEAM TOOLS — TABBED SYSTEM */}
+                            <div className="bg-black text-light p-3 rounded border border-secondary">
+
+                                {/* === TEAM SELECTOR === */}
+                                <h5 className="text-info mb-3">🧩 Team Tools</h5>
+
+                                <div className="d-flex flex-column flex-md-row gap-2 mb-4">
                                     <input
                                         type="text"
                                         placeholder="🔍 Search team..."
@@ -1212,9 +1306,9 @@ export default function LeagueMod() {
                                         className="form-select bg-dark text-light"
                                         value={teamID || ""}
                                         onChange={(e) => {
-                                            const val = Number(e.target.value);
-                                            console.log("🔄 Team selected:", val);
-                                            setTeamID(isNaN(val) ? 0 : val);
+                                            const id = Number(e.target.value);
+                                            setTeamID(isNaN(id) ? 0 : id);
+                                            setMsg("");
                                         }}
                                         style={{ maxWidth: 260 }}
                                     >
@@ -1226,216 +1320,227 @@ export default function LeagueMod() {
                                         ))}
                                     </select>
                                 </div>
-                            </div>
 
-                            {/* === Basic Actions === */}
-                            <div className="border-top border-secondary pt-3 mb-4">
-                                <h6 className="text-warning mb-2">⚙️ Team Management</h6>
-                                <div className="row g-2">
-                                    <div className="col-md-6 col-lg-3">
-                                        <input
-                                            type="text"
-                                            placeholder="✏️ New name..."
-                                            className="form-control bg-dark text-light"
-                                            value={newTeamName}
-                                            onChange={(e) => setNewTeamName(e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="col-md-6 col-lg-9 d-flex flex-wrap gap-2">
-                                        <button
-                                            className="btn btn-outline-info btn-sm"
-                                            onClick={async () => {
-                                                if (!teamID) return setMsg("⚠️ Select a team first.");
-                                                if (!newTeamName.trim())
-                                                    return setMsg("⚠️ Enter a new name before renaming.");
-                                                await safePost(
-                                                    "/api/mod/team/rename",
-                                                    { team_id: teamID, new_name: newTeamName.trim() },
-                                                    `Renamed ${getTeamLabel(teamID)} to ${newTeamName.trim()}`,
-                                                    true
-                                                );
-                                            }}
-                                        >
-                                            ✏️ Rename
-                                        </button>
-                                        <button
-                                            className="btn btn-outline-danger btn-sm"
-                                            onClick={async () => {
-                                                if (!teamID) return setMsg("⚠️ Select a team first.");
-                                                if (
-                                                    !confirm(`⚠️ Are you sure you want to disband ${getTeamLabel(teamID)}?`)
-                                                )
-                                                    return;
-                                                await safePost(
-                                                    "/api/mod/team/disband",
-                                                    { team_id: teamID },
-                                                    `Disbanded ${getTeamLabel(teamID)}`,
-                                                    true
-                                                );
-                                            }}
-                                        >
-                                            🚫 Disband
-                                        </button>
-                                        <button
-                                            className="btn btn-outline-secondary btn-sm"
-                                            onClick={async () => {
-                                                if (!teamID) return setMsg("⚠️ Select a team first.");
-                                                await safePost(
-                                                    "/api/mod/team/lock",
-                                                    { team_id: teamID },
-                                                    `Toggled lock for ${getTeamLabel(teamID)}`,
-                                                    true
-                                                );
-                                            }}
-                                        >
-                                            🔒 Lock / Unlock
-                                        </button>
-                                        <button
-                                            className="btn btn-outline-danger btn-sm"
-                                            onClick={async () => {
-                                                if (!teamID) return setMsg("⚠️ Select a team first.");
-                                                if (
-                                                    !confirm(
-                                                        `⚠️ Permanently delete ${getTeamLabel(teamID)} and all related matches?`
-                                                    )
-                                                )
-                                                    return;
-                                                await safePost(
-                                                    "/api/mod/team/delete",
-                                                    { team_id: teamID },
-                                                    `Deleted ${getTeamLabel(teamID)}`,
-                                                    true
-                                                );
-                                            }}
-                                        >
-                                            🗑️ Delete Team
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
+                                {!teamID && (
+                                    <p className="text-warning small">⚠️ Select a team to manage tools.</p>
+                                )}
 
-                            {/* === Team Context (Smart Roster Manager) === */}
-                            <div
-                                className="p-3 mb-4 rounded-3"
-                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
-                            >
-                                <h6 className="text-info mb-2">👥 Team Context (Roster Manager)</h6>
-                                <p className="small text-light mb-3">
-                                    Select a team to view all members. Click a player to perform kick/promote/demote actions.
-                                </p>
-
-                                {/* --- Team Search + Picker --- */}
-                                <div className="d-flex flex-column flex-md-row align-items-start gap-3">
-                                    <div>
-                                        <label className="form-label text-light small mb-1">🔍 Search Team</label>
-                                        <input
-                                            type="text"
-                                            placeholder="Type team name..."
-                                            className="form-control bg-dark text-light"
-                                            value={teamSearch}
-                                            onChange={(e) => setTeamSearch(e.target.value)}
-                                            style={{ maxWidth: 250 }}
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="form-label text-light small mb-1">🧩 Select Team</label>
-                                        <select
-                                            className="form-select bg-dark text-light"
-                                            value={teamID}
-                                            onChange={(e) => setTeamID(Number(e.target.value) || 0)}
-                                            style={{ maxWidth: 250 }}
-                                        >
-                                            <option value="">Select Team...</option>
-                                            {filteredTeams.map((t) => (
-                                                <option key={t.id} value={t.id}>
-                                                    {t.name} (#{t.id})
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                </div>
-
-                                {/* --- Add Team Member --- */}
                                 {teamID && (
-                                    <div
-                                        className="mt-4 p-3 rounded"
-                                        style={{ backgroundColor: "#111", border: "1px solid #222" }}
-                                    >
-                                        <h6 className="text-success mb-2">➕ Add Player to Team</h6>
-                                        <p className="small text-light mb-2">
-                                            Search for a player, choose a role, then click <b>Add</b>.
-                                        </p>
+                                    <>
 
-                                        {/* Player Search */}
-                                        <div className="d-flex flex-column flex-md-row gap-3 align-items-start">
+                                        {/*     TABBED NAV BAR   */}
+                                        <ul className="nav nav-tabs mb-3" role="tablist">
+                                            <li className="nav-item">
+                                                <button
+                                                    className={`nav-link ${activeTab === "info" ? "active" : ""}`}
+                                                    onClick={() => setActiveTab("info")}
+                                                >
+                                                    ℹ️ Info
+                                                </button>
+                                            </li>
 
-                                            {/* Search Box */}
-                                            <div className="position-relative" style={{ maxWidth: 300 }}>
-                                                <label className="text-light small mb-1">🔍 Search Player</label>
+                                            <li className="nav-item">
+                                                <button
+                                                    className={`nav-link ${activeTab === "stats" ? "active" : ""}`}
+                                                    onClick={() => setActiveTab("stats")}
+                                                >
+                                                    📊 Stats
+                                                </button>
+                                            </li>
+
+                                            <li className="nav-item">
+                                                <button
+                                                    className={`nav-link ${activeTab === "add" ? "active" : ""}`}
+                                                    onClick={() => setActiveTab("add")}
+                                                >
+                                                    ➕ Add Player
+                                                </button>
+                                            </li>
+
+                                            <li className="nav-item">
+                                                <button
+                                                    className={`nav-link ${activeTab === "roster" ? "active" : ""}`}
+                                                    onClick={() => setActiveTab("roster")}
+                                                >
+                                                    👥 Roster
+                                                </button>
+                                            </li>
+                                        </ul>
+
+                                        {/* === INFO TAB === */}
+                                        {activeTab === "info" && (
+                                            <div className="p-3 bg-dark rounded border border-secondary">
+                                                <h6 className="text-info mb-3">ℹ️ Team Information</h6>
+
+                                                <label className="text-light small mb-1">Rename Team</label>
+                                                <div className="d-flex gap-2 mb-3">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="New name..."
+                                                        className="form-control bg-black text-light"
+                                                        value={newTeamName}
+                                                        onChange={(e) => setNewTeamName(e.target.value)}
+                                                        style={{ maxWidth: 250 }}
+                                                    />
+                                                    <button
+                                                        className="btn btn-outline-info btn-sm"
+                                                        onClick={async () => {
+                                                            if (!newTeamName.trim())
+                                                                return setMsg("⚠️ Enter a new name first.");
+                                                            await safePost(
+                                                                "/api/mod/team/rename",
+                                                                { team_id: teamID, new_name: newTeamName.trim() },
+                                                                `Renamed team to ${newTeamName.trim()}`,
+                                                                true
+                                                            );
+                                                        }}
+                                                    >
+                                                        Save
+                                                    </button>
+                                                </div>
+
+                                                <div className="d-flex flex-wrap gap-2">
+                                                    <button
+                                                        className="btn btn-outline-secondary btn-sm"
+                                                        onClick={async () => {
+                                                            await safePost(
+                                                                "/api/mod/team/lock",
+                                                                { team_id: teamID },
+                                                                "Toggled team lock",
+                                                                true
+                                                            );
+                                                        }}
+                                                    >
+                                                        🔒 Lock / Unlock
+                                                    </button>
+
+                                                    <button
+                                                        className="btn btn-outline-danger btn-sm"
+                                                        onClick={async () => {
+                                                            if (!confirm("Disband this team?")) return;
+                                                            await safePost(
+                                                                "/api/mod/team/disband",
+                                                                { team_id: teamID },
+                                                                "Team disbanded",
+                                                                true
+                                                            );
+                                                        }}
+                                                    >
+                                                        🚫 Disband
+                                                    </button>
+
+                                                    <button
+                                                        className="btn btn-outline-danger btn-sm"
+                                                        onClick={async () => {
+                                                            if (!confirm("Delete team and all matches?")) return;
+                                                            await safePost(
+                                                                "/api/mod/team/delete",
+                                                                { team_id: teamID },
+                                                                "Team deleted",
+                                                                true
+                                                            );
+                                                        }}
+                                                    >
+                                                        🗑️ Delete Team
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* === STATS TAB === */}
+                                        {activeTab === "stats" && (
+                                            <div className="p-3 bg-dark rounded border border-secondary">
+                                                <h6 className="text-info mb-3">📊 Team Rating / W-L / Games Played</h6>
+
+                                                <label className="text-light small mb-1">Rating</label>
                                                 <input
-                                                    type="text"
-                                                    className="form-control bg-dark text-light"
-                                                    placeholder="Type player name or ID..."
-                                                    value={addPlayerInput}
-                                                    onChange={async (e) => {
-                                                        const value = e.target.value;
-                                                        setAddPlayerInput(value);
-                                                        setAddPlayerID("");
-
-                                                        if (value.trim().length >= 2) {
-                                                            try {
-                                                                const res = await axios.get(`${urlBase}/api/players`);
-                                                                const list = res.data || [];
-
-                                                                const filtered = list.filter((p) =>
-                                                                    [p.username, p.display_name, String(p.id)]
-                                                                        .join(" ")
-                                                                        .toLowerCase()
-                                                                        .includes(value.toLowerCase())
-                                                                );
-
-                                                                setFilteredPlayers(filtered.slice(0, 8));
-                                                            } catch {
-                                                                setFilteredPlayers([]);
-                                                            }
-                                                        } else {
-                                                            setFilteredPlayers([]);
-                                                        }
-                                                    }}
-                                                    onBlur={() => setTimeout(() => setFilteredPlayers([]), 150)}
+                                                    type="number"
+                                                    className="form-control bg-black text-light mb-2"
+                                                    style={{ maxWidth: 180 }}
+                                                    value={newRating}
+                                                    onChange={(e) => setNewRating(e.target.value)}
                                                 />
 
-                                                {/* Suggestions */}
-                                                {filteredPlayers.length > 0 && (
-                                                    <ul
-                                                        className="list-group position-absolute w-100 mt-1 shadow-sm"
-                                                        style={{ zIndex: 10, borderRadius: "0.4rem", overflow: "hidden" }}
-                                                    >
-                                                        {filteredPlayers.map((p) => (
-                                                            <li
-                                                                key={p.id}
-                                                                className="list-group-item list-group-item-action bg-dark text-light border-secondary small"
-                                                                style={{ cursor: "pointer" }}
-                                                                onMouseDown={() => {
-                                                                    setAddPlayerInput(`${p.display_name || p.username} (#${p.id})`);
-                                                                    setAddPlayerID(String(p.id));
-                                                                    setFilteredPlayers([]);
-                                                                }}
-                                                            >
-                                                                {p.display_name || p.username}
-                                                                <span className="text-info"> #{p.id}</span>
-                                                            </li>
-                                                        ))}
-                                                    </ul>
-                                                )}
-                                            </div>
+                                                <label className="text-light small mb-1">Wins</label>
+                                                <input
+                                                    type="number"
+                                                    className="form-control bg-black text-light mb-2"
+                                                    style={{ maxWidth: 180 }}
+                                                    value={newWins}
+                                                    onChange={(e) => setNewWins(e.target.value)}
+                                                />
 
-                                            {/* Role Selector */}
-                                            <div>
-                                                <label className="text-light small mb-1">🧩 Role</label>
+                                                <label className="text-light small mb-1">Losses</label>
+                                                <input
+                                                    type="number"
+                                                    className="form-control bg-black text-light mb-2"
+                                                    style={{ maxWidth: 180 }}
+                                                    value={newLosses}
+                                                    onChange={(e) => setNewLosses(e.target.value)}
+                                                />
+
+                                                <label className="text-light small mb-1">Games Played</label>
+                                                <input
+                                                    type="number"
+                                                    className="form-control bg-black text-light mb-3"
+                                                    style={{ maxWidth: 180 }}
+                                                    value={newGP}
+                                                    onChange={(e) => setNewGP(e.target.value)}
+                                                />
+
+                                                <button
+                                                    className="btn btn-outline-info btn-sm"
+                                                    onClick={handleAdjustTeamStats}
+                                                >
+                                                    💾 Save Stats
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* === ADD PLAYER TAB === */}
+                                        {activeTab === "add" && (
+                                            <div className="p-3 bg-dark rounded border border-secondary">
+                                                <h6 className="text-success mb-3">➕ Add Player to Team</h6>
+
+                                                {/* Player Search Box */}
+                                                <div className="position-relative mb-3" style={{ maxWidth: 300 }}>
+                                                    <label className="text-light small mb-1">Search Player</label>
+                                                    <input
+                                                        type="text"
+                                                        className="form-control bg-black text-light"
+                                                        placeholder="name or ID..."
+                                                        value={addPlayerInput}
+                                                        onChange={handlePlayerSearchForAdd}
+                                                    />
+
+                                                    {/* Autocomplete */}
+                                                    {filteredPlayers.length > 0 && (
+                                                        <ul
+                                                            className="list-group position-absolute w-100 mt-1 shadow-sm"
+                                                            style={{ zIndex: 10 }}
+                                                        >
+                                                            {filteredPlayers.map((p) => (
+                                                                <li
+                                                                    key={p.id}
+                                                                    className="list-group-item bg-dark text-light small"
+                                                                    onMouseDown={() => {
+                                                                        setAddPlayerInput(`${p.display_name} (#${p.id})`);
+                                                                        setAddPlayerID(p.id);
+                                                                        setFilteredPlayers([]);
+                                                                    }}
+                                                                    style={{ cursor: "pointer" }}
+                                                                >
+                                                                    {p.display_name || p.username} #{p.id}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </div>
+
+                                                {/* Role Select */}
+                                                <label className="text-light small mb-1">Role</label>
                                                 <select
-                                                    className="form-select bg-dark text-light"
+                                                    className="form-select bg-black text-light mb-3"
                                                     value={addRole}
                                                     onChange={(e) => setAddRole(e.target.value)}
                                                     style={{ maxWidth: 200 }}
@@ -1444,150 +1549,74 @@ export default function LeagueMod() {
                                                     <option value="Co-Captain">Co-Captain</option>
                                                     <option value="Captain">Captain</option>
                                                 </select>
-                                            </div>
 
-                                            {/* Add Button */}
-                                            <div className="d-flex align-items-end">
                                                 <button
                                                     className="btn btn-outline-success btn-sm"
-                                                    disabled={!teamID || !addPlayerID}
-                                                    onClick={async () => {
-                                                        if (!teamID || !addPlayerID) {
-                                                            setMsg("⚠️ Must select a team and player first.");
-                                                            return;
-                                                        }
-
-                                                        await safePost(
-                                                            "/api/mod/team/add-player",
-                                                            {
-                                                                team_id: teamID,
-                                                                player_id: addPlayerID,
-                                                                role: addRole,
-                                                            },
-                                                            `Added ${addPlayerInput} as ${addRole}`,
-                                                            true
-                                                        );
-
-                                                        setAddPlayerInput("");
-                                                        setAddPlayerID("");
-                                                    }}
+                                                    disabled={!addPlayerID}
+                                                    onClick={handleAddPlayer}
                                                 >
                                                     ➕ Add Player
                                                 </button>
                                             </div>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* --- Roster List --- */}
-                                {teamID && (
-                                    <div
-                                        className="mt-3 p-3 rounded"
-                                        style={{ backgroundColor: "#111", border: "1px solid #222" }}
-                                    >
-                                        <h6 className="text-light mb-2">📋 Team Members</h6>
-
-                                        {teamMembers.length === 0 ? (
-                                            <p className="text-warning small">No players found on this team.</p>
-                                        ) : (
-                                            <ul className="list-group bg-dark">
-                                                {teamMembers.map((m) => (
-                                                    <li
-                                                        key={m.player_id}
-                                                        className="list-group-item d-flex justify-content-between align-items-center bg-dark text-light border-secondary"
-                                                        style={{ cursor: "pointer" }}
-                                                        onClick={() => {
-                                                            setPlayerID(m.player_id);
-                                                            setPlayerSearch(`${m.display_name || m.username} (#${m.player_id})`);
-                                                        }}
-                                                    >
-                                                        <span>
-                                                            <b>{m.display_name || m.username}</b>{" "}
-                                                            <span className="text-info">#{m.player_id}</span>
-                                                            <span className="ms-2 text-warning small">[{m.role}]</span>
-                                                        </span>
-
-                                                        <div className="d-flex gap-2">
-                                                            {/* Promote/Demote Buttons */}
-                                                            <button
-                                                                className="btn btn-outline-primary btn-sm"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    safePost(
-                                                                        "/api/mod/team/promote-captain",
-                                                                        {
-                                                                            team_id: teamID,
-                                                                            player_id: m.player_id,
-                                                                        },
-                                                                        `Promoted ${m.display_name} to Captain`,
-                                                                        true
-                                                                    );
-                                                                }}
-                                                            >
-                                                                👑 Captain
-                                                            </button>
-
-                                                            <button
-                                                                className="btn btn-outline-success btn-sm"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    safePost(
-                                                                        "/api/mod/team/set-role",
-                                                                        {
-                                                                            team_id: teamID,
-                                                                            player_id: m.player_id,
-                                                                            role: "Co-Captain",
-                                                                        },
-                                                                        `Promoted ${m.display_name} to Co-Captain`,
-                                                                        true
-                                                                    );
-                                                                }}
-                                                            >
-                                                                ⭐ Co-Captain
-                                                            </button>
-
-                                                            <button
-                                                                className="btn btn-outline-warning btn-sm"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    safePost(
-                                                                        "/api/mod/team/set-role",
-                                                                        {
-                                                                            team_id: teamID,
-                                                                            player_id: m.player_id,
-                                                                            role: "Member",
-                                                                        },
-                                                                        `Set ${m.display_name} to Member`,
-                                                                        true
-                                                                    );
-                                                                }}
-                                                            >
-                                                                👤 Member
-                                                            </button>
-
-                                                            <button
-                                                                className="btn btn-outline-danger btn-sm"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    safePost(
-                                                                        "/api/mod/team/kick",
-                                                                        {
-                                                                            team_id: teamID,
-                                                                            player_id: m.player_id,
-                                                                        },
-                                                                        `Kicked ${m.display_name} from team`,
-                                                                        true
-                                                                    );
-                                                                }}
-                                                            >
-                                                                🦶 Kick
-                                                            </button>
-                                                        </div>
-                                                    </li>
-                                                ))}
-                                            </ul>
                                         )}
-                                    </div>
+
+                                        {/* === ROSTER TAB === */}
+                                        {activeTab === "roster" && (
+                                            <div className="p-3 bg-dark rounded border border-secondary">
+                                                <h6 className="text-info mb-3">👥 Team Roster</h6>
+
+                                                {teamMembers.length === 0 ? (
+                                                    <p className="text-warning small">No members in this team.</p>
+                                                ) : (
+                                                    <ul className="list-group bg-dark">
+                                                        {teamMembers.map((m) => (
+                                                            <li
+                                                                key={m.player_id}
+                                                                className="list-group-item bg-dark text-light border-secondary d-flex justify-content-between align-items-center"
+                                                            >
+                                                                <span>
+                                                                    <b>{m.display_name}</b>{" "}
+                                                                    <span className="text-info">#{m.player_id}</span>{" "}
+                                                                    <span className="text-warning small">[{m.role}]</span>
+                                                                </span>
+
+                                                                <div className="d-flex gap-2">
+                                                                    <button
+                                                                        className="btn btn-outline-primary btn-sm"
+                                                                        onClick={() => HandleModPromoteToCaptain(m.player_id, m.display_name)}
+                                                                    >
+                                                                        👑
+                                                                    </button>
+
+                                                                    <button
+                                                                        className="btn btn-outline-success btn-sm"
+                                                                        onClick={() => handleSetRole(m.player_id, "Co-Captain", m.display_name)}
+                                                                    >
+                                                                        ⭐
+                                                                    </button>
+
+                                                                    <button
+                                                                        className="btn btn-outline-warning btn-sm"
+                                                                        onClick={() => handleSetRole(m.player_id, "Member", m.display_name)}
+                                                                    >
+                                                                        👤
+                                                                    </button>
+
+                                                                    <button
+                                                                        className="btn btn-outline-danger btn-sm"
+                                                                        onClick={() => handleKickMember(m.player_id, m.display_name)}
+                                                                    >
+                                                                        🦶
+                                                                    </button>
+                                                                </div>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                        )}
+
+                                    </>
                                 )}
                             </div>
 
@@ -1756,80 +1785,6 @@ export default function LeagueMod() {
                                         🛑 Disable Global Challenges
                                     </button>
                                 </div>
-                            </div>
-                            {/* ⭐ TEAM RATING / W-L-GP EDITOR */}
-                            <div
-                                className="p-3 mt-4 rounded"
-                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
-                            >
-                                <h6 className="text-warning mb-3">⭐ Edit Team Rating / W-L / Games Played</h6>
-
-                                {/* Select Team */}
-                                <label className="text-light small mb-1">Select Team</label>
-                                <select
-                                    className="form-select bg-dark text-light mb-3"
-                                    value={teamID}
-                                    onChange={(e) => setTeamID(e.target.value)}
-                                    style={{ maxWidth: 260 }}
-                                >
-                                    <option value="">Choose a Team...</option>
-                                    {teams.map((t) => (
-                                        <option key={t.id} value={t.id}>
-                                            {t.name} (#{t.id})
-                                        </option>
-                                    ))}
-                                </select>
-
-                                {/* Rating */}
-                                <label className="text-light small mb-1">Team Rating</label>
-                                <input
-                                    type="number"
-                                    className="form-control bg-dark text-light mb-3"
-                                    placeholder="Rating..."
-                                    value={newRating}
-                                    onChange={(e) => setNewRating(e.target.value)}
-                                    style={{ maxWidth: 180 }}
-                                />
-
-                                {/* Wins */}
-                                <label className="text-light small mb-1">Wins</label>
-                                <input
-                                    type="number"
-                                    className="form-control bg-dark text-light mb-3"
-                                    placeholder="Wins..."
-                                    value={newWins}
-                                    onChange={(e) => setNewWins(e.target.value)}
-                                    style={{ maxWidth: 180 }}
-                                />
-
-                                {/* Losses */}
-                                <label className="text-light small mb-1">Losses</label>
-                                <input
-                                    type="number"
-                                    className="form-control bg-dark text-light mb-3"
-                                    placeholder="Losses..."
-                                    value={newLosses}
-                                    onChange={(e) => setNewLosses(e.target.value)}
-                                    style={{ maxWidth: 180 }}
-                                />
-
-                                {/* Games Played */}
-                                <label className="text-light small mb-1">Games Played</label>
-                                <input
-                                    type="number"
-                                    className="form-control bg-dark text-light mb-3"
-                                    placeholder="Games Played..."
-                                    value={newGP}
-                                    onChange={(e) => setNewGP(e.target.value)}
-                                    style={{ maxWidth: 180 }}
-                                />
-
-                                <button
-                                    className="btn btn-outline-warning btn-sm mt-2"
-                                    onClick={handleAdjustTeamStats}
-                                >
-                                    💾 Save All Stats
-                                </button>
                             </div>
                         </div>
                     }
@@ -2130,7 +2085,7 @@ export default function LeagueMod() {
                                 Archive Season
                             </button>
 
-                            <button
+                            {/* <button
                                 className="btn btn-outline-warning btn-sm"
                                 onClick={handleResetLeaderboard}
                             >
@@ -2149,9 +2104,9 @@ export default function LeagueMod() {
                                 onClick={handleRebuildELO}
                             >
                                 Rebuild ELO
-                            </button>
+                            </button> */}
 
-                            {/* 🔄 NEW: Sync Discord Roles */}
+                            {/* 🔄  Sync Discord Roles */}
                             <button
                                 className="btn btn-outline-primary btn-sm"
                                 onClick={async () => {

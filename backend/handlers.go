@@ -5917,3 +5917,46 @@ func ModResetMatchSchedule(w http.ResponseWriter, r *http.Request) {
 		"match_id": req.MatchID,
 	})
 }
+
+// POST /api/mod/team/lock
+func HandleModToggleTeamLock(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TeamID uint `json:"team_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.TeamID == 0 {
+		http.Error(w, "Missing team_id", http.StatusBadRequest)
+		return
+	}
+
+	var team Team
+	if err := DB.First(&team, req.TeamID).Error; err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	// 🔄 Toggle state
+	team.Locked = !team.Locked
+
+	if err := DB.Save(&team).Error; err != nil {
+		http.Error(w, "Failed to update lock state", http.StatusInternalServerError)
+		return
+	}
+
+	state := "UNLOCKED"
+	if team.Locked {
+		state = "LOCKED"
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"team_id": team.ID,
+		"locked":  team.Locked,
+		"message": fmt.Sprintf("Team is now %s", state),
+	})
+}

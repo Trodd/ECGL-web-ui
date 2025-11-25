@@ -55,6 +55,7 @@ type Team struct {
 	Matches              int    `json:"matches"`
 	WeeklyChallengesUsed int    `json:"weekly_challenges_used" gorm:"default:0"`
 	AllowChallenges      bool   `json:"allow_challenges" gorm:"default:true"`
+	Locked               bool   `gorm:"default:false"`
 }
 
 // --- Team Member ---
