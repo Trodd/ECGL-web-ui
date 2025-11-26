@@ -11,6 +11,7 @@ import Players from "./pages/Players";
 import Matchups from "./pages/Matchups";
 import PlayerDetail from "./pages/PlayerDetail";
 import MatchDetail from "./pages/MatchDetail";
+import FinalsPage from "./pages/Finals";
 import LeagueMod from "./pages/LeagueMod";
 
 import "bootstrap/dist/css/bootstrap.min.css";
@@ -113,6 +114,12 @@ function App() {
           </NavLink>
         </li>
 
+        {/*<li className="nav-item">
+          <NavLink to="/finals" className="nav-link">
+            🏁 Finals
+          </NavLink>
+        </li>*/}
+
         {/* 🔒 League Mod tab only visible to League Mods */}
         {!loadingUser && user?.is_mod && (
           <li className="nav-item">
@@ -156,6 +163,7 @@ function App() {
             <Route path="/myteam" element={<MyTeam />} />
             <Route path="/players" element={<Players />} />
             <Route path="/players/:id" element={<PlayerDetail />} />
+            <Route path="/finals" element={<FinalsPage />} />
 
             {/* 🛠️ League Mod Route (extra protected inside component) */}
             <Route path="/modpanel" element={<LeagueMod />} />

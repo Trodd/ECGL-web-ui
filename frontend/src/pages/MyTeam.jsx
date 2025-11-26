@@ -129,6 +129,8 @@ export default function MyTeam() {
   }, []);
 
   const { team, roster, matches, requests, myRole } = data;
+  const isLockedByMods = Boolean(team?.locked);
+  const joinDisabled = rosterLocked || isLockedByMods;
   const isCaptain = myRole === "Captain" || myRole === "Co-Captain";
 
   // 🔄 Load current season label (from backend)
@@ -418,49 +420,67 @@ export default function MyTeam() {
                   </div>
 
                   {/* 🔒 Allow Join Requests */}
-                  <div>
+                  <div className="mb-4 border-bottom border-secondary pb-3">
                     <h6 className="text-success mb-2">👥 Join Requests</h6>
-                    <div className="form-check form-switch d-flex align-items-center gap-2">
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        checked={!!team.join_allowed}
-                        disabled={rosterLocked}
-                        onChange={async (e) => {
-                          if (rosterLocked)
-                            return alert(
-                              "🚫 League roster lock is active — cannot change this setting."
-                            );
 
-                          const newAllow = e.target.checked;
-                          try {
-                            setData((prev) => ({
-                              ...prev,
-                              team: { ...prev.team, join_allowed: newAllow },
-                            }));
-                            const res = await axios.post(
-                              `${urlBase}/api/team/toggle-join`,
-                              { team_id: team.id, allow: newAllow },
-                              { withCredentials: true }
-                            );
-                            if (!res.data?.success) throw new Error("Backend rejected");
-                            await loadTeam();
-                          } catch (err) {
-                            console.error("❌ Failed to toggle join requests:", err);
-                            alert("Failed to update join requests setting");
-                            setData((prev) => ({
-                              ...prev,
-                              team: { ...prev.team, join_allowed: !newAllow },
-                            }));
-                          }
-                        }}
-                      />
+                    <div className="d-flex align-items-center gap-2">
+
+                      {/* SWITCH WRAPPER — disable ONLY the switch */}
+                      <div
+                        className="form-check form-switch m-0"
+                        style={joinDisabled ? { opacity: 0.5, pointerEvents: "none" } : {}}
+                      >
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          checked={!!team.join_allowed}
+                          disabled={joinDisabled}
+                          onChange={async (e) => {
+                            if (joinDisabled) return;
+
+                            const newAllow = e.target.checked;
+
+                            try {
+                              setData(prev => ({
+                                ...prev,
+                                team: { ...prev.team, join_allowed: newAllow },
+                              }));
+
+                              const res = await axios.post(
+                                `${urlBase}/api/team/toggle-join`,
+                                { team_id: team.id, allow: newAllow },
+                                { withCredentials: true }
+                              );
+
+                              if (!res.data?.success) throw new Error("Backend rejected");
+                              await loadTeam();
+                            } catch (err) {
+                              console.error("❌ Toggle failed:", err);
+                              setData(prev => ({
+                                ...prev,
+                                team: { ...prev.team, join_allowed: !newAllow },
+                              }));
+                            }
+                          }}
+                        />
+                      </div>
+
+                      {/* LABEL — always explain why it's disabled */}
                       <label className="form-check-label text-light small ms-2">
-                        {rosterLocked
-                          ? "🔒 Locked by League Mods"
-                          : team.join_allowed
-                            ? "✅ Allowed"
-                            : "🚫 Disabled"}
+                        {joinDisabled ? (
+                          <>
+                            {isLockedByMods ? (
+                              <span className="text-warning">🔒 Your team roster is locked.</span>
+                            ) : rosterLocked ? (
+                              <span className="text-warning">🔒 Rosters are Locked league-wide.</span>
+                            ) : null}
+                          </>
+                        ) : (
+                          // Normal active label
+                          <>
+                            {team.join_allowed ? "✅ Allowed" : "🚫 Disabled"}
+                          </>
+                        )}
                       </label>
                     </div>
                   </div>
@@ -528,8 +548,7 @@ export default function MyTeam() {
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          </div>)}
 
         {/* 👥 Roster - bounded width */}
         <h4>👥 Roster</h4>
@@ -871,7 +890,7 @@ export default function MyTeam() {
           </div>
         </section>
       </div>
-    </div>
+    </div >
   );
 }
 

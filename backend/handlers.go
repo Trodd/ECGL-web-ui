@@ -802,6 +802,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 			"join_allowed":           team.JoinAllowed,
 			"allow_challenges":       team.AllowChallenges,
 			"weekly_challenges_used": team.WeeklyChallengesUsed,
+			"locked":                 team.Locked,
 		},
 		"roster":             roster,
 		"matches":            matches,
@@ -1779,6 +1780,19 @@ func HandleToggleTeamJoinAllowed(w http.ResponseWriter, r *http.Request) {
 	}
 	playerID, _ := strconv.ParseInt(discordID, 10, 64)
 
+	// --- Load team ---
+	var team Team
+	if err := DB.First(&team, req.TeamID).Error; err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	// 🚫 HARD BLOCK: team is locked by moderators
+	if team.Locked {
+		http.Error(w, "Team is locked by moderators — cannot enable join requests", http.StatusForbidden)
+		return
+	}
+
 	// --- Check captain/co-captain role ---
 	var member TeamMember
 	if err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, playerID).First(&member).Error; err != nil {
@@ -1797,8 +1811,6 @@ func HandleToggleTeamJoinAllowed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var team Team
-	DB.First(&team, req.TeamID)
 	SendDiscordLog(
 		fmt.Sprintf(
 			"👥 **Join Requests %s** for **%s** (by <@%s>)",
@@ -5940,23 +5952,34 @@ func HandleModToggleTeamLock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🔄 Toggle state
-	team.Locked = !team.Locked
+	// 🔄 Toggle the locked state
+	newLockState := !team.Locked
 
-	if err := DB.Save(&team).Error; err != nil {
+	updateData := map[string]any{
+		"locked": newLockState,
+	}
+
+	// 🚫 If locking → automatically disable join requests
+	if newLockState {
+		updateData["join_allowed"] = false
+	}
+
+	// 🔥 Apply updates
+	if err := DB.Model(&Team{}).Where("id = ?", team.ID).Updates(updateData).Error; err != nil {
 		http.Error(w, "Failed to update lock state", http.StatusInternalServerError)
 		return
 	}
 
-	state := "UNLOCKED"
-	if team.Locked {
-		state = "LOCKED"
+	stateText := "UNLOCKED"
+	if newLockState {
+		stateText = "LOCKED"
 	}
 
 	json.NewEncoder(w).Encode(map[string]any{
-		"success": true,
-		"team_id": team.ID,
-		"locked":  team.Locked,
-		"message": fmt.Sprintf("Team is now %s", state),
+		"success":      true,
+		"team_id":      team.ID,
+		"locked":       newLockState,
+		"join_allowed": updateData["join_allowed"], // always false when locked
+		"message":      fmt.Sprintf("Team is now %s", stateText),
 	})
 }
