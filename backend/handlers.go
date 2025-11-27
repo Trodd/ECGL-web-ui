@@ -2047,15 +2047,16 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save league subs
-	switch req.TeamID {
-	case match.TeamAID:
+	// Normalize: ALWAYS store subs in real TeamA/TeamB order
+	if req.TeamID == match.TeamAID {
+		// Team A submitted → subA is theirs, subB is opponent
 		match.LeagueSubA = subA
 		match.LeagueSubB = subB
-	case match.TeamBID:
+	} else if req.TeamID == match.TeamBID {
+		// Team B submitted → subA and subB must be flipped
 		match.LeagueSubA = subB
 		match.LeagueSubB = subA
-	default:
+	} else {
 		http.Error(w, "Team not part of this match", http.StatusForbidden)
 		return
 	}
@@ -2232,22 +2233,47 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 
 	var rosterA, rosterB []MatchRosterPlayer
 
-	// Try player_history first
+	// ============================================================
+	// 🧊 1) Try frozen snapshot from match_rosters
+	// ============================================================
 	DB.Raw(`
-		SELECT p.id AS player_id, p.display_name, p.username, ph.role
-		FROM player_history ph
-		JOIN players p ON p.id = ph.player_id
-		WHERE ph.team_id = ? AND ph.season = ?
-	`, match.TeamAID, currentSeason).Scan(&rosterA)
+		SELECT player_id, display_name, username, role
+		FROM match_rosters
+		WHERE match_id = ? AND team_id = ?
+		ORDER BY role ASC, display_name ASC
+	`, match.ID, match.TeamAID).Scan(&rosterA)
 
 	DB.Raw(`
-		SELECT p.id AS player_id, p.display_name, p.username, ph.role
-		FROM player_history ph
-		JOIN players p ON p.id = ph.player_id
-		WHERE ph.team_id = ? AND ph.season = ?
-	`, match.TeamBID, currentSeason).Scan(&rosterB)
+		SELECT player_id, display_name, username, role
+		FROM match_rosters
+		WHERE match_id = ? AND team_id = ?
+		ORDER BY role ASC, display_name ASC
+	`, match.ID, match.TeamBID).Scan(&rosterB)
 
-	// 🧩 Fallback to live team_members if empty
+	// ============================================================
+	// 2) Fallback: player_history (same-season)
+	// ============================================================
+	if len(rosterA) == 0 {
+		DB.Raw(`
+			SELECT p.id AS player_id, p.display_name, p.username, ph.role
+			FROM player_history ph
+			JOIN players p ON p.id = ph.player_id
+			WHERE ph.team_id = ? AND ph.season = ?
+		`, match.TeamAID, currentSeason).Scan(&rosterA)
+	}
+
+	if len(rosterB) == 0 {
+		DB.Raw(`
+			SELECT p.id AS player_id, p.display_name, p.username, ph.role
+			FROM player_history ph
+			JOIN players p ON p.id = ph.player_id
+			WHERE ph.team_id = ? AND ph.season = ?
+		`, match.TeamBID, currentSeason).Scan(&rosterB)
+	}
+
+	// ============================================================
+	// 3) Last resort: live team_members
+	// ============================================================
 	if len(rosterA) == 0 {
 		DB.Raw(`
 			SELECT p.id AS player_id, p.display_name, p.username, tm.role
@@ -2287,7 +2313,7 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(cast.Casters, &casterIDs)
 	}
 
-	// 🔁 Convert IDs to strings for JSON (match /api/players & avoid JS precision loss)
+	// Convert IDs to strings for JSON
 	casterStrs := make([]string, 0, len(casterIDs))
 	for _, id := range casterIDs {
 		casterStrs = append(casterStrs, strconv.FormatInt(id, 10))
@@ -2329,7 +2355,6 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 		},
 		"cast": castData,
 	})
-
 }
 
 // helper to safely coerce numbers
@@ -3813,7 +3838,19 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	match.Status = "Completed"
-	DB.Save(&match)
+
+	// Save match first (basic crash prevention)
+	if err := DB.Save(&match).Error; err != nil {
+		log.Printf("❌ Failed to save match %d as Completed: %v", match.ID, err)
+		http.Error(w, "Failed to finalize match", http.StatusInternalServerError)
+		return
+	}
+
+	// ✅ SNAPSHOT ROSTERS FOR THIS MATCH
+	if err := snapshotMatchRosters(match.ID, match.TeamAID, match.TeamBID); err != nil {
+		// Not fatal, just log — match is still completed
+		log.Printf("⚠️ Failed to snapshot rosters for match %d: %v", match.ID, err)
+	}
 
 	// Leaderboard update for teams
 	if match.WinnerID != nil {
@@ -3946,6 +3983,77 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		"status":  "Completed",
 		"message": "Match finalized.",
 	})
+}
+
+// snapshotMatchRosters freezes the rosters for both teams at the time a match is finalized.
+// It is SAFE to call multiple times; it will no-op if data already exists.
+func snapshotMatchRosters(matchID, teamAID, teamBID uint) error {
+	if matchID == 0 || (teamAID == 0 && teamBID == 0) {
+		// Nothing to do
+		return nil
+	}
+
+	// If we already have a snapshot, don't duplicate it
+	var existing int64
+	if err := DB.Model(&MatchRoster{}).
+		Where("match_id = ?", matchID).
+		Count(&existing).Error; err != nil {
+		log.Printf("⚠️ Failed to check existing MatchRoster for match %d: %v", matchID, err)
+		return err
+	}
+	if existing > 0 {
+		// Already snapshotted
+		return nil
+	}
+
+	type row struct {
+		PlayerID    int64
+		TeamID      uint
+		DisplayName string
+		Username    string
+		Role        string
+	}
+
+	var rows []row
+
+	// Pull current team_members + players for both teams
+	if err := DB.Table("team_members").
+		Select(`
+			team_members.player_id AS player_id,
+			team_members.team_id AS team_id,
+			COALESCE(players.display_name, '') AS display_name,
+			COALESCE(players.username, '') AS username,
+			COALESCE(team_members.role, '') AS role`).
+		Joins("JOIN players ON players.id = team_members.player_id").
+		Where("team_members.team_id IN ?", []uint{teamAID, teamBID}).
+		Scan(&rows).Error; err != nil {
+
+		log.Printf("⚠️ Failed to load roster for snapshot (match %d): %v", matchID, err)
+		return err
+	}
+
+	if len(rows) == 0 {
+		// No members found — don't treat as fatal, just log
+		log.Printf("⚠️ No roster rows found to snapshot for match %d", matchID)
+		return nil
+	}
+
+	for _, r := range rows {
+		mr := MatchRoster{
+			MatchID:     matchID,
+			TeamID:      r.TeamID,
+			PlayerID:    r.PlayerID,
+			DisplayName: r.DisplayName,
+			Username:    r.Username,
+			Role:        r.Role,
+		}
+		if err := DB.Create(&mr).Error; err != nil {
+			log.Printf("⚠️ Failed to insert MatchRoster (match %d, player %d): %v", matchID, r.PlayerID, err)
+			// Don't return immediately; try to insert the rest
+		}
+	}
+
+	return nil
 }
 
 // updateLeaderboards updates both team + player leaderboards using ELO from env.

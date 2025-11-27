@@ -152,8 +152,8 @@ export default function Matchups() {
                             const teamBId = Number(m.team_b_id);
 
                             let winner = null;
-                            if (winnerId === teamAId) winner = "A";
-                            else if (winnerId === teamBId) winner = "B";
+                            if (winnerId && winnerId === teamAId) winner = "A";
+                            if (winnerId && winnerId === teamBId) winner = "B";
 
                             return (
                                 <Link
@@ -219,11 +219,13 @@ export default function Matchups() {
                                             Match ID: <b>{m.match_code}</b> | Status:{" "}
                                             <span
                                                 className={
-                                                    ["Completed", "Finished"].includes(m.status)
+                                                    m.status === "Completed"
                                                         ? "text-success"
                                                         : m.status === "Scheduled"
                                                             ? "text-warning"
-                                                            : "text-light"
+                                                            : m.status === "Forfeit" || m.status === "Double Forfeit"
+                                                                ? "text-danger"
+                                                                : "text-secondary"
                                                 }
                                             >
                                                 {m.status}

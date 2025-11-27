@@ -388,7 +388,7 @@ def migrate_matches(include_orphans=True):
 
         # 3) Finished → winner & loser AND map scores exist
         elif winner_id and loser_id and score_count > 0:
-            final_status = "Finished"
+            final_status = "Completed"
 
         # 4) Pending / Proposed cases
         elif status_raw.lower() in ["pending", "tbd", "proposed", ""]:
@@ -592,6 +592,78 @@ def resolve_team_from_player(player_name):
         if r:
             return r[0]  # team_id
 
+def migrate_match_rosters():
+    print("📦 Migrating roster snapshots for completed matches...")
+
+    # 1. Get all completed matches
+    cur.execute("""
+        SELECT id, team_a_id, team_b_id, season
+        FROM matches
+        WHERE status = 'Completed'
+    """)
+    completed_matches = cur.fetchall()
+
+    total = 0
+    created = 0
+    skipped = 0
+
+    for match_id, team_a_id, team_b_id, season in completed_matches:
+        total += 1
+
+        # 2. Check if snapshot already exists
+        cur.execute("SELECT COUNT(*) FROM match_rosters WHERE match_id = %s", (match_id,))
+        exists = cur.fetchone()[0]
+
+        if exists > 0:
+            skipped += 1
+            continue
+
+        # Helper to load roster from player_history
+        def load_history(team_id):
+            cur.execute("""
+                SELECT p.id, p.display_name, p.username, ph.role
+                FROM player_history ph
+                JOIN players p ON p.id = ph.player_id
+                WHERE ph.team_id = %s AND ph.season = %s
+            """, (team_id, season))
+            return cur.fetchall()
+
+        # Fallback: load from team_members
+        def load_live(team_id):
+            cur.execute("""
+                SELECT p.id, p.display_name, p.username, tm.role
+                FROM team_members tm
+                JOIN players p ON p.id = tm.player_id
+                WHERE tm.team_id = %s
+            """, (team_id,))
+            return cur.fetchall()
+
+        # 3. Load roster A
+        roster_a = load_history(team_a_id)
+        if not roster_a:
+            roster_a = load_live(team_a_id)
+
+        # 4. Load roster B
+        roster_b = load_history(team_b_id)
+        if not roster_b:
+            roster_b = load_live(team_b_id)
+
+        # 5. Insert rows
+        def insert_roster(team_id, roster):
+            for player_id, display, user, role in roster:
+                cur.execute("""
+                    INSERT INTO match_rosters (match_id, team_id, player_id, display_name, username, role)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (match_id, team_id, player_id, display, user, role))
+
+        insert_roster(team_a_id, roster_a)
+        insert_roster(team_b_id, roster_b)
+
+        created += 1
+
+    conn.commit()
+    print(f"✅ Roster snapshots complete: total={total}, created={created}, skipped={skipped}")
+
     return None
 
 # === Run Migration (order matters!) ===
@@ -603,6 +675,7 @@ migrate_team_leaderboard()
 migrate_player_history()
 migrate_scoring()  
 migrate_matches()
+migrate_match_rosters()
 
 cur.close()
 conn.close()

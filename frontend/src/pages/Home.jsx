@@ -22,8 +22,8 @@ export default function Home() {
       <hr />
       <h2>📅 Match Types</h2>
       <ul>
-        <li>🔄 <b>Assigned Matches</b> – automatically posted weekly</li>
-        <li>⚔️ <b>Challenge Matches</b> – 1 per team per week</li>
+        <li>🔄 <b>Assigned Matches</b> – matches automatically generated each week by the league.</li>
+        <li>⚔️ <b>Challenge Matches</b> – optional extra matches that teams may choose to schedule (limit: 1 per team per week).</li>
         <li>📅 Each team receives <b>2 scheduled matchups per week</b></li>
         <li>⚠️ Postponed matches must be played before the next week</li>
         <li>🚫 Matches not completed on time are auto-forfeited (ELO loss)</li>

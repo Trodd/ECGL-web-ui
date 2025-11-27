@@ -48,15 +48,26 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
         setScores(preset);
     }, [match.maps, match.team_a_id, team.id]);
 
-    // Load saved league subs (NEW — INSERT THIS)
+    // Load saved league subs — BUT normalize based on which team you are
     useEffect(() => {
-        if (match.league_sub_a !== null && match.league_sub_a !== undefined) {
-            setSelectedSubA(String(match.league_sub_a));
+        const subA = match.league_sub_a ? String(match.league_sub_a) : "";
+        const subB = match.league_sub_b ? String(match.league_sub_b) : "";
+
+        if (team.id === match.team_a_id) {
+            // You are Team A → store normally
+            setSelectedSubA(subA);
+            setSelectedSubB(subB);
+        } else {
+            // You are Team B → flip perspective
+            setSelectedSubA(subB);
+            setSelectedSubB(subA);
         }
-        if (match.league_sub_b !== null && match.league_sub_b !== undefined) {
-            setSelectedSubB(String(match.league_sub_b));
-        }
-    }, [match.league_sub_a, match.league_sub_b]);
+    }, [
+        match.league_sub_a,
+        match.league_sub_b,
+        match.team_a_id,
+        team.id
+    ]);
 
     // 🔄 Load League Subs once
     useEffect(() => {

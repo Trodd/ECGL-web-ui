@@ -35,8 +35,17 @@ export default function MatchDetail() {
     // Helper: Safe name lookup
     function getPlayerName(id) {
         if (!id) return "None";
-        const p = players.find((x) => String(x.id) === String(id));
-        return p ? p.display_name || p.username : "Unknown";
+
+        // 1) Look inside rosterA / rosterB (frozen snapshot first)
+        const allRoster = [...rosterA, ...rosterB];
+        const snap = allRoster.find(r => String(r.player_id) === String(id));
+        if (snap) return snap.display_name || snap.username;
+
+        // 2) Fall back to global players list
+        const p = players.find(x => String(x.id) === String(id));
+        if (p) return p.display_name || p.username;
+
+        return "Unknown";
     }
 
     // -----------------------------------------------------

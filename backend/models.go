@@ -162,3 +162,14 @@ type CastLogMulti struct {
 	CameraID  int64          `json:"camera_id"`
 	CreatedAt time.Time      `json:"created_at"`
 }
+
+type MatchRoster struct {
+	ID          uint   `gorm:"primaryKey"`
+	MatchID     uint   `gorm:"index"`
+	TeamID      uint   `gorm:"index"`
+	PlayerID    int64  `gorm:"index"`
+	DisplayName string `gorm:"size:100"`
+	Username    string `gorm:"size:100"`
+	Role        string `gorm:"size:50"`
+	CreatedAt   time.Time
+}
