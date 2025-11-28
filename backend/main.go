@@ -685,6 +685,17 @@ func main() {
 	api.HandleFunc("/leaderboard/players", GetPlayerLeaderboard).Methods("GET")
 	api.HandleFunc("/leaderboard/teams", GetTeamLeaderboard).Methods("GET")
 
+	// --- Finals (public) ---
+	api.HandleFunc("/finals/teams", HandleGetFinalsTeams).Methods("GET")
+	api.HandleFunc("/finals/bracket", HandleGetFinalsBracket).Methods("GET")
+
+	// --- Finals (mod tools) ---
+	api.HandleFunc("/mod/finals/add-team", HandleModFinalsAddTeam).Methods("POST")
+	api.HandleFunc("/mod/finals/remove-team", HandleModFinalsRemoveTeam).Methods("POST")
+	api.HandleFunc("/mod/finals/generate", HandleModFinalsGenerate).Methods("POST")
+	api.HandleFunc("/mod/finals/reset", HandleModFinalsReset).Methods("POST")
+	api.HandleFunc("/mod/finals/update-match", HandleModFinalsUpdateMatch).Methods("POST")
+
 	// STATIC FRONTEND + SPA FALLBACK
 	distDir := "../frontend/dist"
 

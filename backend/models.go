@@ -96,6 +96,10 @@ type Match struct {
 	LeagueSubA             *int64         `json:"league_sub_a"`
 	LeagueSubB             *int64         `json:"league_sub_b"`
 	CoinFlip               string         `json:"coin_flip" gorm:"default:''"`
+	IsFinals               bool           `json:"is_finals" gorm:"default:false"`
+	Bracket                string         `json:"bracket" gorm:"default:''"`      // "winners", "losers", "grand_final"
+	BracketRound           int            `json:"bracket_round" gorm:"default:0"` // 1,2,...
+	BracketSlot            int            `json:"bracket_slot" gorm:"default:0"`  // match index within the round
 }
 
 // --- Match Score ---
@@ -172,4 +176,13 @@ type MatchRoster struct {
 	Username    string `gorm:"size:100"`
 	Role        string `gorm:"size:50"`
 	CreatedAt   time.Time
+}
+
+// --- Finals models ---
+
+type FinalsTeam struct {
+	ID     uint   `json:"id" gorm:"primaryKey"`
+	Season string `json:"season"`
+	TeamID uint   `json:"team_id"`
+	Seed   int    `json:"seed"` // 1 = top seed
 }

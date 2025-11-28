@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import FinalsBracket from "./Finals";
 
 export default function LeagueMod() {
     const [me, setMe] = useState(null);
@@ -60,6 +61,10 @@ export default function LeagueMod() {
     const [teamLosses, setTeamLosses] = useState("");
     const [teamGames, setTeamGames] = useState("");
     const [activeTab, setActiveTab] = useState("info");
+
+    // Finals data
+    const [finalsTeams, setFinalsTeams] = useState([]);
+    const [finalsBracket, setFinalsBracket] = useState(null);
 
     useEffect(() => {
         async function loadPlayers() {
@@ -203,6 +208,7 @@ export default function LeagueMod() {
                     });
                 }
                 setMatches(matchList);
+                loadFinals();
             } catch (err) {
                 console.error("❌ Failed to load lists:", err);
                 setMsg("⚠️ Failed to load team/match data.");
@@ -225,6 +231,21 @@ export default function LeagueMod() {
         } catch (err) {
             console.error("❌ Failed to load teams:", err);
             setMsg("⚠️ Failed to refresh teams.");
+        }
+    }
+
+    async function loadFinals() {
+        try {
+            const [teamsRes, bracketRes] = await Promise.all([
+                axios.get(`${urlBase}/api/finals/teams`, { withCredentials: true }),
+                axios.get(`${urlBase}/api/finals/bracket`, { withCredentials: true })
+            ]);
+
+            setFinalsTeams(teamsRes.data || []);
+            setFinalsBracket(bracketRes.data || null);
+
+        } catch (err) {
+            console.error("❌ Failed to load finals:", err);
         }
     }
 
@@ -1243,7 +1264,7 @@ export default function LeagueMod() {
                                                         };
 
 
-                                                        await axios.post(`${urlBase}/api/mod/match/set-maps`, payload, { withCredentials: true });
+                                                        await axios.post(`${urlBase}/mod/match/set-maps`, payload, { withCredentials: true });
 
                                                         setMsg(
                                                             `✅ Saved map scores for ${match.match_code}: ${match.team_a} vs ${match.team_b}`
@@ -2127,6 +2148,128 @@ export default function LeagueMod() {
                                 🔄 Sync Roles
                             </button>
 
+                        </div>
+                    }
+                />
+                {/* 🏆 FINALS MANAGEMENT */}
+                <AccordionItem
+                    id="finalsManagement"
+                    title="🏆 Finals Setup & Bracket Tools"
+                    children={
+                        <div className="text-light">
+
+                            {/* Status Message */}
+                            {msg && (
+                                <div className={`alert ${msg.startsWith("✅") ? "alert-success" :
+                                    msg.startsWith("⚠️") ? "alert-warning" :
+                                        "alert-danger"
+                                    } small`}>
+                                    {msg}
+                                </div>
+                            )}
+
+                            {/* FINALS TEAMS */}
+                            <div className="p-3 mb-4 rounded"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}>
+
+                                <h5 className="text-info mb-3">🏅 Finals Teams</h5>
+
+                                {/* List finals teams */}
+                                <ul className="list-group mb-3">
+                                    {finalsTeams?.length > 0 ? (
+                                        finalsTeams.map((t) => (
+                                            <li key={t.id} className="list-group-item bg-dark text-light d-flex justify-content-between align-items-center">
+                                                <span>{t.name}</span>
+                                                <button
+                                                    className="btn btn-sm btn-outline-danger"
+                                                    onClick={() =>
+                                                        safePost(
+                                                            "/api/mod/finals/remove-team",
+                                                            { team_id: t.id },
+                                                            `Removed ${t.name} from Finals`
+                                                        ).then(loadFinals)
+                                                    }
+                                                >
+                                                    Remove
+                                                </button>
+                                            </li>
+                                        ))
+                                    ) : (
+                                        <li className="list-group-item bg-dark text-muted">No finals teams selected.</li>
+                                    )}
+                                </ul>
+
+                                {/* Add team */}
+                                <h6 className="text-light mb-2">➕ Add a Team to Finals</h6>
+                                <div className="d-flex gap-2 flex-wrap">
+                                    <select
+                                        className="form-select bg-dark text-light"
+                                        id="addFinalsTeamSelect"
+                                        style={{ maxWidth: 300 }}
+                                        onChange={(e) => {
+                                            const tid = e.target.value;
+                                            if (!tid) return;
+                                            safePost(
+                                                "/api/mod/finals/add-team",
+                                                { team_id: parseInt(tid) },
+                                                "Added team to Finals"
+                                            ).then(loadFinals);
+                                        }}
+                                    >
+                                        <option value="">Select team…</option>
+                                        {teams.map((t) => (
+                                            <option key={t.id} value={t.id}>{t.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
+                            {/* BRACKET MANAGEMENT */}
+                            <div className="p-3 mb-4 rounded"
+                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}>
+
+                                <h5 className="text-warning mb-3">📊 Bracket Management</h5>
+
+                                <div className="d-flex flex-wrap gap-2 mb-3">
+                                    <button
+                                        className="btn btn-outline-success btn-sm"
+                                        onClick={() =>
+                                            safePost(
+                                                "/api/mod/finals/generate",
+                                                {},
+                                                "Generated Finals Bracket"
+                                            ).then(loadFinals)
+                                        }
+                                    >
+                                        🚀 Generate Bracket
+                                    </button>
+
+                                    <button
+                                        className="btn btn-outline-danger btn-sm"
+                                        onClick={() =>
+                                            safePost(
+                                                "/api/mod/finals/reset",
+                                                {},
+                                                "Reset Finals Bracket"
+                                            ).then(loadFinals)
+                                        }
+                                    >
+                                        ♻️ Reset Bracket
+                                    </button>
+                                </div>
+
+                                {/* BRACKET DISPLAY */}
+                                <FinalsBracket
+                                    bracket={finalsBracket}
+                                    onWinnerSelect={(payload) =>
+                                        safePost(
+                                            "/mod/finals/update-match",
+                                            payload,
+                                            "Updated match"
+                                        ).then(loadFinals)
+                                    }
+                                />
+                            </div>
                         </div>
                     }
                 />

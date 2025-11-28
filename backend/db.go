@@ -50,7 +50,7 @@ func InitDB() {
 	// Auto-migrate schema
 	err = DB.AutoMigrate(
 		&Player{}, &Team{}, &TeamMember{}, &TeamJoinRequest{},
-		&Match{}, &MatchScore{}, &PlayerHistory{}, &CastLog{}, &CastLogMulti{}, &MatchRoster{},
+		&Match{}, &MatchScore{}, &PlayerHistory{}, &CastLog{}, &CastLogMulti{}, &MatchRoster{}, &FinalsTeam{},
 	)
 	if err != nil {
 		log.Fatal("❌ Migration failed:", err)

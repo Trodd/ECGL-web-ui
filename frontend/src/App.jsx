@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Routes, Route, NavLink } from "react-router-dom";
+import { Routes, Route, NavLink, Link } from "react-router-dom";
 import ErrorBoundary from "./ErrorBoundary";
 import Home from "./pages/Home";
 import Teams from "./pages/Teams";
@@ -11,7 +11,7 @@ import Players from "./pages/Players";
 import Matchups from "./pages/Matchups";
 import PlayerDetail from "./pages/PlayerDetail";
 import MatchDetail from "./pages/MatchDetail";
-import FinalsPage from "./pages/Finals";
+import Finals from "./pages/Finals";
 import LeagueMod from "./pages/LeagueMod";
 
 import "bootstrap/dist/css/bootstrap.min.css";
@@ -103,6 +103,12 @@ function App() {
         </li>
 
         <li className="nav-item">
+          <Link className="nav-link" to="/finals">
+            🏆 Finals
+          </Link>
+        </li>
+
+        <li className="nav-item">
           <NavLink to="/matchups" className="nav-link">
             📅 Matchups
           </NavLink>
@@ -163,7 +169,7 @@ function App() {
             <Route path="/myteam" element={<MyTeam />} />
             <Route path="/players" element={<Players />} />
             <Route path="/players/:id" element={<PlayerDetail />} />
-            <Route path="/finals" element={<FinalsPage />} />
+            <Route path="/finals" element={<Finals />} />
 
             {/* 🛠️ League Mod Route (extra protected inside component) */}
             <Route path="/modpanel" element={<LeagueMod />} />

@@ -1382,19 +1382,23 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
         JOIN teams t2 ON t2.id = m.team_b_id
         
         -- 🔥 Proper season/week sorting (DESC = Newest on top)
-        ORDER BY 
-            CASE 
-                WHEN split_part(m.match_code, '-', 1) ~ '^[0-9]+$' 
-                THEN CAST(split_part(m.match_code, '-', 1) AS INTEGER)
-                ELSE 0
-            END DESC,
-            CAST(
-                split_part(
-                    split_part(m.match_code, 'Week', 2),
-                    '-', 1
-                ) AS INTEGER
-            ) DESC,
-            m.match_code DESC
+        ORDER BY
+			-- Season number
+			CASE 
+				WHEN split_part(m.match_code, '-', 1) ~ '^[0-9]+$' 
+				THEN CAST(split_part(m.match_code, '-', 1) AS INTEGER)
+				ELSE 0
+			END DESC,
+
+			-- Week number if numeric, Finals = 999
+			CASE
+				WHEN m.match_code ILIKE '%Week%' 
+					AND split_part(split_part(m.match_code, 'Week', 2), '-', 1) ~ '^[0-9]+$'
+				THEN CAST(split_part(split_part(m.match_code, 'Week', 2), '-', 1) AS INTEGER)
+				ELSE 999
+			END DESC,
+
+			m.id DESC
     `).Scan(&rows).Error; err != nil {
 		log.Printf("❌ HandlePublicMatches query failed: %v", err)
 		http.Error(w, "failed to fetch matches", http.StatusInternalServerError)
@@ -1437,8 +1441,8 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 		normalized = append(normalized, PublicMatch{
 			ID:            m.ID,
 			MatchCode:     m.MatchCode,
-			Season:        fmt.Sprintf("%v", seasonLabel),
-			Week:          fmt.Sprintf("%v", weekLabel),
+			Season:        seasonLabel,
+			Week:          weekLabel,
 			TeamAID:       m.TeamAID,
 			TeamA:         m.TeamA,
 			TeamBID:       m.TeamBID,
@@ -2414,23 +2418,33 @@ func HandleGetTeamMatches(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func deriveSeasonAndWeek(matchCode string) (string, string) {
-	// Example: "1-Week1-M004" → Season=1, Week=1
-	// Example: "Week1-M004" → Season="Preseason", Week=1
-	parts := strings.Split(matchCode, "-")
-
-	if len(parts) >= 3 && strings.Contains(parts[1], "Week") {
-		// Case: 1-Week1-M004
-		season := parts[0]
-		week := strings.TrimPrefix(parts[1], "Week")
-		return season, week
-	} else if len(parts) >= 2 && strings.HasPrefix(parts[0], "Week") {
-		// Case: Week1-M004
-		week := strings.TrimPrefix(parts[0], "Week")
-		return "Preseason", week
+func deriveSeasonAndWeek(code string) (string, string) {
+	parts := strings.Split(code, "-")
+	if len(parts) < 2 {
+		return "Unknown", "?"
 	}
 
-	return "Preseason", "?"
+	season := parts[0]
+
+	// Finals detection (MXXX or any "Finals" token)
+	if len(parts) >= 3 && strings.EqualFold(parts[1], "Finals") {
+		return season, "Finals"
+	}
+
+	// Normal Week parsing
+	if strings.Contains(code, "Week") {
+		after := strings.SplitN(code, "Week", 2)[1]
+		week := strings.Split(after, "-")[0]
+
+		week = strings.TrimSpace(week)
+		if week == "" {
+			return season, "?"
+		}
+		return season, week
+	}
+
+	// Default fallback
+	return season, "?"
 }
 
 // --- Get all matches for a player (with historical team data) ---
@@ -3846,21 +3860,40 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🚀 FINALS AUTO-ADVANCEMENT
+	if match.IsFinals && match.WinnerID != nil {
+		go advanceFinalsBracket(match) // async, non-blocking, crash-safe
+	}
+
 	// ✅ SNAPSHOT ROSTERS FOR THIS MATCH
 	if err := snapshotMatchRosters(match.ID, match.TeamAID, match.TeamBID); err != nil {
 		// Not fatal, just log — match is still completed
 		log.Printf("⚠️ Failed to snapshot rosters for match %d: %v", match.ID, err)
 	}
 
+	// Load team records BEFORE leaderboard updates
+	var teamA, teamB Team
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+
+	// 🛑 Finals should NOT update leaderboard, stats, ratings, subs
+	if match.IsFinals {
+		log.Printf("🏆 Finals match %d confirmed — skipping leaderboard, ratings, and sub stats", match.ID)
+
+		// Still send final embeds & continue normally
+		// But return BEFORE stats changes below
+		respondJSON(w, map[string]any{
+			"success": true,
+			"status":  "Completed (Finals)",
+			"message": "Finals match completed — leaderboard & ratings were not updated.",
+		})
+		return
+	}
+
 	// Leaderboard update for teams
 	if match.WinnerID != nil {
 		updateLeaderboards(*match.WinnerID, *match.LoserID)
 	}
-
-	// Load team records
-	var teamA, teamB Team
-	DB.First(&teamA, match.TeamAID)
-	DB.First(&teamB, match.TeamBID)
 
 	// 🧍 APPLY LEAGUE SUB STATS
 	applySubStats := func(subID *int64, won bool, teamID uint, teamName string) {
@@ -6090,4 +6123,631 @@ func HandleModToggleTeamLock(w http.ResponseWriter, r *http.Request) {
 		"join_allowed": updateData["join_allowed"], // always false when locked
 		"message":      fmt.Sprintf("Team is now %s", stateText),
 	})
+}
+
+// --- Finals Bracket DTOs ---
+
+type finalsBracketMatch struct {
+	TeamA   string `json:"team_a"`
+	TeamB   string `json:"team_b"`
+	TeamAID uint   `json:"team_a_id"`
+	TeamBID uint   `json:"team_b_id"`
+	Winner  string `json:"winner"`
+}
+
+type finalsBracketResponse struct {
+	Winners       [][]finalsBracketMatch `json:"winners"`
+	Losers        [][]finalsBracketMatch `json:"losers"`
+	GrandFinal    *finalsBracketMatch    `json:"grand_final"`
+	ResetPossible bool                   `json:"reset_possible"`
+}
+
+// GET /api/finals/teams
+func HandleGetFinalsTeams(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	season := strings.TrimSpace(currentSeason)
+	if season == "" {
+		season = "0"
+	}
+
+	var finals []FinalsTeam
+	if err := DB.Where("season = ?", season).Order("seed ASC").Find(&finals).Error; err != nil {
+		log.Printf("❌ HandleGetFinalsTeams: DB error: %v", err)
+		http.Error(w, "Failed to load finals teams", http.StatusInternalServerError)
+		return
+	}
+
+	if len(finals) == 0 {
+		// No finals set up yet – let frontend show "No Finals"
+		respondJSON(w, []any{})
+		return
+	}
+
+	// Load team names in one query for crash-safe mapping
+	teamIDs := make([]uint, 0, len(finals))
+	for _, ft := range finals {
+		if ft.TeamID != 0 {
+			teamIDs = append(teamIDs, ft.TeamID)
+		}
+	}
+
+	teamNames := map[uint]string{}
+	if len(teamIDs) > 0 {
+		var teams []Team
+		if err := DB.Where("id IN ?", teamIDs).Find(&teams).Error; err != nil {
+			log.Printf("⚠️ HandleGetFinalsTeams: team lookup failed: %v", err)
+		} else {
+			for _, t := range teams {
+				teamNames[t.ID] = t.Name
+			}
+		}
+	}
+
+	out := make([]map[string]any, 0, len(finals))
+	for _, ft := range finals {
+		out = append(out, map[string]any{
+			"team_id": ft.TeamID,
+			"name":    teamNames[ft.TeamID],
+			"seed":    ft.Seed,
+		})
+	}
+
+	respondJSON(w, out)
+}
+
+// GET /api/finals/bracket
+func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	season := strings.TrimSpace(currentSeason)
+	if season == "" {
+		season = "0"
+	}
+
+	// Load all finals matches for this season
+	var matches []Match
+	if err := DB.Where("season = ? AND is_finals = ?", season, true).Find(&matches).Error; err != nil {
+		log.Printf("❌ HandleGetFinalsBracket: DB error: %v", err)
+		http.Error(w, "Failed to load finals bracket", http.StatusInternalServerError)
+		return
+	}
+
+	if len(matches) == 0 {
+		http.Error(w, "No finals bracket", http.StatusNotFound)
+		return
+	}
+
+	// Collect team IDs from matches
+	teamIDsSet := map[uint]bool{}
+	for _, m := range matches {
+		if m.TeamAID != 0 {
+			teamIDsSet[m.TeamAID] = true
+		}
+		if m.TeamBID != 0 {
+			teamIDsSet[m.TeamBID] = true
+		}
+		if m.WinnerID != nil {
+			teamIDsSet[*m.WinnerID] = true
+		}
+	}
+
+	teamIDs := make([]uint, 0, len(teamIDsSet))
+	for id := range teamIDsSet {
+		teamIDs = append(teamIDs, id)
+	}
+
+	teamNames := map[uint]string{}
+	if len(teamIDs) > 0 {
+		var teams []Team
+		if err := DB.Where("id IN ?", teamIDs).Find(&teams).Error; err != nil {
+			log.Printf("⚠️ HandleGetFinalsBracket: team lookup failed: %v", err)
+		} else {
+			for _, t := range teams {
+				teamNames[t.ID] = t.Name
+			}
+		}
+	}
+
+	name := func(id uint) string {
+		if id == 0 {
+			return "TBD"
+		}
+		if n, ok := teamNames[id]; ok && strings.TrimSpace(n) != "" {
+			return n
+		}
+		return fmt.Sprintf("Team #%d", id)
+	}
+
+	toDTO := func(list []Match) []finalsBracketMatch {
+		out := make([]finalsBracketMatch, 0, len(list))
+		for _, m := range list {
+			winner := "TBD"
+			if m.WinnerID != nil {
+				winner = name(*m.WinnerID)
+			}
+			out = append(out, finalsBracketMatch{
+				TeamA:   name(m.TeamAID),
+				TeamB:   name(m.TeamBID),
+				TeamAID: m.TeamAID,
+				TeamBID: m.TeamBID,
+				Winner:  winner,
+			})
+		}
+		return out
+	}
+
+	// Load rounds by bracket/round using SQL order instead of Go sort (less crash-prone)
+	var wbR1, wbR2, lbR1, lbR2, gfList []Match
+
+	DB.Where("season = ? AND is_finals = ? AND bracket = ? AND bracket_round = ?", season, true, "winners", 1).
+		Order("bracket_slot ASC").Find(&wbR1)
+	DB.Where("season = ? AND is_finals = ? AND bracket = ? AND bracket_round = ?", season, true, "winners", 2).
+		Order("bracket_slot ASC").Find(&wbR2)
+
+	DB.Where("season = ? AND is_finals = ? AND bracket = ? AND bracket_round = ?", season, true, "losers", 1).
+		Order("bracket_slot ASC").Find(&lbR1)
+	DB.Where("season = ? AND is_finals = ? AND bracket = ? AND bracket_round = ?", season, true, "losers", 2).
+		Order("bracket_slot ASC").Find(&lbR2)
+
+	DB.Where("season = ? AND is_finals = ? AND bracket = ?", season, true, "grand_final").
+		Order("bracket_round ASC, bracket_slot ASC").Find(&gfList)
+
+	// If literally nothing is categorized, bail out safely
+	if len(wbR1)+len(wbR2)+len(lbR1)+len(lbR2)+len(gfList) == 0 {
+		http.Error(w, "No finals bracket", http.StatusNotFound)
+		return
+	}
+
+	resp := finalsBracketResponse{
+		Winners: [][]finalsBracketMatch{
+			toDTO(wbR1),
+			toDTO(wbR2),
+		},
+		Losers: [][]finalsBracketMatch{
+			toDTO(lbR1),
+			toDTO(lbR2),
+		},
+		ResetPossible: true, // purely for UI text for now
+	}
+
+	if len(gfList) > 0 {
+		dto := toDTO(gfList)
+		if len(dto) > 0 {
+			resp.GrandFinal = &dto[0]
+		}
+	}
+
+	respondJSON(w, resp)
+}
+
+// POST /api/mod/finals/add-team
+func HandleModFinalsAddTeam(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		TeamID uint `json:"team_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TeamID == 0 {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	var team Team
+	if err := DB.First(&team, req.TeamID).Error; err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	season := strings.TrimSpace(currentSeason)
+	if season == "" {
+		season = "0"
+	}
+
+	// Avoid duplicates
+	var existing FinalsTeam
+	if err := DB.Where("season = ? AND team_id = ?", season, team.ID).First(&existing).Error; err == nil {
+		modJSONErr(w, http.StatusBadRequest, "Team already added to finals")
+		return
+	}
+
+	var maxSeed int64
+	if err := DB.Model(&FinalsTeam{}).
+		Where("season = ?", season).
+		Select("COALESCE(MAX(seed), 0)").Scan(&maxSeed).Error; err != nil {
+		log.Printf("⚠️ HandleModFinalsAddTeam: failed to get max seed: %v", err)
+		maxSeed = 0
+	}
+
+	ft := FinalsTeam{
+		Season: season,
+		TeamID: team.ID,
+		Seed:   int(maxSeed) + 1,
+	}
+
+	if err := DB.Create(&ft).Error; err != nil {
+		log.Printf("❌ HandleModFinalsAddTeam: DB error: %v", err)
+		http.Error(w, "Failed to add finals team", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"team": map[string]any{
+			"team_id": ft.TeamID,
+			"name":    team.Name,
+			"seed":    ft.Seed,
+		},
+	})
+}
+
+// POST /api/mod/finals/remove-team
+func HandleModFinalsRemoveTeam(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		TeamID uint `json:"team_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TeamID == 0 {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	season := strings.TrimSpace(currentSeason)
+	if season == "" {
+		season = "0"
+	}
+
+	if err := DB.Where("season = ? AND team_id = ?", season, req.TeamID).
+		Delete(&FinalsTeam{}).Error; err != nil {
+		log.Printf("❌ HandleModFinalsRemoveTeam: DB error: %v", err)
+		http.Error(w, "Failed to remove finals team", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+	})
+}
+
+// POST /api/mod/finals/generate
+func HandleModFinalsGenerate(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	season := strings.TrimSpace(currentSeason)
+	if season == "" {
+		season = "0"
+	}
+
+	// Load finals teams
+	var finalsTeams []FinalsTeam
+	if err := DB.Where("season = ?", season).Order("seed ASC").Find(&finalsTeams).Error; err != nil {
+		log.Printf("❌ HandleModFinalsGenerate: DB error: %v", err)
+		http.Error(w, "Failed to load finals teams", http.StatusInternalServerError)
+		return
+	}
+
+	if len(finalsTeams) != 4 {
+		modJSONErr(w, http.StatusBadRequest,
+			fmt.Sprintf("Finals currently supports exactly 4 teams; you have %d", len(finalsTeams)))
+		return
+	}
+
+	// Seed → TeamID lookup
+	seedToTeam := map[int]uint{}
+	for _, ft := range finalsTeams {
+		seedToTeam[ft.Seed] = ft.TeamID
+	}
+
+	for s := 1; s <= 4; s++ {
+		if seedToTeam[s] == 0 {
+			modJSONErr(w, http.StatusBadRequest, "Missing seeds 1–4 for finals")
+			return
+		}
+	}
+
+	// Cleanup old finals matches
+	var oldMatches []Match
+	if err := DB.Where("season = ? AND is_finals = ?", season, true).Find(&oldMatches).Error; err != nil {
+		log.Printf("⚠️ FinalsGenerate: failed to load old finals: %v", err)
+	} else if len(oldMatches) > 0 {
+		ids := make([]uint, 0, len(oldMatches))
+		for _, m := range oldMatches {
+			ids = append(ids, m.ID)
+		}
+
+		// Remove map score rows safely
+		if err := DB.Where("match_id IN ?", ids).Delete(&MatchScore{}).Error; err != nil {
+			log.Printf("⚠️ FinalsGenerate: failed to delete old map scores: %v", err)
+		}
+
+		// Remove matches
+		if err := DB.Where("id IN ?", ids).Delete(&Match{}).Error; err != nil {
+			log.Printf("⚠️ FinalsGenerate: failed to delete old finals matches: %v", err)
+		}
+	}
+
+	// 🎯 Correct Match builder for your schema
+	newFinalsMatch := func(code, bracket string, round, slot int, teamA, teamB uint) Match {
+		now := time.Now()
+		sysID := int64(0)
+
+		return Match{
+			MatchCode:    code,
+			Season:       season,
+			Week:         "FINALS",
+			TeamAID:      teamA,
+			TeamBID:      teamB,
+			Status:       "Pending", // Same behavior as unscheduled matches
+			ProposedDate: &now,
+			ProposerID:   &sysID,
+
+			// Finals-only metadata
+			IsFinals:     true,
+			Bracket:      bracket,
+			BracketRound: round,
+			BracketSlot:  slot,
+		}
+	}
+
+	// Build bracket
+	code := func(n int) string {
+		return fmt.Sprintf("%s-Finals-M%03d", season, n)
+	}
+
+	matchesToCreate := []Match{
+		// M001 – Winners R1 Match 1
+		newFinalsMatch(
+			code(1),
+			"winners", 1, 1,
+			seedToTeam[1], seedToTeam[4],
+		),
+
+		// M002 – Winners R1 Match 2
+		newFinalsMatch(
+			code(2),
+			"winners", 1, 2,
+			seedToTeam[2], seedToTeam[3],
+		),
+
+		// M003 – Winners Final
+		newFinalsMatch(
+			code(3),
+			"winners", 2, 1,
+			0, 0,
+		),
+
+		// M004 – Losers Round 1
+		newFinalsMatch(
+			code(4),
+			"losers", 1, 1,
+			0, 0,
+		),
+
+		// M005 – Losers Round 2
+		newFinalsMatch(
+			code(5),
+			"losers", 2, 1,
+			0, 0,
+		),
+
+		// M006 – Grand Final
+		newFinalsMatch(
+			code(6),
+			"grand_final", 1, 1,
+			0, 0,
+		),
+	}
+
+	// Save to DB
+	for i := range matchesToCreate {
+		if err := DB.Create(&matchesToCreate[i]).Error; err != nil {
+			log.Printf("❌ FinalsGenerate: failed to create match %s: %v",
+				matchesToCreate[i].MatchCode, err)
+			http.Error(w, "Failed to generate finals bracket", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"count":   len(matchesToCreate),
+	})
+}
+
+// POST /api/mod/finals/reset
+func HandleModFinalsReset(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	season := strings.TrimSpace(currentSeason)
+	if season == "" {
+		season = "0"
+	}
+
+	// Delete finals teams
+	if err := DB.Where("season = ?", season).Delete(&FinalsTeam{}).Error; err != nil {
+		log.Printf("❌ HandleModFinalsReset: failed to delete finals teams: %v", err)
+		http.Error(w, "Failed to reset finals teams", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete finals matches + map scores
+	var matches []Match
+	if err := DB.Where("season = ? AND is_finals = ?", season, true).Find(&matches).Error; err != nil {
+		log.Printf("⚠️ HandleModFinalsReset: failed to load finals matches: %v", err)
+	} else if len(matches) > 0 {
+		ids := make([]uint, 0, len(matches))
+		for _, m := range matches {
+			ids = append(ids, m.ID)
+		}
+		if err := DB.Where("match_id IN ?", ids).Delete(&MatchScore{}).Error; err != nil {
+			log.Printf("⚠️ HandleModFinalsReset: failed to delete finals map scores: %v", err)
+		}
+		if err := DB.Where("id IN ?", ids).Delete(&Match{}).Error; err != nil {
+			log.Printf("⚠️ HandleModFinalsReset: failed to delete finals matches: %v", err)
+		}
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+	})
+}
+
+// POST /api/mod/finals/update-match
+func HandleModFinalsUpdateMatch(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		MatchID uint   `json:"match_id"`
+		Bracket string `json:"bracket"`
+		Round   int    `json:"round"`
+		Slot    int    `json:"slot"`
+		Winner  uint   `json:"winner"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Winner == 0 {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	var match Match
+
+	// Load by ID OR bracket metadata
+	if req.MatchID != 0 {
+		if err := DB.First(&match, req.MatchID).Error; err != nil {
+			http.Error(w, "Match not found", http.StatusNotFound)
+			return
+		}
+	} else {
+		season := strings.TrimSpace(currentSeason)
+		if season == "" {
+			season = "0"
+		}
+
+		if err := DB.Where(
+			"season = ? AND is_finals = ? AND bracket = ? AND bracket_round = ? AND bracket_slot = ?",
+			season, true, req.Bracket, req.Round, req.Slot,
+		).First(&match).Error; err != nil {
+			http.Error(w, "Finals match not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	// Validate winner belongs to match
+	if req.Winner != match.TeamAID && req.Winner != match.TeamBID {
+		http.Error(w, "Winner not in this match", http.StatusBadRequest)
+		return
+	}
+
+	// Apply winner + loser
+	match.WinnerID = &req.Winner
+	if req.Winner == match.TeamAID {
+		match.LoserID = &match.TeamBID
+	} else {
+		match.LoserID = &match.TeamAID
+	}
+
+	match.Status = "Completed"
+
+	// Save
+	if err := DB.Save(&match).Error; err != nil {
+		http.Error(w, "Failed to save match", http.StatusInternalServerError)
+		return
+	}
+
+	advanceFinalsBracket(match)
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"updated": match.ID,
+	})
+}
+
+func advanceFinalsBracket(m Match) {
+	season := strings.TrimSpace(currentSeason)
+	if season == "" {
+		season = "0"
+	}
+
+	if m.WinnerID == nil {
+		return
+	}
+	winner := *m.WinnerID
+
+	var loser uint
+	if *m.WinnerID == m.TeamAID {
+		loser = m.TeamBID
+	} else {
+		loser = m.TeamAID
+	}
+
+	forward := func(bracket string, round, slot int, teamID uint) {
+		var next Match
+		err := DB.Where(
+			"season = ? AND is_finals = ? AND bracket = ? AND bracket_round = ? AND bracket_slot = ?",
+			season, true, bracket, round, slot,
+		).First(&next).Error
+
+		if err != nil {
+			log.Printf("⚠️ Finals auto-advance: missing target (%s R%d S%d)", bracket, round, slot)
+			return
+		}
+
+		if next.TeamAID == 0 {
+			next.TeamAID = teamID
+		} else if next.TeamBID == 0 {
+			next.TeamBID = teamID
+		} else {
+			log.Printf("⚠️ Finals auto-advance: target match full (%s R%d S%d)", bracket, round, slot)
+			return
+		}
+
+		if err := DB.Save(&next).Error; err != nil {
+			log.Printf("❌ Finals auto-advance: failed to save next match: %v", err)
+		}
+	}
+
+	// --- ADVANCEMENT LOGIC FOR 4-TEAM DOUBLE ELIM --- //
+
+	// Winners Round 1
+	if m.Bracket == "winners" && m.BracketRound == 1 {
+		forward("winners", 2, 1, winner) // to Winners Final
+		forward("losers", 1, 1, loser)   // loser of WB R1 → Losers R1
+		return
+	}
+
+	// Winners Final
+	if m.Bracket == "winners" && m.BracketRound == 2 {
+		forward("grand_final", 1, 1, winner)
+		forward("losers", 2, 1, loser) // loser drops to LB R2
+		return
+	}
+
+	// Losers Round 1
+	if m.Bracket == "losers" && m.BracketRound == 1 {
+		forward("losers", 2, 1, winner)
+		return
+	}
+
+	// Losers Round 2 (losers rep → GF)
+	if m.Bracket == "losers" && m.BracketRound == 2 {
+		forward("grand_final", 1, 1, winner)
+		return
+	}
+
+	// Grand Final
+	if m.Bracket == "grand_final" {
+		// Add GF reset logic later if needed
+		return
+	}
 }

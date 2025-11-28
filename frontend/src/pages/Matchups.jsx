@@ -9,6 +9,44 @@ export default function Matchups() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    function normalizeSeasonKey(season) {
+        if (!season || season.trim() === "" || season === "0") return "Preseason";
+        return season;
+    }
+
+    function parseMatchCode(code) {
+        // Example patterns:
+        // Preseason: "Week1-M005", "CHAL-M002", "Finals-M003"
+        // Season 1: "1-Week1-M005", "1-CHAL-M002"
+        // Season Finals: "1-Finals-M003"
+
+        const parts = code.split("-"); // ["1","Week1","M005"] or ["Week1","M005"]
+
+        // Case 1: Preseason (does NOT start with a number)
+        if (isNaN(parts[0])) {
+            const weekPart = parts[0]; // Week1, CHAL, Finals
+            return {
+                season: "Preseason",
+                week: weekPart
+                    .replace("Week", "")      // Week3 → 3
+                    .replace("Finals", "Finals")
+                    .replace("CHAL", "CHAL")
+            };
+        }
+
+        // Case 2: Season X
+        const seasonNumber = parts[0]; // "1"
+        const weekPart = parts[1];     // "Week1", "CHAL", "Finals"
+
+        return {
+            season: seasonNumber,
+            week: weekPart
+                .replace("Week", "")       // Week3 → 3
+                .replace("Finals", "Finals")
+                .replace("CHAL", "CHAL")
+        };
+    }
+
     function normalizeWeek(week) {
         if (week === null || week === undefined) return "CHAL";
         const w = String(week).trim();
@@ -22,8 +60,31 @@ export default function Matchups() {
         axios
             .get(`${import.meta.env.VITE_API_URL}/api/matches/public`)
             .then((res) => {
-                if (res.data.success) setMatches(res.data.matches);
-                else throw new Error("Invalid response");
+                if (!res.data.success) throw new Error("Invalid response");
+
+                const raw = res.data.matches || {};
+
+                // Step 1: flatten ALL matches from all keys the API gives
+                const flat = [];
+                Object.values(raw).forEach(seasonObj => {
+                    Object.values(seasonObj).forEach(list => {
+                        list.forEach(m => flat.push(m));
+                    });
+                });
+
+                // Step 2: rebuild using REAL match_code logic
+                const rebuilt = {};
+
+                flat.forEach(m => {
+                    const { season, week } = parseMatchCode(m.match_code);
+
+                    if (!rebuilt[season]) rebuilt[season] = {};
+                    if (!rebuilt[season][week]) rebuilt[season][week] = [];
+
+                    rebuilt[season][week].push(m);
+                });
+
+                setMatches(rebuilt);
             })
             .catch((err) => setError(err.message))
             .finally(() => setLoading(false));
@@ -33,7 +94,28 @@ export default function Matchups() {
         if (localStorage.getItem("refresh_matchups") === "1") {
             axios
                 .get(`${import.meta.env.VITE_API_URL}/api/matches/public`)
-                .then((res) => setMatches(res.data.matches))
+                .then((res) => {
+                    const raw = res.data.matches || {};
+
+                    const flat = [];
+                    Object.values(raw).forEach(seasonObj => {
+                        Object.values(seasonObj).forEach(list => {
+                            list.forEach(m => flat.push(m));
+                        });
+                    });
+
+                    const rebuilt = {};
+                    flat.forEach(m => {
+                        const { season, week } = parseMatchCode(m.match_code);
+
+                        if (!rebuilt[season]) rebuilt[season] = {};
+                        if (!rebuilt[season][week]) rebuilt[season][week] = [];
+
+                        rebuilt[season][week].push(m);
+                    });
+
+                    setMatches(rebuilt);
+                })
                 .finally(() => localStorage.removeItem("refresh_matchups"));
         }
     }, []);
@@ -44,16 +126,27 @@ export default function Matchups() {
     useEffect(() => {
         if (!matches) return;
 
-        const seasons = Object.keys(matches);
-        const currentWeeks =
+        const rawWeeks =
             selectedSeason !== "All" && matches[selectedSeason]
-                ? ["All", ...Object.keys(matches[selectedSeason])]
-                : ["All"];
+                ? Object.keys(matches[selectedSeason])
+                : [];
 
-        setAvailableWeeks(currentWeeks);
+        const weekOptions = [
+            "All",
+            ...rawWeeks.filter((w) => w === "Finals" || /^\d+$/.test(w)), // Finals + digits only
+        ];
+
+        setAvailableWeeks(weekOptions);
     }, [matches, selectedSeason]);
 
-    const allSeasons = ["All", ...Object.keys(matches || {})];
+    const allSeasons = [
+        "All",
+        ...Object.keys(matches || {}).sort((a, b) => {
+            if (a === "Preseason") return -1;
+            if (b === "Preseason") return 1;
+            return Number(b) - Number(a);
+        }),
+    ];
 
     // --------------------------------------
     // 🔥 SORT SEASONS AND WEEKS (DESC)
