@@ -17,4 +17,16 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
+
+  build: {
+    rollupOptions: {
+      // Optional: better chunking
+      output: {
+        manualChunks: undefined
+      }
+    }
+  },
+
+  // 👇 SERVE SW.JS WITH CORRECT MIME TYPE
+  publicDir: "public",
 }));

@@ -600,6 +600,7 @@ func main() {
 	r.HandleFunc("/api/challenge/request", HandleChallengeRequest).Methods("POST")
 	r.HandleFunc("/api/challenge/respond", HandleChallengeRespond).Methods("POST")
 	r.HandleFunc("/api/team/toggle-challenges", HandleToggleChallenges).Methods("POST")
+	r.HandleFunc("/api/team/rename", CaptainRenameTeam).Methods("POST")
 
 	// League Mod routes (all requireLeagueMod inside handlers)
 	r.HandleFunc("/api/mod/match/reset", ModMatchReset).Methods("POST")
@@ -672,7 +673,7 @@ func main() {
 	api.HandleFunc("/team/join/decision", HandleJoinRequestDecision).Methods("POST")
 	api.HandleFunc("/team/kick", HandleKickMember).Methods("POST")
 	api.HandleFunc("/team/promote", HandlePromoteMember).Methods("POST")
-	r.HandleFunc("/api/team/rename", CaptainRenameTeam).Methods("POST")
+	api.HandleFunc("/match/ping-sub", HandleMatchPingSub).Methods("POST")
 
 	// Players
 	api.HandleFunc("/register", handleRegister).Methods("POST")
@@ -685,6 +686,10 @@ func main() {
 	api.HandleFunc("/leaderboard/players", GetPlayerLeaderboard).Methods("GET")
 	api.HandleFunc("/leaderboard/teams", GetTeamLeaderboard).Methods("GET")
 
+	// --- Finals Visibility ---
+	api.HandleFunc("/finals/visible", HandleGetFinalsVisible).Methods("GET")
+	api.HandleFunc("/mod/finals/toggle-visible", HandleModToggleFinalsVisible).Methods("POST")
+
 	// --- Finals (public) ---
 	api.HandleFunc("/finals/teams", HandleGetFinalsTeams).Methods("GET")
 	api.HandleFunc("/finals/bracket", HandleGetFinalsBracket).Methods("GET")
@@ -695,6 +700,8 @@ func main() {
 	api.HandleFunc("/mod/finals/generate", HandleModFinalsGenerate).Methods("POST")
 	api.HandleFunc("/mod/finals/reset", HandleModFinalsReset).Methods("POST")
 	api.HandleFunc("/mod/finals/update-match", HandleModFinalsUpdateMatch).Methods("POST")
+	api.HandleFunc("/mod/finals/clear-bracket-view", HandleModFinalsClearBracketView).Methods("POST")
+	api.HandleFunc("/mod/finals/set-seeds", HandleModFinalsSetSeeds).Methods("POST")
 
 	// STATIC FRONTEND + SPA FALLBACK
 	distDir := "../frontend/dist"

@@ -21,6 +21,7 @@ import "./styles.css";
 function App() {
   const [user, setUser] = useState(null);
   const [season, setSeason] = useState("");
+  const [showFinals, setShowFinals] = useState(false);
   const [loadingUser, setLoadingUser] = useState(true);
 
   useEffect(() => {
@@ -55,6 +56,28 @@ function App() {
       .then((res) => res.json())
       .then((data) => setSeason(data.season))
       .catch(() => setSeason("Unknown"));
+
+    // Fetch finals visibility
+    fetch(`${import.meta.env.VITE_API_URL}/api/finals/visible`)
+      .then(res => res.json())
+      .then(data => setShowFinals(data.visible))
+      .catch(() => setShowFinals(false));
+
+  }, []);
+
+  useEffect(() => {
+    function handleVisibilityUpdate() {
+      fetch(`${import.meta.env.VITE_API_URL}/api/finals/visible`)
+        .then(res => res.json())
+        .then(data => setShowFinals(data.visible))
+        .catch(() => setShowFinals(false));
+    }
+
+    window.addEventListener("finals-visibility-updated", handleVisibilityUpdate);
+
+    return () => {
+      window.removeEventListener("finals-visibility-updated", handleVisibilityUpdate);
+    };
   }, []);
 
   return (
@@ -102,11 +125,13 @@ function App() {
           </NavLink>
         </li>
 
-        <li className="nav-item">
-          <Link className="nav-link" to="/finals">
-            🏆 Finals
-          </Link>
-        </li>
+        {showFinals && (
+          <li className="nav-item">
+            <NavLink to="/finals" className="nav-link">
+              🏆 Finals
+            </NavLink>
+          </li>
+        )}
 
         <li className="nav-item">
           <NavLink to="/matchups" className="nav-link">

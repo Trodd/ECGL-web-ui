@@ -1,185 +1,231 @@
-
 import { useState, useEffect } from "react";
 import axios from "axios";
 
 export default function Finals() {
-    const [bracket, setBracket] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
-    const urlBase = import.meta.env.VITE_API_URL;
+    const [visible, setVisible] = useState(true);
     const [me, setMe] = useState(null);
+    const [loading, setLoading] = useState(true);
 
-    async function loadMe() {
-        try {
-            const res = await axios.get(`${urlBase}/api/me`, { withCredentials: true });
-            setMe(res.data);
-        } catch (err) {
-            console.error("Failed to load me:", err);
-        }
+    const [winnerRounds, setWinnerRounds] = useState([]);
+    const [loserRounds, setLoserRounds] = useState([]);
+    const [grandFinals, setGrandFinals] = useState([]);
+    const [resetPossible, setResetPossible] = useState(false);
+
+    const urlBase = import.meta.env.VITE_API_URL;
+
+    // --- Load finals visibility ---
+    useEffect(() => {
+        axios
+            .get(`${urlBase}/api/finals/visible`)
+            .then((res) => setVisible(!!res.data?.visible))
+            .catch(() => setVisible(false));
+    }, [urlBase]);
+
+    if (!visible) {
+        return (
+            <p className="text-light">
+                🏆 Finals bracket is not available yet.
+            </p>
+        );
     }
 
+    // --- Load user (for mod perms) ---
     useEffect(() => {
-        loadMe();
-    }, []);
+        axios
+            .get(`${urlBase}/api/me`, { withCredentials: true })
+            .then((res) => setMe(res.data))
+            .catch(() => setMe(null));
+    }, [urlBase]);
 
-    // --- load bracket ---
-    async function loadBracket() {
+    // --- Main load of bracket data ---
+    const loadBracket = async () => {
+        setLoading(true);
         try {
-            const res = await axios.get(`${urlBase}/api/finals/bracket`, { withCredentials: true });
-            setBracket(res.data);
+            const res = await axios.get(`${urlBase}/api/finals/bracket`);
+            setWinnerRounds(res.data?.winners || []);
+            setLoserRounds(res.data?.losers || []);
+            setGrandFinals(res.data?.grand_finals || []);
+            setResetPossible(!!res.data?.reset_possible);
         } catch (err) {
-            console.error("Failed to load finals bracket:", err);
-            setError("Could not load finals bracket.");
+            console.error("❌ Failed loading finals bracket:", err);
+            setWinnerRounds([]);
+            setLoserRounds([]);
+            setGrandFinals([]);
+            setResetPossible(false);
         } finally {
             setLoading(false);
         }
-    }
+    };
 
     useEffect(() => {
         loadBracket();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const onWinnerSelect = async ({ bracket, round, slot, winner }) => {
+    // --- Mod: set winner for a match ---
+    const setWinner = async (match, winnerID) => {
+        const idNum = Number(winnerID);
+        if (!idNum || !match?.id) return;
+
         try {
             await axios.post(
                 `${urlBase}/api/mod/finals/update-match`,
-                { bracket, round, slot, winner },
+                {
+                    match_id: match.id,
+                    winner: idNum,
+                },
                 { withCredentials: true }
             );
-            loadBracket();
-        } catch (err) {
-            console.error("Failed to set winner:", err);
+            await loadBracket();
+        } catch (error) {
+            console.error("❌ Failed to set winner:", error);
         }
     };
 
-    if (loading) return <p className="text-light">Loading finals bracket...</p>;
-    if (error) return <p className="text-danger">{error}</p>;
+    // --- Match card with optional connector line ---
+    const renderMatch = (m, { connectRight = false } = {}) => {
+        if (!m) return null;
 
-    if (!bracket) return <p className="text-light">No finals bracket generated.</p>;
+        const aWin = m.winner_id && m.winner_id === m.team_a_id;
+        const bWin = m.winner_id && m.winner_id === m.team_b_id;
 
-    // shortcut helpers
-    const WB = bracket.winners || [];      // winners[roundIndex][matchIndex]
-    const LB = bracket.losers || [];
-    const GF = bracket.grand_final || null;
-
-    const renderMatch = (m, bracketName, round, slot) => (
-        <div className="fb-match">
-            <div className="fb-teams">
-                <div className="fb-team">{m.team_a}</div>
-                <div className="fb-team">{m.team_b}</div>
-            </div>
-
-            {/* Winner selector (mods only) */}
-            {me?.is_mod && (
-                <select
-                    className="fb-winner-select"
-                    onChange={(e) => {
-                        const winnerTeamID = Number(e.target.value);
-                        if (!winnerTeamID) return;
-
-                        onWinnerSelect({
-                            bracket: bracketName,
-                            round,
-                            slot,
-                            winner: winnerTeamID
-                        });
-                    }}
+        return (
+            <div className="fb-match-wrapper" key={m.id}>
+                <div
+                    className="fb-match rounded p-2 mb-2"
+                    style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
                 >
-                    <option value="">Set Winner…</option>
-                    <option value={m.team_a_id}>{m.team_a}</option>
-                    <option value={m.team_b_id}>{m.team_b}</option>
-                </select>
-            )}
-        </div>
-    );
+                    <div className="fb-teams">
+                        <div className={`fb-team ${aWin ? "fb-team-winner" : ""}`}>
+                            {m.team_a || "TBD"}
+                        </div>
+                        <div className={`fb-team ${bWin ? "fb-team-winner" : ""}`}>
+                            {m.team_b || "TBD"}
+                        </div>
+                    </div>
+
+                    {me?.is_mod && (
+                        <select
+                            className="form-select bg-dark text-light mt-1 fb-winner-select"
+                            onChange={(e) => setWinner(m, e.target.value)}
+                            defaultValue=""
+                        >
+                            <option value="">Pick winner…</option>
+                            {m.team_a_id ? (
+                                <option value={m.team_a_id}>{m.team_a}</option>
+                            ) : null}
+                            {m.team_b_id ? (
+                                <option value={m.team_b_id}>{m.team_b}</option>
+                            ) : null}
+                        </select>
+                    )}
+                </div>
+
+                {/* connector to next round */}
+                {connectRight && <div className="fb-connector-next" />}
+            </div>
+        );
+    };
+
+    // Helper: filter out pure placeholder matches (0 vs 0 / TBD vs TBD)
+    const filterRealMatches = (round) => {
+        if (!Array.isArray(round)) return [];
+        return round.filter((m) => {
+            const aReal = m.team_a_id && m.team_a_id !== 0;
+            const bReal = m.team_b_id && m.team_b_id !== 0;
+            return aReal || bReal;
+        });
+    };
+
+    if (loading) return <p className="text-light">Loading finals…</p>;
+
+    const hasBracket =
+        (winnerRounds && winnerRounds.length > 0) ||
+        (loserRounds && loserRounds.length > 0) ||
+        (grandFinals && grandFinals.length > 0);
+
+    if (!hasBracket) return <p className="text-light">No finals bracket generated.</p>;
 
     return (
-        <div className="fb-container">
+        <div className="text-light fb-bracket">
 
-            {/* ================= WINNERS BRACKET ================= */}
-            <div className="fb-section">
-                <h5 className="fb-section-title text-success">Winners Bracket</h5>
+            {/* WINNERS BRACKET */}
+            {winnerRounds && winnerRounds.length > 0 && (
+                <section className="mb-5">
+                    <h3 className="text-success mb-4">🥇 Winners Bracket</h3>
 
-                <div className="fb-columns">
-
-                    {/* Round 1 */}
-                    <div className="fb-column">
-                        <div className="fb-column-title">Round 1</div>
-                        {WB[0]?.map((m, i) =>
-                            renderMatch(m, "winners", 1, i + 1)
-                        )}
+                    {/* Build list of non-empty winner rounds */}
+                    <div className="d-flex flex-wrap gap-4">
+                        {winnerRounds
+                            .map((round, idx) => {
+                                const realMatches = filterRealMatches(round);
+                                if (realMatches.length === 0) return null;
+                                return { idx, matches: realMatches };
+                            })
+                            .filter(Boolean)
+                            .map((col, colIndex, arr) => {
+                                const isLast = colIndex === arr.length - 1;
+                                return (
+                                    <div key={`wb-${col.idx}`} className="fb-column">
+                                        <h5 className="text-info mb-2">
+                                            WB Round {colIndex + 1}
+                                        </h5>
+                                        {col.matches.map((m) =>
+                                            renderMatch(m, { connectRight: !isLast })
+                                        )}
+                                    </div>
+                                );
+                            })}
                     </div>
+                </section>
+            )}
 
-                    {/* Semifinals */}
-                    <div className="fb-column">
-                        <div className="fb-column-title">Semifinals</div>
-                        {WB[1]?.map((m, i) =>
-                            renderMatch(m, "winners", 2, i + 1)
-                        )}
+            {/* LOSERS BRACKET */}
+            {loserRounds && loserRounds.length > 0 && (
+                <section className="mb-5">
+                    <h3 className="text-warning mb-4">🥉 Losers Bracket</h3>
+
+                    <div className="d-flex flex-wrap gap-4">
+                        {loserRounds
+                            .map((round, idx) => {
+                                const realMatches = filterRealMatches(round);
+                                if (realMatches.length === 0) return null;
+                                return { idx, matches: realMatches };
+                            })
+                            .filter(Boolean)
+                            .map((col, colIndex, arr) => {
+                                const isLast = colIndex === arr.length - 1;
+                                return (
+                                    <div key={`lb-${col.idx}`} className="fb-column">
+                                        <h5 className="text-info mb-2">
+                                            LB Round {colIndex + 1}
+                                        </h5>
+                                        {col.matches.map((m) =>
+                                            renderMatch(m, { connectRight: !isLast })
+                                        )}
+                                    </div>
+                                );
+                            })}
                     </div>
+                </section>
+            )}
 
-                    {/* Finals */}
-                    <div className="fb-column">
-                        <div className="fb-column-title">Finals</div>
-                        {GF ? (
-                            <div className="fb-match">
-                                <div className="fb-teams">
-                                    <div className="fb-team">{GF.team_a}</div>
-                                    <div className="fb-team">{GF.team_b}</div>
-                                </div>
+            {/* GRAND FINALS */}
+            {grandFinals && grandFinals.length > 0 && (
+                <section>
+                    <h3 className="text-light mb-4">🏁 Grand Finals</h3>
 
-                                {/* Winner selector (mods only) */}
-                                {me?.is_mod && (
-                                    <select
-                                        className="fb-winner-select"
-                                        onChange={(e) => {
-                                            const winnerTeamID = Number(e.target.value);
-                                            if (!winnerTeamID) return;
+                    <div className="d-flex flex-wrap gap-4">
 
-                                            onWinnerSelect({
-                                                bracket: "grand_final",
-                                                round: 1,
-                                                slot: 1,
-                                                winner: winnerTeamID
-                                            });
-                                        }}
-                                    >
-                                        <option value="">Set Winner…</option>
-                                        <option value={GF.team_a_id}>{GF.team_a}</option>
-                                        <option value={GF.team_b_id}>{GF.team_b}</option>
-                                    </select>
-                                )}
-                            </div>
-                        ) : (
-                            <p className="text-light">No finals match</p>
-                        )}
+                        {/* Only show the FIRST Grand Final */}
+                        <div className="fb-column">
+                            <h5 className="text-info mb-2">Grand Final</h5>
+                            {renderMatch(grandFinals[0], { connectRight: false })}
+                        </div>
+
                     </div>
-                </div>
-            </div>
-
-            {/* ================= LOSERS BRACKET ================= */}
-            <div className="fb-section" style={{ marginTop: "40px" }}>
-                <h5 className="fb-section-title text-danger">Losers Bracket</h5>
-
-                <div className="fb-columns">
-
-                    {/* Losers Round 1 */}
-                    <div className="fb-column">
-                        <div className="fb-column-title">Losers Round 1</div>
-                        {LB[0]?.map((m, i) =>
-                            renderMatch(m, "losers", 1, i + 1)
-                        )}
-                    </div>
-
-                    {/* Losers Round 2 */}
-                    <div className="fb-column">
-                        <div className="fb-column-title">Losers Round 2</div>
-                        {LB[1]?.map((m, i) =>
-                            renderMatch(m, "losers", 2, i + 1)
-                        )}
-                    </div>
-                </div>
-            </div>
+                </section>
+            )}
         </div>
     );
 }

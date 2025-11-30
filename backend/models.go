@@ -135,6 +135,7 @@ type LeagueSettings struct {
 	CurrentWeek          int        `json:"current_week"`
 	WeeklyChallengeLimit int        `json:"weekly_challenge_limit"`
 	ChallengesEnabled    bool       `json:"challenges_enabled" gorm:"default:true"`
+	FinalsVisible        bool       `json:"finals_visible" gorm:"column:show_finals_tab;default:false"`
 	LastMatchGeneration  *time.Time `json:"last_match_generation"`
 }
 

@@ -27,6 +27,21 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
     const [leagueSubs, setLeagueSubs] = useState([]);
     const [selectedSubA, setSelectedSubA] = useState("");
     const [selectedSubB, setSelectedSubB] = useState("");
+    const pingForSub = async (matchID, teamID) => {
+        console.log("PingForSub CLICKED:", { matchID, teamID }); // DEBUG
+
+        try {
+            await axios.post(`${import.meta.env.VITE_API_URL}/api/match/ping-sub`, {
+                match_id: matchID,
+                team_id: teamID,
+            });
+
+            alert("Sub request sent!");
+        } catch (err) {
+            console.error("Sub ping failed:", err);
+            alert("Failed to send sub request.");
+        }
+    };
 
     // ✅ Load saved scores
     useEffect(() => {
@@ -324,6 +339,12 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                                 ))}
                             </select>
                         </div>
+                        <button
+                            className="btn btn-warning btn-sm"
+                            onClick={() => pingForSub(match.id, team.id)}
+                        >
+                            🔔 Ping for Sub
+                        </button>
                     </div>
 
                     <div className="row g-3">

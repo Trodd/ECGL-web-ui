@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
-import FinalsBracket from "./Finals";
+import FinalsBracket from "../components/FinalsBracket";
+import FinalsSeedEditor from "../components/FinalsSeedEditor";
 
 export default function LeagueMod() {
+    const urlBase = import.meta.env.VITE_API_URL;
     const [me, setMe] = useState(null);
     const [loading, setLoading] = useState(true);
     const [msg, setMsg] = useState("");
@@ -65,6 +67,14 @@ export default function LeagueMod() {
     // Finals data
     const [finalsTeams, setFinalsTeams] = useState([]);
     const [finalsBracket, setFinalsBracket] = useState(null);
+    const [finalsVisible, setFinalsVisible] = useState(false);
+
+    // Load on mount
+    useEffect(() => {
+        axios.get(`${urlBase}/api/finals/visible`)
+            .then(res => setFinalsVisible(res.data.visible))
+            .catch(() => { });
+    }, []);
 
     useEffect(() => {
         async function loadPlayers() {
@@ -156,8 +166,6 @@ export default function LeagueMod() {
     // Search filters
     const [teamSearch, setTeamSearch] = useState("");
     const [matchSearch, setMatchSearch] = useState("");
-
-    const urlBase = import.meta.env.VITE_API_URL;
 
     // --- Fetch moderator session ---
     useEffect(() => {
@@ -2158,81 +2166,197 @@ export default function LeagueMod() {
                     children={
                         <div className="text-light">
 
-                            {/* Status Message */}
+                            {/* STATUS MESSAGE */}
                             {msg && (
-                                <div className={`alert ${msg.startsWith("✅") ? "alert-success" :
-                                    msg.startsWith("⚠️") ? "alert-warning" :
-                                        "alert-danger"
-                                    } small`}>
+                                <div
+                                    className={`alert ${msg.startsWith("✅") ? "alert-success" :
+                                        msg.startsWith("⚠️") ? "alert-warning" :
+                                            "alert-danger"
+                                        } small mb-3`}
+                                >
                                     {msg}
                                 </div>
                             )}
 
-                            {/* FINALS TEAMS */}
-                            <div className="p-3 mb-4 rounded"
-                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}>
+                            {/* ================================ */}
+                            {/* SECTION: FINALS TEAMS */}
+                            {/* ================================ */}
+                            <div
+                                className="p-3 mb-4 rounded shadow-sm"
+                                style={{ backgroundColor: "#161616", border: "1px solid #2d2d2d" }}
+                            >
+                                <h4 className="mb-3 d-flex align-items-center text-info">
+                                    <span style={{ fontSize: "1.4rem" }}>🏅</span>
+                                    <span className="ms-2">Finals Teams</span>
+                                </h4>
 
-                                <h5 className="text-info mb-3">🏅 Finals Teams</h5>
+                                {/* Seed Editor */}
+                                {finalsTeams.length > 0 && (
+                                    <div className="mb-3">
 
-                                {/* List finals teams */}
-                                <ul className="list-group mb-3">
-                                    {finalsTeams?.length > 0 ? (
-                                        finalsTeams.map((t) => (
-                                            <li key={t.id} className="list-group-item bg-dark text-light d-flex justify-content-between align-items-center">
-                                                <span>{t.name}</span>
-                                                <button
-                                                    className="btn btn-sm btn-outline-danger"
-                                                    onClick={() =>
-                                                        safePost(
-                                                            "/api/mod/finals/remove-team",
-                                                            { team_id: t.id },
-                                                            `Removed ${t.name} from Finals`
-                                                        ).then(loadFinals)
-                                                    }
+                                        <FinalsSeedEditor
+                                            teams={finalsTeams}
+                                            setTeams={(newList) => setFinalsTeams(newList)}
+                                            onSave={async (newSeeds) => {
+                                                await safePost(
+                                                    "/api/mod/finals/update-seeds",
+                                                    { seeds: newSeeds },
+                                                    "Updated Finals seeds"
+                                                );
+                                                loadFinals();
+                                            }}
+                                        />
+
+                                        {/* REMOVE TEAM FROM FINALS */}
+                                        <div className="mt-3">
+                                            <h6 className="text-light mb-2">❌ Remove Team From Finals</h6>
+
+                                            {finalsTeams.map((ft) => (
+                                                <div
+                                                    key={ft.team_id}
+                                                    className="d-flex justify-content-between align-items-center
+                                                            p-2 mb-2 rounded"
+                                                    style={{ backgroundColor: "#111", border: "1px solid #333" }}
                                                 >
-                                                    Remove
-                                                </button>
-                                            </li>
-                                        ))
-                                    ) : (
-                                        <li className="list-group-item bg-dark text-muted">No finals teams selected.</li>
-                                    )}
-                                </ul>
+                                                    <span>{ft.seed}. {ft.name}</span>
 
-                                {/* Add team */}
-                                <h6 className="text-light mb-2">➕ Add a Team to Finals</h6>
+                                                    <button
+                                                        className="btn btn-sm btn-outline-danger"
+                                                        onClick={() => {
+                                                            safePost(
+                                                                "/api/mod/finals/remove-team",
+                                                                { team_id: ft.team_id },
+                                                                `Removed ${ft.name} from Finals`
+                                                            ).then(() => {
+                                                                // Update local state instantly
+                                                                setFinalsTeams(prev =>
+                                                                    prev
+                                                                        .filter(x => x.team_id !== ft.team_id)
+                                                                        .map((t, idx) => ({
+                                                                            ...t,
+                                                                            seed: idx + 1,
+                                                                        }))
+                                                                );
+                                                                loadFinals();
+                                                            });
+                                                        }}
+                                                    >
+                                                        Remove
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                    </div>
+                                )}
+
+                                {/* Divider */}
+                                <hr className="border-secondary my-3" />
+
+                                {/* Add Team to Finals */}
+                                <h6 className="text-light mb-2">➕ Add Team to Finals</h6>
                                 <div className="d-flex gap-2 flex-wrap">
                                     <select
                                         className="form-select bg-dark text-light"
                                         id="addFinalsTeamSelect"
                                         style={{ maxWidth: 300 }}
                                         onChange={(e) => {
-                                            const tid = e.target.value;
+                                            const tid = Number(e.target.value);
                                             if (!tid) return;
+
+                                            const t = teams.find(x => x.id === tid);
+
+                                            // Update local state
+                                            setFinalsTeams(prev => {
+                                                const updated = [
+                                                    ...prev,
+                                                    {
+                                                        team_id: tid,
+                                                        name: t?.name || `Team #${tid}`,
+                                                    }
+                                                ];
+
+                                                // Reseed
+                                                return updated.map((team, index) => ({
+                                                    ...team,
+                                                    seed: index + 1
+                                                }));
+                                            });
+
+                                            e.target.value = "";
+
                                             safePost(
                                                 "/api/mod/finals/add-team",
-                                                { team_id: parseInt(tid) },
-                                                "Added team to Finals"
+                                                { team_id: tid },
+                                                `Added ${t?.name || "team"} to Finals`
                                             ).then(loadFinals);
                                         }}
                                     >
-                                        <option value="">Select team…</option>
-                                        {teams.map((t) => (
-                                            <option key={t.id} value={t.id}>{t.name}</option>
-                                        ))}
+                                        <option value="">Select a team…</option>
+
+                                        {/* Only show TEAMS NOT already in finals */}
+                                        {teams
+                                            .filter(t => !finalsTeams.some(ft => ft.team_id === t.id))
+                                            .map((t) => (
+                                                <option key={t.id} value={t.id}>
+                                                    {t.name}
+                                                </option>
+                                            ))}
                                     </select>
                                 </div>
                             </div>
 
-                            {/* BRACKET MANAGEMENT */}
-                            <div className="p-3 mb-4 rounded"
-                                style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}>
+                            {/* ================================ */}
+                            {/* SECTION: BRACKET TOOLS */}
+                            {/* ================================ */}
+                            <div
+                                className="p-3 mb-4 rounded shadow-sm"
+                                style={{ backgroundColor: "#161616", border: "1px solid #2d2d2d" }}
+                            >
+                                <h4 className="mb-3 d-flex align-items-center text-warning">
+                                    <span style={{ fontSize: "1.4rem" }}>📊</span>
+                                    <span className="ms-2">Bracket Management</span>
+                                </h4>
 
-                                <h5 className="text-warning mb-3">📊 Bracket Management</h5>
+                                {/* Visibility Toggle */}
+                                <div className="p-3 rounded mb-3"
+                                    style={{
+                                        backgroundColor: "#0f0f0f",
+                                        border: "1px solid #2c2c2c"
+                                    }}
+                                >
+                                    <div className="form-check form-switch">
+                                        <input
+                                            className="form-check-input"
+                                            type="checkbox"
+                                            id="toggleFinalsVisible"
+                                            checked={finalsVisible}
+                                            onChange={(e) => {
+                                                const visible = e.target.checked;
+                                                safePost(
+                                                    "/api/mod/finals/toggle-visible",
+                                                    { visible },
+                                                    visible ? "Finals tab is now visible" : "Finals tab hidden"
+                                                ).then(() => {
+                                                    setFinalsVisible(visible);
+                                                    window.dispatchEvent(new Event("finals-visibility-updated"));
+                                                });
+                                            }}
+                                        />
+                                        <label className="form-check-label ms-2" htmlFor="toggleFinalsVisible">
+                                            {finalsVisible
+                                                ? "Finals Visible to Public"
+                                                : "Finals Hidden from Public"}
+                                        </label>
+                                    </div>
+                                </div>
 
-                                <div className="d-flex flex-wrap gap-2 mb-3">
+                                {/* Bracket Actions */}
+                                <div className="d-flex flex-wrap gap-2">
+
                                     <button
-                                        className="btn btn-outline-success btn-sm"
+                                        className="btn btn-success"
+                                        style={{ minWidth: 170 }}
                                         onClick={() =>
                                             safePost(
                                                 "/api/mod/finals/generate",
@@ -2241,11 +2365,12 @@ export default function LeagueMod() {
                                             ).then(loadFinals)
                                         }
                                     >
-                                        🚀 Generate Bracket
+                                        🚀 Auto-Generate Bracket
                                     </button>
 
                                     <button
-                                        className="btn btn-outline-danger btn-sm"
+                                        className="btn btn-danger"
+                                        style={{ minWidth: 170 }}
                                         onClick={() =>
                                             safePost(
                                                 "/api/mod/finals/reset",
@@ -2254,22 +2379,26 @@ export default function LeagueMod() {
                                             ).then(loadFinals)
                                         }
                                     >
-                                        ♻️ Reset Bracket
+                                        ♻️ Reset Entire Bracket
                                     </button>
-                                </div>
 
-                                {/* BRACKET DISPLAY */}
-                                <FinalsBracket
-                                    bracket={finalsBracket}
-                                    onWinnerSelect={(payload) =>
-                                        safePost(
-                                            "/mod/finals/update-match",
-                                            payload,
-                                            "Updated match"
-                                        ).then(loadFinals)
-                                    }
-                                />
+                                    <button
+                                        className="btn btn-warning text-dark"
+                                        style={{ minWidth: 170 }}
+                                        onClick={() =>
+                                            safePost(
+                                                "/api/mod/finals/clear-bracket-view",
+                                                {},
+                                                "Cleared Finals Bracket View"
+                                            ).then(loadFinals)
+                                        }
+                                    >
+                                        🧹 Clear Bracket (Keep Matches)
+                                    </button>
+
+                                </div>
                             </div>
+
                         </div>
                     }
                 />
