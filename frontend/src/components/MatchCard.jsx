@@ -188,7 +188,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
             <div className="d-flex justify-content-between align-items-center mb-2">
             </div>
 
-            <p className="text-muted mb-2">
+            <p className="text-light mb-2">
                 Status: <strong>{match.status || "Pending"}</strong>
             </p>
 
@@ -427,7 +427,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                         ✅ Both teams confirmed — match completed!
                     </p>
                     {(selectedSubA || selectedSubB) && (
-                        <p className="text-muted mt-1 mb-0">
+                        <p className="text-light mt-1 mb-0">
                             {selectedSubA &&
                                 `League Sub (Your Team): ${leagueSubs.find((s) => String(s.id) === String(selectedSubA))
                                     ?.display_name ||

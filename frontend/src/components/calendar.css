@@ -1,0 +1,154 @@
+.calendar-container {
+    border: 1px solid #444;
+}
+
+.calendar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+}
+
+.calendar-day-header {
+    text-align: center;
+    font-weight: bold;
+    padding: 6px 0;
+    background: #222;
+    border-radius: 4px;
+}
+
+.calendar-day {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    height: 48px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: default;
+}
+
+.calendar-day.empty {
+    background: transparent;
+    border: none;
+}
+
+.calendar-day.clickable:hover {
+    border-color: #777;
+}
+
+/* COLORS */
+
+.season-start {
+    background: #0077ff !important;
+    border-color: #005fcc !important;
+    font-weight: bold;
+    color: white !important;
+}
+
+.season-end {
+    background: #b300ff !important;
+    border-color: #7a00b3 !important;
+    font-weight: bold;
+    color: white !important;
+}
+
+.break-week {
+    background: #ff8100 !important;
+    border-color: #cc6900 !important;
+    color: black !important;
+}
+
+.finals-week {
+    background: #00c853 !important;
+    border-color: #009f43 !important;
+    font-weight: bold;
+    color: black !important;
+}
+
+/* Legend */
+.legend-item {
+    display: flex;
+    align-items: center;
+    margin-top: 6px;
+}
+
+.legend-box {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    margin-right: 8px;
+    border-radius: 4px;
+    border: 1px solid #555;
+}
+
+.legend-box.season-start {
+    background: #0077ff;
+}
+
+.legend-box.season-end {
+    background: #b300ff;
+}
+
+.legend-box.break-week {
+    background: #ff8100;
+}
+
+.legend-box.finals-week {
+    background: #00c853;
+}
+
+/* --- Full Season Grid --- */
+
+.season-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+.month-block {
+    border: 1px solid #333;
+}
+
+.month-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+}
+
+.dow {
+    text-align: center;
+    font-weight: bold;
+    padding: 4px 0;
+    background: #222;
+    border-radius: 3px;
+    border: 1px solid #333;
+}
+
+.day {
+    height: 30px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 3px;
+    text-align: center;
+    line-height: 30px;
+    font-size: 0.85rem;
+}
+
+.day.empty {
+    background: transparent;
+    border: none;
+}
+
+.day.out-range {
+    opacity: 0.25;
+}
+
+.day.in-range:hover {
+    border-color: #999;
+}

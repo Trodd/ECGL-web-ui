@@ -7096,3 +7096,18 @@ func SendDiscordToChannel(channelID string, msg string) {
 		log.Printf("❌ Discord API error (%d): %s", resp.StatusCode, string(body))
 	}
 }
+
+func HandleGetSeasonCalendar(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	out := map[string]any{
+		"season_start": getEnv("SEASON_START", ""),
+		"season_end":   getEnv("SEASON_END", ""),
+		"break_start":  getEnv("BREAK_START", ""),
+		"break_end":    getEnv("BREAK_END", ""),
+		"finals_start": getEnv("FINALS_START", ""),
+		"finals_end":   getEnv("FINALS_END", ""),
+	}
+
+	respondJSON(w, out)
+}

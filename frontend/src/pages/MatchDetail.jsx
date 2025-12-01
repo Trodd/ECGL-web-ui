@@ -123,7 +123,7 @@ export default function MatchDetail() {
             ? "text-success"
             : match.status === "Scheduled"
                 ? "text-warning"
-                : "text-muted";
+                : "text-light";
 
     // -----------------------------------------------------
     // NORMALIZE CAST (STRING IDs SO LOOKUP ALWAYS MATCHES)
@@ -182,7 +182,7 @@ export default function MatchDetail() {
                     <p className={`mb-2 fw-bold ${statusColor}`}>
                         Status: {match.status || "Unknown"}
                     </p>
-                    <p className="text-muted mb-0">Scheduled: {formattedDate}</p>
+                    <p className="text-light mb-0">Scheduled: {formattedDate}</p>
                 </div>
             </div>
 
@@ -348,7 +348,7 @@ export default function MatchDetail() {
                                             </li>
                                         ))
                                     ) : (
-                                        <li className="list-group-item bg-dark text-muted text-center">
+                                        <li className="list-group-item bg-dark text-light text-center">
                                             No recorded players.
                                         </li>
                                     )}

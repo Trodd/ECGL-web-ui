@@ -112,7 +112,7 @@ export default function Players() {
       {loading ? (
         <p className="text-light">Loading players…</p>
       ) : filteredPlayers.length === 0 ? (
-        <p className="text-muted">No players found.</p>
+        <p className="text-light">No players found.</p>
       ) : (
         <table className="table table-dark table-striped align-middle">
           <thead>

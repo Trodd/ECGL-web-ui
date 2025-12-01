@@ -601,6 +601,7 @@ func main() {
 	r.HandleFunc("/api/challenge/respond", HandleChallengeRespond).Methods("POST")
 	r.HandleFunc("/api/team/toggle-challenges", HandleToggleChallenges).Methods("POST")
 	r.HandleFunc("/api/team/rename", CaptainRenameTeam).Methods("POST")
+	r.HandleFunc("/api/season/calendar", HandleGetSeasonCalendar).Methods("GET")
 
 	// League Mod routes (all requireLeagueMod inside handlers)
 	r.HandleFunc("/api/mod/match/reset", ModMatchReset).Methods("POST")

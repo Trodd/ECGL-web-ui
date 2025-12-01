@@ -1,3 +1,5 @@
+import FullSeasonCalendar from "../components/SeasonCalendar";
+
 export default function Home() {
   return (
     <div className="rules text-start">
@@ -190,6 +192,9 @@ export default function Home() {
         Mods must be contacted immediately with context.
         Otherwise → double forfeit.
       </p>
+
+      <hr className="my-4" />
+      <FullSeasonCalendar />
     </div>
   );
 }
