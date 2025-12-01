@@ -152,3 +152,11 @@
 .day.in-range:hover {
     border-color: #999;
 }
+
+.day.season-start {
+    opacity: 1 !important;
+}
+
+.day.season-start {
+    filter: none !important;
+}
