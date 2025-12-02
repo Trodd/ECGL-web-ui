@@ -343,7 +343,14 @@ export default function MatchDetail() {
                                                 key={idx}
                                                 className="list-group-item bg-dark text-light d-flex justify-content-between align-items-center"
                                             >
-                                                <span>{p.display_name || p.username}</span>
+                                                {/* CLICKABLE PLAYER NAME */}
+                                                <Link
+                                                    to={`/players/${p.player_id}`}
+                                                    className="text-info text-decoration-none fw-bold"
+                                                >
+                                                    {p.display_name || p.username}
+                                                </Link>
+
                                                 <span>{p.role || "-"}</span>
                                             </li>
                                         ))

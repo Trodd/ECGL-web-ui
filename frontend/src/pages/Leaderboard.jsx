@@ -89,7 +89,7 @@ export default function Leaderboard() {
             {sortedPlayers.map((p, idx) => (
               <tr key={p.id}>
                 <td>{idx + 1}</td>
-                <td>{p.username}</td>
+                <td>{p.display_name || p.username}</td>
                 <td>{p.rating}</td>
                 <td>{p.wins}</td>
                 <td>{p.losses}</td>
