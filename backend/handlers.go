@@ -1614,8 +1614,20 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 	// target
 	playerID := req.PlayerID.Int64()
 
-	if req.Role != "Captain" && req.Role != "Co-Captain" {
+	// ⭐ Allow all 3 team roles
+	validRoles := map[string]bool{
+		"Captain":    true,
+		"Co-Captain": true,
+		"Member":     true,
+	}
+	if !validRoles[req.Role] {
 		http.Error(w, "Invalid role", http.StatusBadRequest)
+		return
+	}
+
+	// ⭐ Prevent captain from demoting themselves (must always have a captain)
+	if requesterID == playerID && req.Role != "Captain" {
+		http.Error(w, "Captain cannot demote themselves", http.StatusForbidden)
 		return
 	}
 
@@ -3280,17 +3292,52 @@ func ModSeasonArchive(w http.ResponseWriter, r *http.Request) {
 		Matches []MatchExport `json:"matches"`
 	}
 
+	// --- load teams + players (global) ---
 	var teams []Team
 	var players []Player
-	var matches []Match
-
 	DB.Find(&teams)
 	DB.Find(&players)
-	DB.Find(&matches)
 
-	// attach maps to each match
+	// ------------------------------
+	// 🔥 Determine CURRENT SEASON
+	// ------------------------------
+	curSeason := strings.TrimSpace(currentSeason)
+	if curSeason == "" {
+		curSeason = "0" // preseason
+	}
+
+	// ------------------------------
+	// 🔥 Season extractor using match_code
+	// ------------------------------
+	seasonFromCode := func(code string) string {
+		parts := strings.Split(code, "-")
+		if len(parts) == 0 {
+			return "0"
+		}
+		// If first part is numeric → Season X
+		if _, err := strconv.Atoi(parts[0]); err == nil {
+			return parts[0]
+		}
+		// Otherwise preseason
+		return "0"
+	}
+
+	// ------------------------------
+	// 🔥 Load all matches, but only keep the CURRENT SEASON
+	// ------------------------------
+	var allMatches []Match
+	DB.Find(&allMatches)
+
+	var seasonMatches []Match
+	for _, m := range allMatches {
+		if seasonFromCode(m.MatchCode) == curSeason {
+			seasonMatches = append(seasonMatches, m)
+		}
+	}
+
+	// Attach maps only for the selected matches
 	var fullMatches []MatchExport
-	for _, m := range matches {
+	for _, m := range seasonMatches {
 		var maps []MatchScore
 		DB.Where("match_id = ?", m.ID).Find(&maps)
 		fullMatches = append(fullMatches, MatchExport{Match: m, Maps: maps})
@@ -3328,9 +3375,9 @@ func ModSeasonArchive(w http.ResponseWriter, r *http.Request) {
 				p.ID, p.Username, p.Role, p.Rating, p.Wins, p.Losses, p.Matches)
 		}
 
-		f.WriteString("\n=== MATCHES ===\n")
+		f.WriteString("\n=== MATCHES (CURRENT SEASON ONLY) ===\n")
 		f.WriteString("id,code,teamA,teamB,winner,status,date\n")
-		for _, m := range matches {
+		for _, m := range seasonMatches {
 			fmt.Fprintf(f, "%d,%s,%d,%d,%v,%s,%v\n",
 				m.ID, m.MatchCode, m.TeamAID, m.TeamBID, m.WinnerID, m.Status, m.ScheduledDate)
 		}
@@ -7110,4 +7157,43 @@ func HandleGetSeasonCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, out)
+}
+
+func ModRemoveCooldown(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		PlayerID string `json:"player_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	id, err := strconv.ParseInt(strings.TrimSpace(req.PlayerID), 10, 64)
+	if err != nil || id == 0 {
+		http.Error(w, "Invalid player ID", http.StatusBadRequest)
+		return
+	}
+
+	// Remove cooldown
+	if err := DB.Model(&Player{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"last_left_team_at": nil,
+		}).Error; err != nil {
+
+		http.Error(w, "Failed to remove cooldown", http.StatusInternalServerError)
+		return
+	}
+
+	LogGeneral(fmt.Sprintf("🧹 Cooldown cleared for <@%d>", id))
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "Cooldown cleared",
+	})
 }

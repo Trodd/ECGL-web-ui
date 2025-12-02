@@ -598,6 +598,7 @@ export default function MyTeam() {
                         </option>
                         <option value="Captain">Captain</option>
                         <option value="Co-Captain">Co-Captain</option>
+                        <option value="Member">Member</option>
                       </select>
                       <button
                         className="btn btn-danger btn-sm"

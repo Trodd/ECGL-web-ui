@@ -649,6 +649,7 @@ func main() {
 	r.HandleFunc("/api/mod/team/set-role", HandleModSetTeamRole).Methods("POST")
 	r.HandleFunc("/api/mod/team/promote-captain", HandleModPromoteToCaptain).Methods("POST")
 	r.HandleFunc("/api/mod/team/lock", HandleModToggleTeamLock).Methods("POST")
+	r.HandleFunc("/api/mod/player/remove-cooldown", ModRemoveCooldown).Methods("POST")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()

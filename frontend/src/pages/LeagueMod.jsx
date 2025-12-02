@@ -1935,6 +1935,33 @@ export default function LeagueMod() {
                                     >
                                         ✅ Unban Player
                                     </button>
+
+                                    {/* 🆕 Remove Cooldown Button */}
+                                    <button
+                                        className="btn btn-outline-info btn-sm"
+                                        disabled={!playerID}
+                                        onClick={async () => {
+                                            if (!playerID) {
+                                                setMsg("⚠️ Select a player first.");
+                                                return;
+                                            }
+
+                                            try {
+                                                await axios.post(
+                                                    `${urlBase}/api/mod/player/remove-cooldown`,
+                                                    { player_id: String(playerID) },
+                                                    { withCredentials: true }
+                                                );
+
+                                                setMsg(`✅ Removed cooldown for player #${playerID}`);
+                                            } catch (err) {
+                                                console.error("❌ Failed to remove cooldown:", err);
+                                                setMsg("❌ Failed to remove player cooldown");
+                                            }
+                                        }}
+                                    >
+                                        ⏳❌ Remove Cooldown
+                                    </button>
                                 </div>
                             </div>
                             {/* 🎮 PLAYER RATING / W-L-GP EDITOR (Isolated State) */}
