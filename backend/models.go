@@ -125,11 +125,13 @@ type PlayerHistory struct {
 	Role     string `json:"role"`
 	Season   string `json:"season"`
 
-	ArchiveRating  int    `json:"archive_rating"`
-	ArchiveWins    int    `json:"archive_wins"`
-	ArchiveLosses  int    `json:"archive_losses"`
-	ArchiveMatches int    `json:"archive_matches"`
-	ArchiveTeam    string `json:"archive_team"`
+	ArchiveRating  int       `json:"archive_rating"`
+	ArchiveWins    int       `json:"archive_wins"`
+	ArchiveLosses  int       `json:"archive_losses"`
+	ArchiveMatches int       `json:"archive_matches"`
+	ArchiveTeam    string    `json:"archive_team"`
+	IsTeamJoin     bool      `json:"is_team_join" gorm:"default:false"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func (PlayerHistory) TableName() string {

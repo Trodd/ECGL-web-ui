@@ -121,8 +121,8 @@ CREATE TABLE player_history (
     archive_losses INT DEFAULT 0,
     archive_matches INT DEFAULT 0,
     archive_team TEXT DEFAULT '',
-
-    UNIQUE(player_id, season)
+    is_team_join BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
 );
 
 -- ==========================================================

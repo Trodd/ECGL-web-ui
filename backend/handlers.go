@@ -1001,11 +1001,12 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 
 	// log history
 	DB.Create(&PlayerHistory{
-		PlayerID: playerID,
-		TeamID:   team.ID,
-		TeamName: team.Name,
-		Role:     "Captain",
-		Season:   currentSeason,
+		PlayerID:   playerID,
+		TeamID:     team.ID,
+		TeamName:   team.Name,
+		Role:       "Captain",
+		Season:     currentSeason,
+		IsTeamJoin: true,
 	})
 
 	go DiscordAddRole(discordID, os.Getenv("DISCORD_CAPTAIN_ROLE_ID"))
@@ -1130,11 +1131,12 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 			var team Team
 			DB.First(&team, jr.TeamID)
 			DB.Create(&PlayerHistory{
-				PlayerID: int64(jr.PlayerID),
-				TeamID:   jr.TeamID,
-				TeamName: team.Name,
-				Role:     "Member",
-				Season:   currentSeason,
+				PlayerID:   int64(jr.PlayerID),
+				TeamID:     jr.TeamID,
+				TeamName:   team.Name,
+				Role:       "Member",
+				Season:     currentSeason,
+				IsTeamJoin: true,
 			})
 		}
 
@@ -2608,29 +2610,31 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 		Name string
 	}
 	DB.Raw(`
-		SELECT t.id, t.name
-		FROM teams t
-		JOIN team_members tm ON tm.team_id = t.id
-		WHERE tm.player_id = ?
-		LIMIT 1
-	`, playerID).Scan(&team)
+        SELECT t.id, t.name
+        FROM teams t
+        JOIN team_members tm ON tm.team_id = t.id
+        WHERE tm.player_id = ?
+        LIMIT 1
+    `, playerID).Scan(&team)
 
-	// --- Team History
+	// 🟦 TEAM MEMBERSHIP HISTORY (joined/left/promoted)
 	type HistoryRow struct {
 		Season string `json:"season"`
 		TeamID uint   `json:"team_id"`
 		Team   string `json:"team"`
+		Role   string `json:"role"`
 	}
 
 	var history []HistoryRow
 	DB.Raw(`
-		SELECT ph.season, ph.team_id, ph.team_name AS team
-		FROM player_history ph
-		WHERE ph.player_id = ?
-		ORDER BY ph.season ASC
-	`, playerID).Scan(&history)
+        SELECT season, team_id, team_name AS team, role
+        FROM player_history
+        WHERE player_id = ?
+          AND is_team_join = TRUE
+        ORDER BY created_at ASC
+    `, playerID).Scan(&history)
 
-	// --- 🆕 Archived Stats (Season snapshots)
+	// SEASON STATS HISTORY (archived stats)
 	type ArchiveRow struct {
 		Season         string `json:"season"`
 		ArchiveRating  int    `json:"archive_rating"`
@@ -2642,11 +2646,12 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 
 	var archived []ArchiveRow
 	DB.Raw(`
-		SELECT season, archive_rating, archive_wins, archive_losses, archive_matches, archive_team
-		FROM player_history
-		WHERE player_id = ?
-		ORDER BY season ASC
-	`, playerID).Scan(&archived)
+        SELECT season, archive_rating, archive_wins, archive_losses, archive_matches, archive_team
+        FROM player_history
+        WHERE player_id = ?
+          AND is_team_join = FALSE
+        ORDER BY season ASC
+    `, playerID).Scan(&archived)
 
 	// --- Final Response
 	respondJSON(w, map[string]any{
@@ -7406,6 +7411,7 @@ func archivePlayerStats(playerID int64, season string) {
 		ArchiveLosses:  int(p.Losses),
 		ArchiveMatches: int(p.Matches),
 		ArchiveTeam:    tm.TeamName,
+		IsTeamJoin:     false,
 	}
 
 	DB.Clauses(clause.OnConflict{
