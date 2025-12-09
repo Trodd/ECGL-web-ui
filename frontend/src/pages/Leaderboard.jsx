@@ -30,6 +30,11 @@ export default function Leaderboard() {
     return a.losses - b.losses;
   });
 
+  function getRankClass(division) {
+    if (!division) return "rank-badge rank-unranked";
+    return "rank-badge rank-" + division.toLowerCase();
+  }
+
   return (
     <div>
       <h2>Leaderboard</h2>
@@ -56,6 +61,7 @@ export default function Leaderboard() {
             <tr>
               <th>#</th>
               <th>Team</th>
+              <th>Rank</th>
               <th>Rating</th>
               <th>W</th>
               <th>L</th>
@@ -66,6 +72,14 @@ export default function Leaderboard() {
               <tr key={t.id}>
                 <td>{idx + 1}</td>
                 <td>{t.name}</td>
+
+                {/* ⭐ DIVISION + TIER */}
+                <td>
+                  <span className={getRankClass(t.division)}>
+                    {t.division} {t.tier}
+                  </span>
+                </td>
+
                 <td>{t.rating}</td>
                 <td>{t.wins}</td>
                 <td>{t.losses}</td>
@@ -79,6 +93,7 @@ export default function Leaderboard() {
             <tr>
               <th>#</th>
               <th>Player</th>
+              <th>Rank</th>
               <th>Rating</th>
               <th>W</th>
               <th>L</th>
@@ -90,6 +105,14 @@ export default function Leaderboard() {
               <tr key={p.id}>
                 <td>{idx + 1}</td>
                 <td>{p.display_name || p.username}</td>
+
+                {/* ⭐ DIVISION + TIER */}
+                <td>
+                  <span className={getRankClass(p.division)}>
+                    {p.division} {p.tier}
+                  </span>
+                </td>
+
                 <td>{p.rating}</td>
                 <td>{p.wins}</td>
                 <td>{p.losses}</td>

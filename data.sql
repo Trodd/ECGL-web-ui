@@ -1,115 +1,224 @@
--- === Players ===
+-- ==========================================================
+-- PLAYERS
+-- ==========================================================
 CREATE TABLE players (
-    id BIGINT PRIMARY KEY,            -- Discord ID
+    id BIGINT PRIMARY KEY,                      -- Discord ID
     username TEXT NOT NULL,
+    display_name TEXT DEFAULT '',
     role TEXT CHECK (role IN ('Player','League Sub')) NOT NULL,
     timezone TEXT NOT NULL,
-    rating INT DEFAULT 800,           -- from config
+    device TEXT DEFAULT '',
+    rating INT DEFAULT 800,
     wins INT DEFAULT 0,
     losses INT DEFAULT 0,
-    matches INT DEFAULT 0
+    matches INT DEFAULT 0,
+    last_left_team_at TIMESTAMPTZ                -- nullable
 );
 
--- === Teams ===
+-- ==========================================================
+-- TEAMS
+-- ==========================================================
 CREATE TABLE teams (
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,
     status TEXT DEFAULT 'Active',
+    join_allowed BOOLEAN DEFAULT TRUE,
     rating INT DEFAULT 800,
     wins INT DEFAULT 0,
     losses INT DEFAULT 0,
-    matches INT DEFAULT 0
+    matches INT DEFAULT 0,
+    weekly_challenges_used INT DEFAULT 0,
+    allow_challenges BOOLEAN DEFAULT TRUE,
+    locked BOOLEAN DEFAULT FALSE,
+    finals_placement INT DEFAULT 0
 );
 
--- === Team Members ===
+-- ==========================================================
+-- TEAM MEMBERS
+-- ==========================================================
 CREATE TABLE team_members (
-    team_id INT REFERENCES teams(id) ON DELETE CASCADE,
-    player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
-    role TEXT CHECK (role IN ('Captain','Co-Captain','Member')) NOT NULL,
-    PRIMARY KEY (team_id, player_id)
+    player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    team_id INT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    PRIMARY KEY (player_id, team_id)
 );
 
--- === Matches (Scheduled & Challenge) ===
+-- ==========================================================
+-- MATCHES
+-- ==========================================================
 CREATE TABLE matches (
     id SERIAL PRIMARY KEY,
-    match_code TEXT UNIQUE NOT NULL,     -- e.g. Week3-NEX-IMM or Challenge3-M001
+    match_code TEXT UNIQUE NOT NULL,
     team_a_id INT REFERENCES teams(id),
     team_b_id INT REFERENCES teams(id),
-    proposed_date TIMESTAMP WITH TIME ZONE,
-    scheduled_date TIMESTAMP WITH TIME ZONE,
-    status TEXT CHECK (status IN ('Proposed','Scheduled','Finished','Forfeited','Cancelled')) NOT NULL DEFAULT 'Proposed',
+
+    proposed_date TIMESTAMPTZ,
+    scheduled_date TIMESTAMPTZ,
+
+    status TEXT NOT NULL DEFAULT 'Proposed',
+
     winner_id INT REFERENCES teams(id),
     loser_id INT REFERENCES teams(id),
+
     proposer_id BIGINT REFERENCES players(id),
-    season TEXT DEFAULT 'Preseason'
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    season TEXT DEFAULT 'Preseason',
+    week TEXT DEFAULT '',
+
+    team_a_schedule_confirmed BOOLEAN DEFAULT FALSE,
+    team_b_schedule_confirmed BOOLEAN DEFAULT FALSE,
+    team_a_score_confirmed BOOLEAN DEFAULT FALSE,
+    team_b_score_confirmed BOOLEAN DEFAULT FALSE,
+
+    schedule_confirmed_at TIMESTAMPTZ,
+    score_confirmed_at TIMESTAMPTZ,
+
+    team_a_score INT DEFAULT 0,
+    team_b_score INT DEFAULT 0,
+    score_hash TEXT DEFAULT '',
+
+    map_scores JSONB DEFAULT '[]',
+
+    league_sub_a BIGINT,
+    league_sub_b BIGINT,
+
+    coin_flip TEXT DEFAULT '',
+    is_finals BOOLEAN DEFAULT FALSE,
+
+    bracket TEXT DEFAULT '',
+    bracket_round INT DEFAULT 0,
+    bracket_slot INT DEFAULT 0
 );
 
--- === Match Scores (per map) ===
+-- ==========================================================
+-- MATCH SCORES (Legacy per-map storage)
+-- ==========================================================
 CREATE TABLE match_scores (
     id SERIAL PRIMARY KEY,
     match_id INT REFERENCES matches(id) ON DELETE CASCADE,
     map_number INT CHECK (map_number BETWEEN 1 AND 3),
-    gamemode TEXT CHECK (gamemode IN ('Payload','Capture Point')),
+    gamemode TEXT,
     team_a_score INT,
     team_b_score INT
 );
 
--- === Team Join Requests ===
-CREATE TABLE team_join_requests (
-    id SERIAL PRIMARY KEY,
-    player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
-    team_id INT REFERENCES teams(id) ON DELETE CASCADE,
-    status TEXT CHECK (status IN ('pending','accepted','denied')) NOT NULL DEFAULT 'pending',
-    created_at TIMESTAMPTZ DEFAULT now()
-);
-
+-- ==========================================================
+-- PLAYER HISTORY (FULL SNAPSHOT + TEAM)
+-- ==========================================================
 CREATE TABLE player_history (
     id SERIAL PRIMARY KEY,
     player_id BIGINT REFERENCES players(id),
     team_id INT REFERENCES teams(id),
     team_name TEXT,
+    role TEXT DEFAULT 'Member',
     season TEXT NOT NULL,
+
+    archive_rating INT DEFAULT 0,
+    archive_wins INT DEFAULT 0,
+    archive_losses INT DEFAULT 0,
+    archive_matches INT DEFAULT 0,
+    archive_team TEXT DEFAULT '',
+
     UNIQUE(player_id, season)
 );
 
-CREATE TABLE IF NOT EXISTS team_history (
+-- ==========================================================
+-- TEAM RENAME HISTORY
+-- ==========================================================
+CREATE TABLE team_history (
     id SERIAL PRIMARY KEY,
-    team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    team_id INT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     old_name TEXT NOT NULL,
     new_name TEXT NOT NULL,
-    changed_by BIGINT NOT NULL, -- Discord ID of captain/mod
-    changed_at TIMESTAMP DEFAULT NOW()
+    changed_by BIGINT NOT NULL,
+    changed_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS settings (
+-- ==========================================================
+-- SETTINGS
+-- ==========================================================
+CREATE TABLE settings (
     id SERIAL PRIMARY KEY,
     roster_locked BOOLEAN DEFAULT FALSE
 );
 
--- Ensure one row exists
 INSERT INTO settings (id, roster_locked)
 VALUES (1, FALSE)
 ON CONFLICT (id) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS challenge_requests (
+-- ==========================================================
+-- CHALLENGE REQUESTS
+-- ==========================================================
+CREATE TABLE challenge_requests (
     id SERIAL PRIMARY KEY,
-
     requester_team_id INT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     target_team_id INT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
-
     week INT NOT NULL DEFAULT 0,
-    status VARCHAR(20) NOT NULL DEFAULT 'Pending',
-
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    status TEXT NOT NULL DEFAULT 'Pending',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS league_settings (
+-- ==========================================================
+-- LEAGUE SETTINGS
+-- ==========================================================
+CREATE TABLE league_settings (
     id SERIAL PRIMARY KEY,
     current_week INT NOT NULL DEFAULT 1,
-    weekly_challenge_limit INT NOT NULL DEFAULT 1
+    weekly_challenge_limit INT NOT NULL DEFAULT 1,
+    challenges_enabled BOOLEAN DEFAULT TRUE,
+    show_finals_tab BOOLEAN DEFAULT FALSE,
+    last_match_generation TIMESTAMPTZ
 );
 
--- Ensure row with ID = 1 exists
 INSERT INTO league_settings (id, current_week, weekly_challenge_limit)
 VALUES (1, 1, 1)
 ON CONFLICT (id) DO NOTHING;
+
+-- ==========================================================
+-- CAST LOGS
+-- ==========================================================
+CREATE TABLE cast_logs (
+    id SERIAL PRIMARY KEY,
+    match_id INT REFERENCES matches(id),
+    team_a_id INT,
+    team_b_id INT,
+    caster_id BIGINT,
+    camera_id BIGINT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE cast_log_multis (
+    id SERIAL PRIMARY KEY,
+    match_id INT,
+    casters JSONB DEFAULT '[]',
+    camera_id BIGINT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ==========================================================
+-- MATCH ROSTER
+-- ==========================================================
+CREATE TABLE match_rosters (
+    id SERIAL PRIMARY KEY,
+    match_id INT REFERENCES matches(id),
+    team_id INT REFERENCES teams(id),
+    player_id BIGINT REFERENCES players(id),
+    display_name TEXT,
+    username TEXT,
+    role TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ==========================================================
+-- FINALS TEAMS
+-- ==========================================================
+CREATE TABLE finals_teams (
+    id SERIAL PRIMARY KEY,
+    season TEXT NOT NULL,
+    team_id INT NOT NULL REFERENCES teams(id),
+    seed INT NOT NULL
+);

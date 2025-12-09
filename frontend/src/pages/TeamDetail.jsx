@@ -22,6 +22,16 @@ export default function TeamDetail() {
   const [myTeam, setMyTeam] = useState(null);
   const [myTeamID, setMyTeamID] = useState(null);
   const [isCaptain, setIsCaptain] = useState(false);
+  const [archive, setArchive] = useState([]);
+
+  useEffect(() => {
+    if (!id) return;
+
+    fetch(`${urlBase}/api/team/archive?id=${id}`)
+      .then(res => res.json())
+      .then(data => setArchive(Array.isArray(data) ? data : []))
+      .catch(() => setArchive([]));
+  }, [id]);
 
   // ───────────────────────────────────────────────
   // 🔸 LOAD GLOBAL SETTINGS + MY TEAM INFO
@@ -329,6 +339,35 @@ export default function TeamDetail() {
         </div>
       ) : (
         <p className="text-light">No matches found for {selectedSeason}.</p>
+      )}
+      {archive.length > 0 && (
+        <div className="mt-4">
+          <h3>📦 Archived Team Stats</h3>
+          <table className="table table-dark table-striped">
+            <thead>
+              <tr>
+                <th>Season</th>
+                <th>Team Name</th>
+                <th>Rating</th>
+                <th>Wins</th>
+                <th>Losses</th>
+                <th>Matches</th>
+              </tr>
+            </thead>
+            <tbody>
+              {archive.map(a => (
+                <tr key={a.id}>
+                  <td>{a.season}</td>
+                  <td>{a.name}</td>
+                  <td>{a.rating}</td>
+                  <td>{a.wins}</td>
+                  <td>{a.losses}</td>
+                  <td>{a.matches}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

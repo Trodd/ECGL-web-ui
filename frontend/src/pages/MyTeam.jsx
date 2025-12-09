@@ -348,7 +348,7 @@ export default function MyTeam() {
                 <div className="accordion-body bg-black text-light">
 
                   {/* 🧢 Rename Team */}
-                  {myRole === "Captain" && (
+                  {/*
                     <div className="mb-4 border-bottom border-secondary pb-3">
                       <h6 className="text-info mb-2">✏️ Rename Team</h6>
                       <div className="d-flex align-items-center gap-2 flex-wrap">
@@ -384,7 +384,7 @@ export default function MyTeam() {
                         </button>
                       </div>
                     </div>
-                  )}
+                  )*/}
 
                   {/* 🟢 Team Status Toggle */}
                   <div className="mb-4 border-bottom border-secondary pb-3">

@@ -24,6 +24,8 @@ type Player struct {
 	IsMod          bool       `json:"is_mod" gorm:"-"`
 	LastLeftTeamAt *time.Time `json:"last_left_team_at"`
 	OnCooldown     bool       `gorm:"-" json:"on_cooldown"`
+	Division       string     `json:"division" gorm:"-"`
+	Tier           string     `json:"tier" gorm:"-"`
 }
 
 // --- Registered Player ---
@@ -57,6 +59,8 @@ type Team struct {
 	AllowChallenges      bool   `json:"allow_challenges" gorm:"default:true"`
 	Locked               bool   `gorm:"default:false"`
 	FinalsPlacement      int    `json:"finals_placement"`
+	Division             string `json:"division"`
+	Tier                 string `json:"tier"`
 }
 
 // --- Team Member ---
@@ -120,6 +124,16 @@ type PlayerHistory struct {
 	TeamName string `json:"team_name"`
 	Role     string `json:"role"`
 	Season   string `json:"season"`
+
+	ArchiveRating  int    `json:"archive_rating"`
+	ArchiveWins    int    `json:"archive_wins"`
+	ArchiveLosses  int    `json:"archive_losses"`
+	ArchiveMatches int    `json:"archive_matches"`
+	ArchiveTeam    string `json:"archive_team"`
+}
+
+func (PlayerHistory) TableName() string {
+	return "player_history"
 }
 
 type MyTeamResponse struct {
@@ -186,4 +200,16 @@ type FinalsTeam struct {
 	Season string `json:"season"`
 	TeamID uint   `json:"team_id"`
 	Seed   int    `json:"seed"` // 1 = top seed
+}
+
+type TeamArchive struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	TeamID    uint      `json:"team_id"`
+	Season    string    `json:"season"`
+	Name      string    `json:"name"`
+	Rating    int       `json:"rating"`
+	Wins      int       `json:"wins"`
+	Losses    int       `json:"losses"`
+	Matches   int       `json:"matches"`
+	CreatedAt time.Time `json:"created_at"`
 }

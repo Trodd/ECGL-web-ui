@@ -386,6 +386,26 @@ export default function LeagueMod() {
         setPMatches("");
     };
 
+    const handleResetChallenges = async () => {
+        if (!teamID) return;
+
+        try {
+            const res = await axios.post(
+                `${import.meta.env.VITE_API_URL}/api/team/reset_challenges`,
+                { team_id: teamID }
+            );
+
+            if (res.data.success) {
+                alert("Team’s challenge matches have been reset!");
+            } else {
+                alert("Failed to reset challenges.");
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Error resetting challenges.");
+        }
+    };
+
     const getTeamLabel = (id) => {
         const t = teams.find((x) => x.id === parseInt(id));
         return t ? `${t.name} (#${t.id})` : `Team #${id}`;
@@ -610,12 +630,18 @@ export default function LeagueMod() {
         await safePost("/api/mod/leaderboard/reset", {}, "Reset leaderboards");
     };
 
-    const handleSyncHistory = async () => {
-        await safePost("/api/mod/player/sync-history", {}, "Synced player history");
-    };
-
-    const handleRebuildELO = async () => {
-        await safePost("/api/mod/elo/rebuild", {}, "Rebuilt ELO rankings");
+    const resetPlayerLeaderboard = async () => {
+        try {
+            const res = await axios.post(
+                `${urlBase}/api/mod/reset_player_leaderboard`,
+                {},
+                { withCredentials: true }
+            );
+            alert(res.data.message || "Player leaderboard reset!");
+        } catch (err) {
+            console.error("Reset player leaderboard failed:", err);
+            alert("Failed to reset player leaderboard");
+        }
     };
 
     // ===========================================================
@@ -1442,6 +1468,13 @@ export default function LeagueMod() {
                                                     >
                                                         🔒 Lock / Unlock
                                                     </button>
+                                                    <button
+                                                        className="btn btn-outline-warning btn-sm"
+                                                        disabled={!teamID}
+                                                        onClick={handleResetChallenges}
+                                                    >
+                                                        ♻️ Reset Challenge Matches
+                                                    </button>
 
                                                     <button
                                                         className="btn btn-outline-danger btn-sm"
@@ -2140,27 +2173,57 @@ export default function LeagueMod() {
                             >
                                 Archive Season
                             </button>
+                            <button
+                                className="btn btn-outline-info btn-sm"
+                                onClick={async () => {
+                                    try {
+                                        const seasonRes = await axios.get(`${urlBase}/api/season`, { withCredentials: true });
+                                        let season = seasonRes.data?.season ?? "Preseason";
 
-                            {/* <button
+                                        await safePost(
+                                            "/api/mod/player/archive-all",
+                                            { season },
+                                            `Archived all player stats for Season ${season}`
+                                        );
+                                    } catch (err) {
+                                        console.error("Archive failed:", err);
+                                        alert("❌ Failed to archive all player stats");
+                                    }
+                                }}
+                            >
+                                📦 Archive Player Stats (All Players)
+                            </button>
+                            <button
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={async () => {
+                                    try {
+                                        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/tools/archive-team-stats`, {
+                                            method: "POST",
+                                            credentials: "include",
+                                        });
+
+                                        const data = await res.json();
+                                        alert(`Archived ${data.archived} teams successfully`);
+                                    } catch (err) {
+                                        alert("Failed to archive team stats");
+                                    }
+                                }}
+                            >
+                                📦 Archive Team Stats
+                            </button>
+
+                            <button
                                 className="btn btn-outline-warning btn-sm"
                                 onClick={handleResetLeaderboard}
                             >
-                                Reset Leaderboard
+                                Reset Team Leaderboard
                             </button>
-
                             <button
-                                className="btn btn-outline-success btn-sm"
-                                onClick={handleSyncHistory}
+                                className="btn btn-outline-warning"
+                                onClick={resetPlayerLeaderboard}
                             >
-                                Sync Player History
+                                Reset Player Leaderboard
                             </button>
-
-                            <button
-                                className="btn btn-outline-info btn-sm"
-                                onClick={handleRebuildELO}
-                            >
-                                Rebuild ELO
-                            </button> */}
 
                             {/* 🔄  Sync Discord Roles */}
                             <button

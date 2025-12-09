@@ -58,42 +58,75 @@ export default function PlayerDetail() {
       )}
 
       <h4>📜 Team History</h4>
-      {Array.isArray(player.history) && player.history.length > 0 ? (
-        <table className="table table-dark table-striped">
-          <thead>
-            <tr>
-              <th>Season</th>
-              <th>Team</th>
-            </tr>
-          </thead>
-          <tbody>
-            {player.history.map((h, i) => (
-              <tr key={i}>
-                <td>{h.season}</td>
-                <td>
-                  {h.team_id ? (
-                    <Link
-                      to={`/teams/${h.team_id}`}
-                      className="text-info text-decoration-none"
-                    >
-                      <>
-                        {h.team}
-                        {h.role === "League Sub" && (
-                          <span className="text-warning ms-2">(League Sub)</span>
-                        )}
-                      </>
-                    </Link>
-                  ) : (
-                    h.team
-                  )}
-                </td>
+      <div className="table-section">
+        {Array.isArray(player.history) && player.history.length > 0 ? (
+          <table className="table table-dark table-striped">
+            <thead>
+              <tr>
+                <th>Season</th>
+                <th>Team</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <p>No history found.</p>
-      )}
+            </thead>
+            <tbody>
+              {player.history.map((h, i) => (
+                <tr key={i}>
+                  <td>{h.season}</td>
+                  <td>
+                    {h.team ? (
+                      <Link
+                        to={`/teams/${h.team_id}`}
+                        className="text-info text-decoration-none"
+                      >
+                        <>
+                          {h.team}
+                          {h.role === "League Sub" && (
+                            <span className="text-warning ms-2">(League Sub)</span>
+                          )}
+                        </>
+                      </Link>
+                    ) : (
+                      h.team
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p>No history found.</p>
+        )}
+      </div>
+
+      {/* ARCHIVED STATS */}
+      <h4 className="mt-4">📦 Season Stats history</h4>
+      <div className="table-section">
+        {Array.isArray(player.archived_stats) && player.archived_stats.length > 0 ? (
+          <table className="table table-dark table-striped mt-2">
+            <thead>
+              <tr>
+                <th>Season</th>
+                <th>Rating</th>
+                <th>W</th>
+                <th>L</th>
+                <th>GP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {player.archived_stats.map((s, i) => (
+                <tr key={i}>
+                  <td>{s.season}</td>
+                  <td>{s.archive_rating}</td>
+                  <td>{s.archive_wins}</td>
+                  <td>{s.archive_losses}</td>
+                  <td>{s.archive_matches}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="text-light">No archived stats.</p>
+        )}
+      </div>
 
       <Link to="/players" className="btn btn-secondary mt-3">
         ← Back to Players

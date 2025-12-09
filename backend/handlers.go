@@ -20,6 +20,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var GlobalChallengesEnabled = true
@@ -322,8 +323,10 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 func GetTeams(w http.ResponseWriter, r *http.Request) {
 	var teams []Team
 	if err := DB.
+		Where("name NOT IN ('(No Team)', 'League Sub')").
 		Order("CASE WHEN status = 'Active' THEN 1 WHEN status = 'Inactive' THEN 2 ELSE 3 END").
 		Find(&teams).Error; err != nil {
+
 		http.Error(w, "Failed to load teams", http.StatusInternalServerError)
 		return
 	}
@@ -468,9 +471,13 @@ func GetPlayerLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert int64 → string
+	// Add division/tier + convert ID
 	for i := range players {
 		players[i].IDStr = strconv.FormatInt(players[i].ID, 10)
+
+		div, tier := GetDivisionTier(players[i].Rating)
+		players[i].Division = div
+		players[i].Tier = tier
 	}
 
 	respondJSON(w, players)
@@ -479,14 +486,17 @@ func GetPlayerLeaderboard(w http.ResponseWriter, r *http.Request) {
 // --- Team Leaderboard ---
 func GetTeamLeaderboard(w http.ResponseWriter, r *http.Request) {
 	type TeamRow struct {
-		ID      uint   `json:"id"`
-		Name    string `json:"name"`
-		Status  string `json:"status"`
-		Rating  int    `json:"rating"`
-		Wins    int    `json:"wins"`
-		Losses  int    `json:"losses"`
-		Matches int    `json:"matches"`
+		ID       uint   `json:"id"`
+		Name     string `json:"name"`
+		Status   string `json:"status"`
+		Rating   int    `json:"rating"`
+		Wins     int    `json:"wins"`
+		Losses   int    `json:"losses"`
+		Matches  int    `json:"matches"`
+		Division string `json:"division"`
+		Tier     string `json:"tier"`
 	}
+
 	var rows []TeamRow
 
 	if err := DB.Table("teams").
@@ -495,8 +505,16 @@ func GetTeamLeaderboard(w http.ResponseWriter, r *http.Request) {
 		Order("wins DESC").
 		Order("losses ASC").
 		Find(&rows).Error; err != nil {
+
 		http.Error(w, "failed to load team leaderboard", http.StatusInternalServerError)
 		return
+	}
+
+	// Add division + tier
+	for i := range rows {
+		div, tier := GetDivisionTier(rows[i].Rating)
+		rows[i].Division = div
+		rows[i].Tier = tier
 	}
 
 	respondJSON(w, rows)
@@ -2565,18 +2583,18 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 	var player Player
 	if err := DB.First(&player, playerID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Return default placeholder for unregistered users
 			respondJSON(w, map[string]any{
-				"id":           params["id"],
-				"username":     "Unregistered Player",
-				"display_name": "Unregistered",
-				"role":         "-",
-				"rating":       0,
-				"wins":         0,
-				"losses":       0,
-				"matches":      0,
-				"current_team": "",
-				"history":      []any{},
+				"id":             params["id"],
+				"username":       "Unregistered Player",
+				"display_name":   "Unregistered",
+				"role":           "-",
+				"rating":         0,
+				"wins":           0,
+				"losses":         0,
+				"matches":        0,
+				"current_team":   "",
+				"history":        []any{},
+				"archived_stats": []any{},
 			})
 			return
 		}
@@ -2584,7 +2602,7 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Get current team (if any)
+	// --- Current team
 	var team struct {
 		ID   uint
 		Name string
@@ -2597,7 +2615,7 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 		LIMIT 1
 	`, playerID).Scan(&team)
 
-	// --- Get player history (with team names)
+	// --- Team History
 	type HistoryRow struct {
 		Season string `json:"season"`
 		TeamID uint   `json:"team_id"`
@@ -2607,11 +2625,30 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 	var history []HistoryRow
 	DB.Raw(`
 		SELECT ph.season, ph.team_id, ph.team_name AS team
-		FROM player_histories ph
+		FROM player_history ph
 		WHERE ph.player_id = ?
 		ORDER BY ph.season ASC
 	`, playerID).Scan(&history)
 
+	// --- 🆕 Archived Stats (Season snapshots)
+	type ArchiveRow struct {
+		Season         string `json:"season"`
+		ArchiveRating  int    `json:"archive_rating"`
+		ArchiveWins    int    `json:"archive_wins"`
+		ArchiveLosses  int    `json:"archive_losses"`
+		ArchiveMatches int    `json:"archive_matches"`
+		ArchiveTeam    string `json:"archive_team"`
+	}
+
+	var archived []ArchiveRow
+	DB.Raw(`
+		SELECT season, archive_rating, archive_wins, archive_losses, archive_matches, archive_team
+		FROM player_history
+		WHERE player_id = ?
+		ORDER BY season ASC
+	`, playerID).Scan(&archived)
+
+	// --- Final Response
 	respondJSON(w, map[string]any{
 		"id":              strconv.FormatInt(player.ID, 10),
 		"username":        player.Username,
@@ -2625,6 +2662,7 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 		"current_team":    team.Name,
 		"current_team_id": team.ID,
 		"history":         history,
+		"archived_stats":  archived,
 	})
 }
 
@@ -3145,56 +3183,76 @@ func ModPlayerUnban(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/mod/leaderboard/reset
 // body: { "scope": "teams|players|all" }
-func ModLeaderboardReset(w http.ResponseWriter, r *http.Request) {
+func HandleResetTeamLeaderboard(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireLeagueMod(w, r); !ok {
 		return
 	}
-	var req struct {
-		Scope string `json:"scope"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	scope := req.Scope
-	if scope == "" {
-		scope = "all"
-	}
 
 	tx := DB.Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
-	if scope == "teams" || scope == "all" {
-		if err := tx.Model(&Team{}).Updates(map[string]any{
-			"rating":  1000,
-			"wins":    0,
-			"losses":  0,
-			"matches": 0,
-		}).Error; err != nil {
-			tx.Rollback()
-			modJSONErr(w, http.StatusInternalServerError, "failed reset teams")
-			return
-		}
+	if tx.Error != nil {
+		modJSONErr(w, 500, "failed to start transaction")
+		return
 	}
-	if scope == "players" || scope == "all" {
-		if err := tx.Model(&Player{}).Updates(map[string]any{
-			"rating":  1000,
+
+	if err := tx.Model(&Team{}).
+		Session(&gorm.Session{AllowGlobalUpdate: true}).
+		Updates(map[string]any{
+			"rating":  800,
 			"wins":    0,
 			"losses":  0,
 			"matches": 0,
 		}).Error; err != nil {
-			tx.Rollback()
-			modJSONErr(w, http.StatusInternalServerError, "failed reset players")
-			return
-		}
+
+		log.Printf("❌ Reset Team Leaderboard Failed: %v", err)
+		tx.Rollback()
+		modJSONErr(w, 500, "failed to reset team leaderboard")
+		return
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		modJSONErr(w, http.StatusInternalServerError, "commit failed")
+		log.Printf("❌ Commit Failed (Team Reset): %v", err)
+		modJSONErr(w, 500, "commit failed")
 		return
 	}
-	respondJSON(w, map[string]any{"success": true, "message": "leaderboard reset", "scope": scope})
+
+	LogGeneral("♻️ Team leaderboard reset")
+	respondJSON(w, map[string]any{"success": true, "message": "Team leaderboard reset"})
+}
+
+func HandleResetPlayerLeaderboard(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	tx := DB.Begin()
+	if tx.Error != nil {
+		modJSONErr(w, 500, "failed to start transaction")
+		return
+	}
+
+	if err := tx.Model(&Player{}).
+		Session(&gorm.Session{AllowGlobalUpdate: true}).
+		Updates(map[string]any{
+			"rating":  800,
+			"wins":    0,
+			"losses":  0,
+			"matches": 0,
+		}).Error; err != nil {
+
+		log.Printf("❌ Reset Player Leaderboard Failed: %v", err)
+		tx.Rollback()
+		modJSONErr(w, 500, "failed to reset player leaderboard")
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("❌ Commit Failed (Player Reset): %v", err)
+		modJSONErr(w, 500, "commit failed")
+		return
+	}
+
+	LogGeneral("♻️ Player leaderboard reset")
+	respondJSON(w, map[string]any{"success": true, "message": "Player leaderboard reset"})
 }
 
 // POST /api/mod/match/edit-score
@@ -3302,8 +3360,17 @@ func ModSeasonArchive(w http.ResponseWriter, r *http.Request) {
 	// 🔥 Determine CURRENT SEASON
 	// ------------------------------
 	curSeason := strings.TrimSpace(currentSeason)
-	if curSeason == "" {
-		curSeason = "0" // preseason
+	curSeason = strings.ToLower(curSeason)
+
+	switch curSeason {
+	case "pre", "preseason":
+		curSeason = "Preseason"
+	default:
+		// if numeric like "1", "2", OK
+		// if text "Season 1", extract number
+		if strings.HasPrefix(strings.ToLower(curSeason), "season ") {
+			curSeason = strings.TrimSpace(strings.TrimPrefix(curSeason, "Season"))
+		}
 	}
 
 	// ------------------------------
@@ -3395,14 +3462,18 @@ func ModSeasonArchive(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("📦 Season archived to %s (%s)", filePath, req.Format)
 
-	// --- Optionally reset leaderboard ---
-	if req.ResetAfter {
-		if err := resetAllLeagueStats(); err != nil {
-			modJSONErr(w, http.StatusInternalServerError, "archive saved but reset failed")
-			return
-		}
-		log.Printf("♻️ League reset after archive")
+	// --- Archive ALL Player Stats into player_history ---
+	var playersAll []Player
+	if err := DB.Find(&playersAll).Error; err != nil {
+		modJSONErr(w, http.StatusInternalServerError, "failed to load players for archive")
+		return
 	}
+
+	for _, p := range playersAll {
+		archivePlayerStats(p.ID, curSeason)
+	}
+
+	log.Printf("🗃️ Archived stats for %d players into PlayerHistory", len(playersAll))
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -6187,19 +6258,23 @@ func HandleGetFinalsTeams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var finals []FinalsTeam
-	if err := DB.Where("season = ?", season).Order("seed ASC").Find(&finals).Error; err != nil {
+	if err := DB.
+		Where("season = ?", season).
+		Where("team_id != 0").
+		Order("seed ASC").
+		Find(&finals).Error; err != nil {
+
 		log.Printf("❌ HandleGetFinalsTeams: DB error: %v", err)
 		http.Error(w, "Failed to load finals teams", http.StatusInternalServerError)
 		return
 	}
 
 	if len(finals) == 0 {
-		// No finals set up yet – let frontend show "No Finals"
 		respondJSON(w, []any{})
 		return
 	}
 
-	// Load team names in one query for crash-safe mapping
+	// Load team names safely
 	teamIDs := make([]uint, 0, len(finals))
 	for _, ft := range finals {
 		if ft.TeamID != 0 {
@@ -7196,4 +7271,303 @@ func ModRemoveCooldown(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "Cooldown cleared",
 	})
+}
+
+func HandleArchiveAllPlayers(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		Season string `json:"season"`
+	}
+
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	// Normalize Season
+	season := strings.TrimSpace(req.Season)
+	if season == "" {
+		season = strings.TrimSpace(currentSeason)
+	}
+
+	season = normalizeSeason(season)
+
+	// 🔥 Load players minimal numeric fields only
+	type Row struct {
+		ID      int64
+		Rating  int64
+		Wins    int64
+		Losses  int64
+		Matches int64
+	}
+
+	var rows []Row
+	if err := DB.Raw(`
+        SELECT id, rating, wins, losses, matches
+        FROM players
+        ORDER BY id
+    `).Scan(&rows).Error; err != nil {
+		log.Println("❌ Failed raw load:", err)
+		http.Error(w, "Failed to load players", 500)
+		return
+	}
+
+	log.Printf("🔥 Loaded %d players by RAW SQL\n", len(rows))
+
+	// --- Archive each one ---
+	for _, rrow := range rows {
+		archivePlayerStats(rrow.ID, season)
+	}
+
+	LogGeneral(fmt.Sprintf("📦 Archived %d players (Season %s)", len(rows), season))
+
+	respondJSON(w, map[string]any{
+		"success":          true,
+		"archived_players": len(rows),
+		"season":           season,
+	})
+}
+
+func normalizeSeason(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+
+	if s == "" {
+		return "Preseason"
+	}
+
+	if s == "pre" || s == "preseason" {
+		return "Preseason"
+	}
+
+	s = strings.TrimPrefix(s, "season ")
+
+	// If still not numeric, return as formatted text
+	if _, err := strconv.Atoi(s); err != nil {
+		return strings.Title(s)
+	}
+
+	return s
+}
+
+func archivePlayerStats(playerID int64, season string) {
+	// Load minimal player stats
+	type P struct {
+		Rating  int64
+		Wins    int64
+		Losses  int64
+		Matches int64
+		Role    string
+	}
+
+	var p P
+	DB.Raw(`
+        SELECT rating, wins, losses, matches, role
+        FROM players
+        WHERE id = ?
+    `, playerID).Scan(&p)
+
+	// Normalize Player Role
+	role := strings.TrimSpace(p.Role)
+	role = strings.Title(strings.ToLower(role)) // e.g. "player", "league sub"
+
+	if role != "Player" && role != "League Sub" {
+		role = "Player"
+	}
+
+	// Load team info
+	type TM struct {
+		TeamID   uint
+		TeamName string
+	}
+	var tm TM
+
+	DB.Raw(`
+		SELECT t.id AS team_id, t.name AS team_name
+		FROM team_members tm
+		LEFT JOIN teams t ON t.id = tm.team_id
+		WHERE tm.player_id = ?
+		LIMIT 1
+	`, playerID).Scan(&tm)
+
+	var archiveTeamID uint = 0
+
+	if tm.TeamID != 0 {
+		archiveTeamID = tm.TeamID
+	}
+
+	snapshot := PlayerHistory{
+		PlayerID:       playerID,
+		TeamID:         archiveTeamID,
+		TeamName:       tm.TeamName,
+		Role:           role,
+		Season:         season,
+		ArchiveRating:  int(p.Rating),
+		ArchiveWins:    int(p.Wins),
+		ArchiveLosses:  int(p.Losses),
+		ArchiveMatches: int(p.Matches),
+		ArchiveTeam:    tm.TeamName,
+	}
+
+	DB.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "player_id"}, {Name: "season"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"team_id",
+			"team_name",
+			"role",
+			"archive_rating",
+			"archive_wins",
+			"archive_losses",
+			"archive_matches",
+			"archive_team",
+		}),
+	}).Create(&snapshot)
+}
+
+func GetPlayerComputedRating(playerID int64) int {
+	type WL struct {
+		Wins   int
+		Losses int
+	}
+	var wl WL
+
+	DB.Raw(`
+        SELECT 
+            (SELECT COUNT(*) FROM matches WHERE winner_id = team_id AND 
+                (team_a_id = ? OR team_b_id = ?)) AS wins,
+            (SELECT COUNT(*) FROM matches WHERE loser_id = team_id AND 
+                (team_a_id = ? OR team_b_id = ?)) AS losses
+    `, playerID, playerID, playerID, playerID).Scan(&wl)
+
+	return 800 + (wl.Wins * 25) + (wl.Losses * -25)
+}
+
+func HandleResetTeamChallenges(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		TeamID uint `json:"team_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TeamID == 0 {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure team exists
+	var t Team
+	if err := DB.First(&t, req.TeamID).Error; err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	// Reset challenges
+	if err := DB.Model(&t).Update("weekly_challenges_used", 0).Error; err != nil {
+		log.Printf("⚠️ Failed to reset challenges for team %d: %v", req.TeamID, err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	LogGeneral(fmt.Sprintf("🔄 Reset weekly challenges for team %s (%d)", t.Name, req.TeamID))
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "Team challenge matches reset successfully",
+	})
+}
+
+func HandleArchiveTeamStats(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	// LOAD CURRENT SEASON FROM .env
+	season := os.Getenv("CURRENT_SEASON")
+	season = strings.TrimSpace(season)
+
+	if season == "" {
+		season = "0"
+	}
+
+	var teams []Team
+	if err := DB.Find(&teams).Error; err != nil {
+		modJSONErr(w, 500, "failed to load teams")
+		return
+	}
+
+	count := 0
+	for _, t := range teams {
+		if t.Status == "Disbanded" {
+			continue
+		}
+
+		archive := TeamArchive{
+			TeamID:  t.ID,
+			Name:    t.Name,
+			Season:  season,
+			Rating:  t.Rating,
+			Wins:    t.Wins,
+			Losses:  t.Losses,
+			Matches: t.Matches,
+		}
+
+		if err := DB.Create(&archive).Error; err != nil {
+			log.Printf("⚠️ Failed archiving team %d: %v", t.ID, err)
+			continue
+		}
+
+		count++
+	}
+
+	LogGeneral(fmt.Sprintf("📦 Archived stats for %d teams (Season %s)", count, season))
+
+	respondJSON(w, map[string]any{
+		"success":  true,
+		"archived": count,
+		"season":   season,
+	})
+}
+
+func HandleGetTeamArchive(w http.ResponseWriter, r *http.Request) {
+	teamIDStr := r.URL.Query().Get("id")
+	teamID, err := strconv.Atoi(teamIDStr)
+	if err != nil || teamID <= 0 {
+		http.Error(w, "Invalid team ID", http.StatusBadRequest)
+		return
+	}
+
+	var rows []TeamArchive
+	if err := DB.Where("team_id = ?", teamID).Order("created_at DESC").Find(&rows).Error; err != nil {
+		http.Error(w, "Failed to load team archive", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, rows)
+}
+
+func GetDivisionTier(rating int) (string, string) {
+	divisions := []struct {
+		Name  string
+		Tiers []int
+	}{
+		{"Grandmaster", []int{2200, 2100, 2000, 1900}},
+		{"Diamond", []int{1800, 1700, 1600, 1500}},
+		{"Platinum", []int{1400, 1300, 1200, 1100}},
+		{"Gold", []int{1000, 950, 900, 850}},
+		{"Silver", []int{800, 750, 700, 650}},
+		{"Bronze", []int{600, 550, 500, 0}},
+	}
+
+	for _, div := range divisions {
+		for idx, min := range div.Tiers {
+			if rating >= min {
+				// tiers I–IV (1–4)
+				tier := []string{"IV", "III", "II", "I"}[idx]
+				return div.Name, tier
+			}
+		}
+	}
+
+	return "Unranked", ""
 }

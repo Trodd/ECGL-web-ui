@@ -532,3 +532,64 @@ body {
   font-size: 0.8rem;
   padding: 2px 6px;
 }
+
+.table-section {
+  max-width: 600px;
+  background: #111;
+  padding: 15px;
+  border-radius: 8px;
+  border: 1px solid #333;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.rank-badge {
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  display: inline-block;
+  font-size: 0.8rem;
+  text-transform: capitalize;
+}
+
+/* Dark Purple (Grandmaster) */
+.rank-grandmaster {
+  background-color: #4b3a63;
+  color: #e0d7f7;
+}
+
+/* Deep Cyan/Blue (Diamond) */
+.rank-diamond {
+  background-color: #2d4f66;
+  color: #cfeaff;
+}
+
+/* Dark Teal (Platinum) */
+.rank-platinum {
+  background-color: #1d4d4f;
+  color: #d0f0ef;
+}
+
+/* Muted Gold (Gold Division) */
+.rank-gold {
+  background-color: #5a4c1f;
+  color: #f6e8a2;
+}
+
+/* Dark Silver (Gray-Blue Tone) */
+.rank-silver {
+  background-color: #3e4750;
+  color: #d8dde3;
+}
+
+/* Burnt Bronze (Muted Bronze) */
+.rank-bronze {
+  background-color: #4f2f1e;
+  color: #e8c1a0;
+}
+
+/* fallback */
+.rank-unranked {
+  background-color: #444;
+  color: #ccc;
+}

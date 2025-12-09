@@ -625,7 +625,8 @@ func main() {
 	r.HandleFunc("/api/mod/player/ban", ModPlayerBan).Methods("POST")
 	r.HandleFunc("/api/mod/player/unban", ModPlayerUnban).Methods("POST")
 	r.HandleFunc("/api/mod/team/delete", HandleModDeleteTeam).Methods("POST")
-	r.HandleFunc("/api/mod/leaderboard/reset", ModLeaderboardReset).Methods("POST")
+	r.HandleFunc("/api/mod/leaderboard/reset", HandleResetTeamLeaderboard).Methods("POST")
+	r.HandleFunc("/api/mod/reset_player_leaderboard", HandleResetPlayerLeaderboard).Methods("POST")
 	r.HandleFunc("/api/mod/match/edit-score", ModMatchEditScore).Methods("POST")
 	r.HandleFunc("/api/mod/season/archive", ModSeasonArchive).Methods("POST")
 	r.HandleFunc("/api/mod/matches/preview", HandlePreviewWeeklyMatches).Methods("GET")
@@ -650,6 +651,9 @@ func main() {
 	r.HandleFunc("/api/mod/team/promote-captain", HandleModPromoteToCaptain).Methods("POST")
 	r.HandleFunc("/api/mod/team/lock", HandleModToggleTeamLock).Methods("POST")
 	r.HandleFunc("/api/mod/player/remove-cooldown", ModRemoveCooldown).Methods("POST")
+	r.HandleFunc("/api/mod/player/archive-all", HandleArchiveAllPlayers).Methods("POST")
+	r.HandleFunc("/api/tools/archive-team-stats", HandleArchiveTeamStats).Methods("POST")
+	r.HandleFunc("/api/team/archive", HandleGetTeamArchive).Methods("GET")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()
@@ -676,6 +680,7 @@ func main() {
 	api.HandleFunc("/team/kick", HandleKickMember).Methods("POST")
 	api.HandleFunc("/team/promote", HandlePromoteMember).Methods("POST")
 	api.HandleFunc("/match/ping-sub", HandleMatchPingSub).Methods("POST")
+	r.HandleFunc("/api/team/reset_challenges", HandleResetTeamChallenges).Methods("POST")
 
 	// Players
 	api.HandleFunc("/register", handleRegister).Methods("POST")
@@ -749,7 +754,7 @@ func main() {
 		ErrorLog: log.New(quietErrorLog{}, "", 0),
 	}
 
-	// HTTP (port 80) listener for Let's Encrypt challenges
+	// HTTP (port 80) listener for Let's Encrypt challenge
 	go func() {
 		log.Println("🌐 Listening on :80 for ACME HTTP-01 challenges")
 		http.ListenAndServe(":80", certManager.HTTPHandler(nil))
