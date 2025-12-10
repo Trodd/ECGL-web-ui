@@ -182,6 +182,7 @@ type CastLogMulti struct {
 	Casters   datatypes.JSON `json:"casters" gorm:"type:jsonb"`
 	CameraID  int64          `json:"camera_id"`
 	CreatedAt time.Time      `json:"created_at"`
+	StreamURL string         `json:"stream_url"`
 }
 
 type MatchRoster struct {

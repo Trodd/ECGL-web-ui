@@ -654,6 +654,8 @@ func main() {
 	r.HandleFunc("/api/mod/player/archive-all", HandleArchiveAllPlayers).Methods("POST")
 	r.HandleFunc("/api/tools/archive-team-stats", HandleArchiveTeamStats).Methods("POST")
 	r.HandleFunc("/api/team/archive", HandleGetTeamArchive).Methods("GET")
+	r.HandleFunc("/api/check-discord", HandleCheckDiscordMembership).Methods("GET")
+	r.HandleFunc("/api/discord/info", HandleGetDiscordServerInfo).Methods("GET")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()

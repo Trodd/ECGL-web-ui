@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import DiscordRequiredModal from "../components/DiscordRequiredModal";
 
 export default function Register() {
   const [me, setMe] = useState(null);
@@ -72,6 +73,21 @@ export default function Register() {
     if (me?.id) localStorage.setItem("playerID", me.id);
     else localStorage.removeItem("playerID");
   }, [me]);
+
+  const [showDiscordModal, setShowDiscordModal] = useState(false);
+
+  useEffect(() => {
+    axios.get(`${import.meta.env.VITE_API_URL}/api/check-discord`, { withCredentials: true })
+      .then(res => {
+        if (res.data && res.data.in_guild === false) {
+          setShowDiscordModal(true);
+        }
+      })
+      .catch(() => {
+        setShowDiscordModal(true); // if error, assume not in guild
+      });
+  }, []);
+
 
   // --- Register handler ---
   async function handleRegister(e) {
@@ -180,23 +196,46 @@ export default function Register() {
     }
   }
 
+  // Always render the Discord modal
+  const discordModalElement = (
+    <DiscordRequiredModal
+      show={showDiscordModal}
+      onClose={() => setShowDiscordModal(false)}
+    />
+  );
+
   // --- Loading state ---
-  if (loading) return <p className="text-light">Checking registration status...</p>;
-  if (!me) return <p>🔑 Please log in with Discord to register.</p>;
+  if (loading)
+    return (
+      <>
+        {discordModalElement}
+        <p className="text-light">Checking registration status...</p>
+      </>
+    );
+  if (!me)
+    return (
+      <>
+        {discordModalElement}
+        <p>🔑 Please log in with Discord to register.</p>
+      </>
+    );
 
   // --- Already registered & on a team ---
   if (me?.registered && team) {
     return (
-      <div className="text-light">
-        <h2>✅ You’re already registered!</h2>
-        <p>
-          You’re on team <strong>{team.name}</strong> ({team.status}).
-        </p>
-        <p>Use the <em>My Team</em> tab to manage your roster or matches.</p>
-        <button className="btn btn-danger mt-3" onClick={handleUnregister}>
-          Unregister
-        </button>
-      </div>
+      <>
+        {discordModalElement}
+        <div className="text-light">
+          <h2>✅ You’re already registered!</h2>
+          <p>
+            You’re on team <strong>{team.name}</strong> ({team.status}).
+          </p>
+          <p>Use the <em>My Team</em> tab to manage your roster or matches.</p>
+          <button className="btn btn-danger mt-3" onClick={handleUnregister}>
+            Unregister
+          </button>
+        </div>
+      </>
     );
   }
 
@@ -206,202 +245,208 @@ export default function Register() {
     const isLeagueSub = me?.role?.toLowerCase() === "league sub";
 
     return (
-      <div className="text-light">
-        <h2 className="mb-3">
-          {isBanned ? (
-            <span className="text-danger">🚫 Your account has been banned</span>
-          ) : (
-            <>✅ You’re registered as a {me.role}</>
+      <>
+        {discordModalElement}
+        <div className="text-light">
+          <h2 className="mb-3">
+            {isBanned ? (
+              <span className="text-danger">🚫 Your account has been banned</span>
+            ) : (
+              <>✅ You’re registered as a {me.role}</>
+            )}
+          </h2>
+
+          {/* 🚫 Show roster lock warning */}
+          {!isBanned && rosterLocked && (
+            <div className="alert alert-warning small mb-3" style={{ maxWidth: 500 }}>
+              <strong>🚫 Roster Lock Active:</strong> Joining or creating teams is temporarily disabled.
+            </div>
           )}
-        </h2>
 
-        {/* 🚫 Show roster lock warning */}
-        {!isBanned && rosterLocked && (
-          <div className="alert alert-warning small mb-3" style={{ maxWidth: 500 }}>
-            <strong>🚫 Roster Lock Active:</strong> Joining or creating teams is temporarily disabled.
-          </div>
-        )}
+          {/* ⭐ ALWAYS show unregister button unless banned */}
+          {!isBanned && (
+            <button className="btn btn-danger mb-4" onClick={handleUnregister}>
+              Unregister
+            </button>
+          )}
 
-        {/* ⭐ ALWAYS show unregister button unless banned */}
-        {!isBanned && (
-          <button className="btn btn-danger mb-4" onClick={handleUnregister}>
-            Unregister
-          </button>
-        )}
-
-        {isBanned ? (
-          <p className="text-light fw-bold mt-2">
-            🚫 Contact a Mod for more info.
-          </p>
-        ) : (
-          <>
-            {/* 💬 League Sub message */}
-            {isLeagueSub && (
-              <div className="text-warning fw-bold mt-2">
-                ⚠️ League Subs cannot join or create teams.
-                <ul className="mt-2">
-                  <li>League Subs are stand-in players who fill in for teams when needed.</li>
-                  <li>Look for teams requesting subs in the <strong>looking-for-subs</strong> channel.</li>
-                  <li>League Subs do not join teams or participate as full rostered players.</li>
-                  <li>To become a full player, please unregister and re-register as a Player.</li>
-                </ul>
-              </div>
-            )}
-
-            {/* 👥 Team Join/Create section — ONLY for non-League Subs */}
-            {!isLeagueSub && !rosterLocked && (
-              <>
-                <h5>👥 Request to Join a Team</h5>
-                <div className="mb-3 position-relative" style={{ maxWidth: 300 }}>
-                  <input
-                    type="text"
-                    className="form-control bg-dark text-light"
-                    placeholder="Type team name..."
-                    value={teamQuery}
-                    onChange={(e) => setTeamQuery(e.target.value)}
-                  />
-                  {teamQuery && (
-                    <ul
-                      className="list-group position-absolute w-100"
-                      style={{ zIndex: 1000 }}
-                    >
-                      {teams
-                        .filter((t) =>
-                          t.name.toLowerCase().includes(teamQuery.toLowerCase())
-                        )
-                        .slice(0, 5)
-                        .map((t) => (
-                          <li
-                            key={t.id}
-                            className="list-group-item list-group-item-action bg-dark text-light"
-                            onClick={() => handleRequestJoin(t.name)}
-                            style={{ cursor: "pointer" }}
-                          >
-                            {t.name}
-                          </li>
-                        ))}
-                    </ul>
-                  )}
+          {isBanned ? (
+            <p className="text-light fw-bold mt-2">
+              🚫 Contact a Mod for more info.
+            </p>
+          ) : (
+            <>
+              {/* 💬 League Sub message */}
+              {isLeagueSub && (
+                <div className="text-warning fw-bold mt-2">
+                  ⚠️ League Subs cannot join or create teams.
+                  <ul className="mt-2">
+                    <li>League Subs are stand-in players who fill in for teams when needed.</li>
+                    <li>Look for teams requesting subs in the <strong>looking-for-subs</strong> channel.</li>
+                    <li>League Subs do not join teams or participate as full rostered players.</li>
+                    <li>To become a full player, please unregister and re-register as a Player.</li>
+                  </ul>
                 </div>
+              )}
 
-                <h5 className="text-light fw-light">➕ Create a Team</h5>
-                <div className="d-flex gap-2 mb-3" style={{ maxWidth: 300 }}>
-                  <input
-                    type="text"
-                    className="form-control bg-dark text-light"
-                    placeholder="Team name"
-                    value={newTeamName}
-                    onChange={(e) => setNewTeamName(e.target.value)}
-                  />
-                  <button className="btn btn-info" onClick={handleCreateTeam}>
-                    Create
-                  </button>
-                </div>
-              </>
-            )}
-          </>
-        )}
-      </div>
+              {/* 👥 Team Join/Create section — ONLY for non-League Subs */}
+              {!isLeagueSub && !rosterLocked && (
+                <>
+                  <h5>👥 Request to Join a Team</h5>
+                  <div className="mb-3 position-relative" style={{ maxWidth: 300 }}>
+                    <input
+                      type="text"
+                      className="form-control bg-dark text-light"
+                      placeholder="Type team name..."
+                      value={teamQuery}
+                      onChange={(e) => setTeamQuery(e.target.value)}
+                    />
+                    {teamQuery && (
+                      <ul
+                        className="list-group position-absolute w-100"
+                        style={{ zIndex: 1000 }}
+                      >
+                        {teams
+                          .filter((t) =>
+                            t.name.toLowerCase().includes(teamQuery.toLowerCase())
+                          )
+                          .slice(0, 5)
+                          .map((t) => (
+                            <li
+                              key={t.id}
+                              className="list-group-item list-group-item-action bg-dark text-light"
+                              onClick={() => handleRequestJoin(t.name)}
+                              style={{ cursor: "pointer" }}
+                            >
+                              {t.name}
+                            </li>
+                          ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <h5 className="text-light fw-light">➕ Create a Team</h5>
+                  <div className="d-flex gap-2 mb-3" style={{ maxWidth: 300 }}>
+                    <input
+                      type="text"
+                      className="form-control bg-dark text-light"
+                      placeholder="Team name"
+                      value={newTeamName}
+                      onChange={(e) => setNewTeamName(e.target.value)}
+                    />
+                    <button className="btn btn-info" onClick={handleCreateTeam}>
+                      Create
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </>
     );
   }
 
   // --- Default: not registered ---
   return (
-    <div className="text-light">
-      <h2>📝 Register</h2>
+    <>
+      {discordModalElement}
+      <div className="text-light">
+        <h2>📝 Register</h2>
 
-      <form onSubmit={handleRegister} className="d-flex flex-column gap-3">
-        <div
-          className="alert alert-warning small mb-2"
-          style={{ maxWidth: "500px" }}
-        >
-          <strong>⚠️ Platform Requirement Notice</strong><br />
-          Echo Combat is <b>only available on PCVR</b>.<br />
-          ❌ Quest-native players are <b>not eligible</b>.<br />
-          ✅ You must play via <b>SteamVR</b> or <b>Oculus PC</b>.
-        </div>
-
-        <div>
-          <label className="form-label">Role</label>
-          <select
-            className="form-select form-select-sm bg-dark text-light w-auto"
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
+        <form onSubmit={handleRegister} className="d-flex flex-column gap-3">
+          <div
+            className="alert alert-warning small mb-2"
+            style={{ maxWidth: "500px" }}
           >
-            <option value="">Select role...</option>
-            <option value="Player">Player</option>
-            <option value="League Sub">League Sub</option>
-          </select>
-        </div>
+            <strong>⚠️ Platform Requirement Notice</strong><br />
+            Echo Combat is <b>only available on PCVR</b>.<br />
+            ❌ Quest-native players are <b>not eligible</b>.<br />
+            ✅ You must play via <b>SteamVR</b> or <b>Oculus PC</b>.
+          </div>
 
-        <div>
-          <label className="form-label">Device</label>
-          <select
-            className="form-select form-select-sm bg-dark text-light w-auto"
-            value={device}
-            onChange={(e) => setDevice(e.target.value)}
+          <div>
+            <label className="form-label">Role</label>
+            <select
+              className="form-select form-select-sm bg-dark text-light w-auto"
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+            >
+              <option value="">Select role...</option>
+              <option value="Player">Player</option>
+              <option value="League Sub">League Sub</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="form-label">Device</label>
+            <select
+              className="form-select form-select-sm bg-dark text-light w-auto"
+              value={device}
+              onChange={(e) => setDevice(e.target.value)}
+            >
+              <option value="">Select device...</option>
+              <option value="rift">Rift</option>
+              <option value="quest_link">Quest + Link/AirLink</option>
+              <option value="quest_native" disabled>
+                Quest Native ❌
+              </option>
+            </select>
+          </div>
+
+          <div>
+            <label className="form-label">Timezone</label>
+            <select
+              className="form-select form-select-sm bg-dark text-light w-auto"
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+            >
+              <option value="">Select timezone...</option>
+              <optgroup label="North America">
+                <option value="US/Eastern">US/Eastern (EST/EDT)</option>
+                <option value="US/Central">US/Central (CST/CDT)</option>
+                <option value="US/Mountain">US/Mountain (MST/MDT)</option>
+                <option value="US/Arizona">US/Arizona (no DST)</option>
+                <option value="US/Pacific">US/Pacific (PST/PDT)</option>
+                <option value="US/Alaska">US/Alaska</option>
+                <option value="US/Hawaii">US/Hawaii</option>
+                <option value="Canada/Atlantic">Canada/Atlantic</option>
+                <option value="Canada/Newfoundland">Canada/Newfoundland</option>
+              </optgroup>
+              <optgroup label="Europe">
+                <option value="Europe/London">Europe/London (UK)</option>
+                <option value="Europe/Dublin">Europe/Dublin (Ireland)</option>
+                <option value="Europe/Lisbon">Europe/Lisbon (Portugal)</option>
+                <option value="Europe/Paris">Europe/Paris (France)</option>
+                <option value="Europe/Berlin">Europe/Berlin (Germany)</option>
+                <option value="Europe/Rome">Europe/Rome (Italy)</option>
+                <option value="Europe/Madrid">Europe/Madrid (Spain)</option>
+                <option value="Europe/Amsterdam">Europe/Amsterdam (Netherlands)</option>
+                <option value="Europe/Brussels">Europe/Brussels (Belgium)</option>
+                <option value="Europe/Vienna">Europe/Vienna (Austria)</option>
+                <option value="Europe/Oslo">Europe/Oslo (Norway)</option>
+                <option value="Europe/Stockholm">Europe/Stockholm (Sweden)</option>
+                <option value="Europe/Copenhagen">Europe/Copenhagen (Denmark)</option>
+                <option value="Europe/Helsinki">Europe/Helsinki (Finland)</option>
+                <option value="Europe/Athens">Europe/Athens (Greece)</option>
+                <option value="Europe/Sofia">Europe/Sofia (Bulgaria)</option>
+                <option value="Europe/Warsaw">Europe/Warsaw (Poland)</option>
+                <option value="Europe/Budapest">Europe/Budapest (Hungary)</option>
+                <option value="Europe/Prague">Europe/Prague (Czechia)</option>
+                <option value="Europe/Bucharest">Europe/Bucharest (Romania)</option>
+                <option value="Europe/Moscow">Europe/Moscow (Russia)</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <button
+            type="submit"
+            className="btn btn-primary w-auto align-self-start"
           >
-            <option value="">Select device...</option>
-            <option value="rift">Rift</option>
-            <option value="quest_link">Quest + Link/AirLink</option>
-            <option value="quest_native" disabled>
-              Quest Native ❌
-            </option>
-          </select>
-        </div>
-
-        <div>
-          <label className="form-label">Timezone</label>
-          <select
-            className="form-select form-select-sm bg-dark text-light w-auto"
-            value={timezone}
-            onChange={(e) => setTimezone(e.target.value)}
-          >
-            <option value="">Select timezone...</option>
-            <optgroup label="North America">
-              <option value="US/Eastern">US/Eastern (EST/EDT)</option>
-              <option value="US/Central">US/Central (CST/CDT)</option>
-              <option value="US/Mountain">US/Mountain (MST/MDT)</option>
-              <option value="US/Arizona">US/Arizona (no DST)</option>
-              <option value="US/Pacific">US/Pacific (PST/PDT)</option>
-              <option value="US/Alaska">US/Alaska</option>
-              <option value="US/Hawaii">US/Hawaii</option>
-              <option value="Canada/Atlantic">Canada/Atlantic</option>
-              <option value="Canada/Newfoundland">Canada/Newfoundland</option>
-            </optgroup>
-            <optgroup label="Europe">
-              <option value="Europe/London">Europe/London (UK)</option>
-              <option value="Europe/Dublin">Europe/Dublin (Ireland)</option>
-              <option value="Europe/Lisbon">Europe/Lisbon (Portugal)</option>
-              <option value="Europe/Paris">Europe/Paris (France)</option>
-              <option value="Europe/Berlin">Europe/Berlin (Germany)</option>
-              <option value="Europe/Rome">Europe/Rome (Italy)</option>
-              <option value="Europe/Madrid">Europe/Madrid (Spain)</option>
-              <option value="Europe/Amsterdam">Europe/Amsterdam (Netherlands)</option>
-              <option value="Europe/Brussels">Europe/Brussels (Belgium)</option>
-              <option value="Europe/Vienna">Europe/Vienna (Austria)</option>
-              <option value="Europe/Oslo">Europe/Oslo (Norway)</option>
-              <option value="Europe/Stockholm">Europe/Stockholm (Sweden)</option>
-              <option value="Europe/Copenhagen">Europe/Copenhagen (Denmark)</option>
-              <option value="Europe/Helsinki">Europe/Helsinki (Finland)</option>
-              <option value="Europe/Athens">Europe/Athens (Greece)</option>
-              <option value="Europe/Sofia">Europe/Sofia (Bulgaria)</option>
-              <option value="Europe/Warsaw">Europe/Warsaw (Poland)</option>
-              <option value="Europe/Budapest">Europe/Budapest (Hungary)</option>
-              <option value="Europe/Prague">Europe/Prague (Czechia)</option>
-              <option value="Europe/Bucharest">Europe/Bucharest (Romania)</option>
-              <option value="Europe/Moscow">Europe/Moscow (Russia)</option>
-            </optgroup>
-          </select>
-        </div>
-
-        <button
-          type="submit"
-          className="btn btn-primary w-auto align-self-start"
-        >
-          Register
-        </button>
-      </form>
-    </div>
+            Register
+          </button>
+        </form>
+      </div>
+    </>
   );
 }

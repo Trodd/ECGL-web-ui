@@ -2362,9 +2362,10 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	castData := map[string]any{
-		"active":  castErr == nil && len(casterStrs) > 0,
-		"casters": casterStrs,
-		"camera":  cameraStr,
+		"active":     castErr == nil && len(casterStrs) > 0,
+		"casters":    casterStrs,
+		"camera":     cameraStr,
+		"stream_url": cast.StreamURL,
 	}
 
 	// Final Response
@@ -4859,13 +4860,18 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 		"Cancelled":      true,
 	}
 
+	// ALWAYS skip channel creation for finalized matches
 	if finalStatuses[strings.TrimSpace(match.Status)] {
-		http.Error(w, "This match has already been finalized and cannot be casted.", http.StatusForbidden)
+		respondJSON(w, map[string]any{
+			"success":      true,
+			"skip_channel": true,
+		})
 		return
 	}
 
+	// Any other state must be "Scheduled" to create a channel.
 	if match.Status != "Scheduled" {
-		http.Error(w, "Match is not scheduled", http.StatusForbidden)
+		http.Error(w, "Match is not scheduled for casting.", http.StatusForbidden)
 		return
 	}
 
@@ -5619,9 +5625,10 @@ func HandleGetLeagueSettings(w http.ResponseWriter, r *http.Request) {
 
 func HandleSetCast(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		MatchID  uint     `json:"match_id"`
-		Casters  []string `json:"casters"`
-		CameraID string   `json:"camera_id"`
+		MatchID   uint     `json:"match_id"`
+		Casters   []string `json:"casters"`
+		CameraID  string   `json:"camera_id"`
+		StreamURL string   `json:"stream_url"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -5634,7 +5641,7 @@ func HandleSetCast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🧱 Convert casters → int64 slice (DB-safe)
+	// Convert casters → int64 slice
 	casterIDs := make([]int64, 0, len(req.Casters))
 	for _, idStr := range req.Casters {
 		idStr = strings.TrimSpace(idStr)
@@ -5654,21 +5661,21 @@ func HandleSetCast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🧱 Convert camera ID to int64
+	// Convert camera ID
 	camID, err := strconv.ParseInt(strings.TrimSpace(req.CameraID), 10, 64)
 	if err != nil || camID == 0 {
 		http.Error(w, "Invalid camera ID", http.StatusBadRequest)
 		return
 	}
 
-	// Marshal caster array as JSON (stored as JSONB)
+	// Marshal casters JSONB
 	castersJSON, err := json.Marshal(casterIDs)
 	if err != nil {
 		http.Error(w, "Failed to encode casters", http.StatusInternalServerError)
 		return
 	}
 
-	// Remove legacy single-cast record (if any)
+	// Remove legacy single-cast record
 	DB.Where("match_id = ?", req.MatchID).Delete(&CastLog{})
 
 	// Upsert CastLogMulti
@@ -5676,25 +5683,30 @@ func HandleSetCast(w http.ResponseWriter, r *http.Request) {
 	dbErr := DB.Where("match_id = ?", req.MatchID).First(&existing).Error
 
 	if errors.Is(dbErr, gorm.ErrRecordNotFound) {
-		// Insert new
+		// INSERT NEW
 		if err := DB.Create(&CastLogMulti{
 			MatchID:   req.MatchID,
 			Casters:   castersJSON,
 			CameraID:  camID,
+			StreamURL: strings.TrimSpace(req.StreamURL), // ⭐ SAVE STREAM URL
 			CreatedAt: time.Now(),
 		}).Error; err != nil {
 			http.Error(w, "Failed to save cast", http.StatusInternalServerError)
 			return
 		}
+
 	} else if dbErr == nil {
-		// Update existing
+		// UPDATE EXISTING
 		existing.MatchID = req.MatchID
 		existing.Casters = castersJSON
 		existing.CameraID = camID
+		existing.StreamURL = strings.TrimSpace(req.StreamURL) // ⭐ SAVE STREAM URL
+
 		if err := DB.Save(&existing).Error; err != nil {
 			http.Error(w, "Failed to update cast", http.StatusInternalServerError)
 			return
 		}
+
 	} else {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
@@ -5720,7 +5732,7 @@ func HandleGetCast(w http.ResponseWriter, r *http.Request) {
 		var casterIDs []int64
 		_ = json.Unmarshal(multi.Casters, &casterIDs)
 
-		// 🔁 Convert to strings for JSON (avoid JS precision issues)
+		// Convert to strings for JSON
 		casterStrs := make([]string, 0, len(casterIDs))
 		for _, id := range casterIDs {
 			casterStrs = append(casterStrs, strconv.FormatInt(id, 10))
@@ -5732,9 +5744,10 @@ func HandleGetCast(w http.ResponseWriter, r *http.Request) {
 		}
 
 		respondJSON(w, map[string]any{
-			"match_id": matchID,
-			"casters":  casterStrs,
-			"camera":   cameraStr,
+			"match_id":   matchID,
+			"casters":    casterStrs,
+			"camera":     cameraStr,
+			"stream_url": multi.StreamURL,
 		})
 		return
 	}
@@ -5756,7 +5769,12 @@ func HandleGetCast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, nil)
+	// ✅ Safe empty object (React-friendly)
+	respondJSON(w, map[string]any{
+		"match_id": matchID,
+		"casters":  []string{},
+		"camera":   "",
+	})
 }
 
 func HandleDeleteCast(w http.ResponseWriter, r *http.Request) {
@@ -7576,4 +7594,73 @@ func GetDivisionTier(rating int) (string, string) {
 	}
 
 	return "Unranked", ""
+}
+
+func HandleCheckDiscordMembership(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "session")
+	discordIDStr, ok := session.Values["discord_id"].(string)
+
+	if !ok || discordIDStr == "" {
+		respondJSON(w, map[string]any{"in_guild": false})
+		return
+	}
+
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	botToken := getEnv("DISCORD_BOT_TOKEN", "")
+
+	if guildID == "" || botToken == "" {
+		respondJSON(w, map[string]any{"in_guild": false})
+		return
+	}
+
+	url := fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordIDStr)
+
+	req2, _ := http.NewRequest("GET", url, nil)
+	req2.Header.Set("Authorization", "Bot "+botToken)
+
+	resp, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		respondJSON(w, map[string]any{"in_guild": false})
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"in_guild": resp.StatusCode == 200,
+	})
+}
+
+func HandleGetDiscordServerInfo(w http.ResponseWriter, r *http.Request) {
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	botToken := getEnv("DISCORD_BOT_TOKEN", "")
+	invite := getEnv("DISCORD_INVITE_URL", "")
+
+	if guildID == "" || botToken == "" {
+		respondJSON(w, map[string]any{"error": "Guild ID or bot token missing"})
+		return
+	}
+
+	url := fmt.Sprintf("https://discord.com/api/v10/guilds/%s?with_counts=true", guildID)
+
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", "Bot "+botToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		respondJSON(w, map[string]any{"error": "Failed to contact Discord API"})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		respondJSON(w, map[string]any{"error": "Discord API returned non-200 response"})
+		return
+	}
+
+	var guildData map[string]any
+	json.NewDecoder(resp.Body).Decode(&guildData)
+
+	// ⭐ Add invite URL safely
+	guildData["invite"] = invite
+
+	respondJSON(w, guildData)
 }

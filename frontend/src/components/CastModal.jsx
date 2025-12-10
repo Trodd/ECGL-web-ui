@@ -15,6 +15,34 @@ export default function CastModal({
 
     const [casterSearch, setCasterSearch] = useState("");
     const [cameraSearch, setCameraSearch] = useState("");
+    const [streamURL, setStreamURL] = useState("");
+    const [streamError, setStreamError] = useState("");
+
+    useEffect(() => {
+        if (!show) return;
+
+        axios
+            .get(`${urlBase}/api/players`, { withCredentials: true })
+            .then((res) => {
+                const list = Array.isArray(res.data) ? res.data : [];
+                setPlayers(list);
+
+                // Normalize existing cast
+                const savedCasters = (existingCast?.casters || []).map(String);
+                const savedCamera = existingCast?.camera ? String(existingCast.camera) : "";
+                const savedStream = existingCast?.stream_url || "";
+
+                setCasters(savedCasters);
+                setCamera(savedCamera);
+                setStreamURL(savedStream);
+            })
+            .catch(() => {
+                setPlayers([]);
+                setCasters([]);
+                setCamera("");
+                setStreamURL("");
+            });
+    }, [show]);
 
     // Load players ONLY when modal is open
     useEffect(() => {
@@ -51,6 +79,11 @@ export default function CastModal({
         );
     }
 
+    function isValidYouTube(url) {
+        if (!url) return true; // optional field
+        return /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/.+/.test(url);
+    }
+
     async function saveCast() {
         if (casters.length === 0) {
             alert("Pick at least one caster.");
@@ -61,27 +94,42 @@ export default function CastModal({
             return;
         }
 
-        try {
-            // Step 1 — Create Discord cast channel
-            await axios.post(
-                `${urlBase}/api/match/cast/request`,
-                { match_id: Number(matchID) },
-                { withCredentials: true }
-            );
+        // YouTube URL validation
+        if (!isValidYouTube(streamURL)) {
+            setStreamError("Invalid YouTube URL. Example: https://youtube.com/live/xxxx");
+            return;
+        }
 
-            // Step 2 — Save to DB
+        try {
+            // Detect whether this is an edit (not a new cast)
+            const isEditing =
+                !!(existingCast?.casters?.length ||
+                    existingCast?.camera ||
+                    existingCast?.stream_url);
+
+            // Step 1 — Only create Discord channel if this is NOT an edit
+            if (!isEditing) {
+                await axios.post(
+                    `${urlBase}/api/match/cast/request`,
+                    { match_id: Number(matchID) },
+                    { withCredentials: true }
+                );
+            }
+
+            // Step 2 — Save cast + stream URL to DB
             await axios.post(
                 `${urlBase}/api/match/cast`,
                 {
                     match_id: Number(matchID),
                     casters: casters.map(String),
                     camera_id: camera.toString(),
+                    stream_url: streamURL.trim(),
                 },
                 { withCredentials: true }
             );
 
             alert("🎥 Cast saved!");
-            if (onSaved) onSaved();
+            onSaved?.();
             onClose();
 
         } catch (err) {
@@ -179,6 +227,23 @@ export default function CastModal({
                         </option>
                     ))}
                 </select>
+
+                {/* === STREAM URL === */}
+                <label className="fw-bold mt-2">YouTube Stream URL (Optional)</label>
+                <input
+                    type="text"
+                    className="form-control form-control-sm bg-dark text-light mb-2"
+                    placeholder="https://youtube.com/live/..."
+                    value={streamURL}
+                    onChange={(e) => {
+                        setStreamURL(e.target.value);
+                        setStreamError("");
+                    }}
+                />
+
+                {streamError && (
+                    <p className="text-danger small">{streamError}</p>
+                )}
 
                 {/* === BUTTONS === */}
                 <div className="d-flex justify-content-between gap-2 mt-3">

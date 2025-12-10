@@ -125,12 +125,76 @@ export default function MatchDetail() {
                 ? "text-warning"
                 : "text-light";
 
+    function convertToEmbed(url) {
+        if (!url) return "";
+
+        // youtu.be short links
+        if (url.includes("youtu.be/")) {
+            const id = url.split("youtu.be/")[1].split(/[?&]/)[0];
+            return `https://www.youtube.com/embed/${id}`;
+        }
+
+        // youtube.com/watch?v=xxxx
+        if (url.includes("watch?v=")) {
+            const id = url.split("watch?v=")[1].split(/[?&]/)[0];
+            return `https://www.youtube.com/embed/${id}`;
+        }
+
+        // youtube.com/live/xxxx
+        if (url.includes("/live/")) {
+            const id = url.split("/live/")[1].split(/[?&]/)[0];
+            return `https://www.youtube.com/embed/${id}`;
+        }
+
+        return "";
+    }
+
     // -----------------------------------------------------
     // NORMALIZE CAST (STRING IDs SO LOOKUP ALWAYS MATCHES)
     // -----------------------------------------------------
     const cast = matchData.cast || {};
     const castCasters = (cast.casters || []).map(String);
     const castCamera = cast.camera ? String(cast.camera) : "";
+    const streamURL = cast.stream_url || "";
+    const embedURL = convertToEmbed(streamURL);
+
+    async function openCastEditor() {
+        try {
+            const res = await axios.get(
+                `${import.meta.env.VITE_API_URL}/api/match/cast/get/${id}`,
+                { withCredentials: true }
+            );
+            setExistingCast(res.data || { casters: [], camera: "" });
+        } catch {
+            setExistingCast({ casters: [], camera: "" });
+        }
+
+        setShowCastModal(true);
+    }
+
+    function convertToEmbed(url) {
+        if (!url) return "";
+
+        // youtu.be short links
+        if (url.includes("youtu.be/")) {
+            const id = url.split("youtu.be/")[1].split(/[?&]/)[0];
+            return `https://www.youtube.com/embed/${id}`;
+        }
+
+        // youtube.com/watch?v=xxxx
+        if (url.includes("watch?v=")) {
+            const id = url.split("watch?v=")[1].split(/[?&]/)[0];
+            return `https://www.youtube.com/embed/${id}`;
+        }
+
+        // youtube.com/live/xxxx
+        if (url.includes("/live/")) {
+            const id = url.split("/live/")[1].split(/[?&]/)[0];
+            return `https://www.youtube.com/embed/${id}`;
+        }
+
+        return "";
+    }
 
     return (
         <div className="container py-3 text-light">
@@ -140,14 +204,16 @@ export default function MatchDetail() {
                     Match Details <small className="ms-2">#{match.id || id}</small>
                 </h2>
 
-                {me?.is_caster && match.status === "Scheduled" && (
-                    <button
-                        className="btn btn-info btn-sm"
-                        onClick={() => setShowCastModal(true)}
-                    >
-                        🎥 Cast Match
-                    </button>
-                )}
+                {(me?.is_caster || me?.is_mod) &&
+                    match.scheduled_date && ( // ⭐ must have a real datetime
+                        <button
+                            className="btn btn-info btn-sm"
+                            onClick={openCastEditor}
+                        >
+                            🎥 {existingCast ? "Edit Cast" : "Cast Match"}
+                        </button>
+                    )
+                }
             </div>
 
             <CastModal
@@ -159,8 +225,6 @@ export default function MatchDetail() {
                 onSaved={() => {
                     axios.get(`${import.meta.env.VITE_API_URL}/api/match/${id}`)
                         .then((res) => setMatchData(res.data));
-                    axios.get(`${import.meta.env.VITE_API_URL}/api/match/${id}`)
-                        .then((res) => setMatchData(res.data));  // <-- refresh matchData.cast
 
                     axios.get(`${import.meta.env.VITE_API_URL}/api/match/cast/get/${id}`)
                         .then((res) => setExistingCast(res.data));
@@ -186,15 +250,17 @@ export default function MatchDetail() {
                 </div>
             </div>
 
-            {/* 🎥 CAST INFO */}
-            {cast?.active && (
+            {/* 🎥 CAST & BROADCAST */}
+            {(castCasters.length > 0 || castCamera || streamURL) && (
                 <div className="card bg-dark border-info shadow-sm mb-4">
                     <div className="card-header border-info text-info fw-bold d-flex align-items-center">
                         <span style={{ fontSize: "1.4rem", marginRight: "8px" }}>🎥</span>
-                        Match Cast Information
+                        Match Cast & Broadcast
                     </div>
 
                     <div className="card-body text-light">
+
+                        {/* === CAST INFO === */}
                         <p className="mb-2">
                             <strong className="text-info">Casters:</strong><br />
                             {castCasters.length > 0
@@ -202,12 +268,55 @@ export default function MatchDetail() {
                                 : "No casters assigned"}
                         </p>
 
-                        <p className="mb-0">
+                        <p className="mb-4">
                             <strong className="text-warning">Camera Operator:</strong><br />
                             {castCamera
                                 ? getPlayerName(castCamera)
                                 : "None assigned"}
                         </p>
+
+                        {/* === BROADCAST VIDEO === */}
+                        {streamURL && embedURL && (
+                            <>
+                                <div
+                                    style={{
+                                        position: "relative",
+                                        paddingBottom: "56.25%",
+                                        height: 0,
+                                        overflow: "hidden",
+                                        borderRadius: "10px",
+                                    }}
+                                >
+                                    <iframe
+                                        src={embedURL}
+                                        frameBorder="0"
+                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                        allowFullScreen
+                                        title="Match Stream"
+                                        style={{
+                                            position: "absolute",
+                                            top: 0,
+                                            left: 0,
+                                            width: "100%",
+                                            height: "100%",
+                                            borderRadius: "10px",
+                                        }}
+                                    ></iframe>
+                                </div>
+
+                                <p className="mt-3 mb-0 text-center">
+                                    <a
+                                        href={streamURL}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-info"
+                                    >
+                                        🔗 Open on YouTube
+                                    </a>
+                                </p>
+                            </>
+                        )}
+
                     </div>
                 </div>
             )}
