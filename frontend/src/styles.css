@@ -700,3 +700,55 @@ body {
     opacity: 1;
   }
 }
+
+/* Existing card styling */
+.team-stats-card {
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  padding: 16px;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background-color: #151515;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* Grid for stats */
+.team-stats-grid {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+}
+
+/* Desktop layout */
+@media (min-width: 600px) {
+  .team-stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+    justify-items: center;
+  }
+}
+
+/* Mobile layout */
+@media (max-width: 599px) {
+  .team-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    justify-items: center;
+  }
+}
+
+/* Stat item */
+.team-stat-item {
+  background: #1d1d1d;
+  padding: 10px;
+  border-radius: 6px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

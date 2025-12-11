@@ -341,13 +341,12 @@ export default function TeamDetail() {
         <p className="text-light">No matches found for {selectedSeason}.</p>
       )}
       {archive.length > 0 && (
-        <div className="mt-4">
+        <div className="team-stats-card">
           <h3>📦 Archived Team Stats</h3>
           <table className="table table-dark table-striped">
             <thead>
               <tr>
                 <th>Season</th>
-                <th>Team Name</th>
                 <th>Rating</th>
                 <th>Wins</th>
                 <th>Losses</th>
@@ -358,7 +357,6 @@ export default function TeamDetail() {
               {archive.map(a => (
                 <tr key={a.id}>
                   <td>{a.season}</td>
-                  <td>{a.name}</td>
                   <td>{a.rating}</td>
                   <td>{a.wins}</td>
                   <td>{a.losses}</td>
