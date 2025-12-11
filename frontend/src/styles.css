@@ -593,3 +593,110 @@ body {
   background-color: #444;
   color: #ccc;
 }
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  /* IMPORTANT */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-card {
+  background: #1e1f22;
+  border-radius: 12px;
+  width: 420px;
+  max-width: 95%;
+  padding: 0;
+  position: relative;
+  animation: modalPop 0.18s ease-out;
+  box-shadow: 0 0 25px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.discord-banner {
+  width: 100%;
+  height: 120px;
+  background-size: cover;
+  background-position: center;
+}
+
+.discord-invite {
+  display: flex;
+  gap: 15px;
+  padding: 20px;
+}
+
+.server-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+}
+
+.server-info {
+  flex: 1;
+}
+
+.server-name {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin-bottom: 5px;
+}
+
+.server-stats {
+  font-size: 0.9rem;
+  margin-bottom: 10px;
+  color: #ffffff;
+  opacity: 0.9;
+}
+
+.online-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #43b581;
+  margin-right: 5px;
+}
+
+.join-btn {
+  background: #5865F2;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.15s ease-in-out;
+}
+
+.join-btn:hover {
+  background: #4752C4;
+}
+
+.close-btn {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  border: none;
+  background: transparent;
+  color: #ccc;
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+@keyframes modalPop {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}

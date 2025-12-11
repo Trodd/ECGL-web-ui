@@ -7635,32 +7635,61 @@ func HandleGetDiscordServerInfo(w http.ResponseWriter, r *http.Request) {
 	invite := getEnv("DISCORD_INVITE_URL", "")
 
 	if guildID == "" || botToken == "" {
-		respondJSON(w, map[string]any{"error": "Guild ID or bot token missing"})
+		http.Error(w, "Discord settings missing", http.StatusInternalServerError)
 		return
 	}
 
+	// Fetch guild info
 	url := fmt.Sprintf("https://discord.com/api/v10/guilds/%s?with_counts=true", guildID)
-
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", "Bot "+botToken)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		respondJSON(w, map[string]any{"error": "Failed to contact Discord API"})
+		http.Error(w, "Discord API error", http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		respondJSON(w, map[string]any{"error": "Discord API returned non-200 response"})
+		body, _ := io.ReadAll(resp.Body)
+		log.Println("Discord error:", string(body))
+		http.Error(w, "Discord API returned error", http.StatusInternalServerError)
 		return
 	}
 
-	var guildData map[string]any
-	json.NewDecoder(resp.Body).Decode(&guildData)
+	var guild struct {
+		Name   string `json:"name"`
+		Icon   string `json:"icon"`
+		Banner string `json:"banner"`
 
-	// ⭐ Add invite URL safely
-	guildData["invite"] = invite
+		ApproximateMemberCount   int `json:"approximate_member_count"`
+		ApproximatePresenceCount int `json:"approximate_presence_count"`
+	}
 
-	respondJSON(w, guildData)
+	if err := json.NewDecoder(resp.Body).Decode(&guild); err != nil {
+		http.Error(w, "Failed to decode guild data", http.StatusInternalServerError)
+		return
+	}
+
+	// Build URLs
+	iconURL := ""
+	bannerURL := ""
+
+	if guild.Icon != "" {
+		iconURL = fmt.Sprintf("https://cdn.discordapp.com/icons/%s/%s.png?size=256", guildID, guild.Icon)
+	}
+	if guild.Banner != "" {
+		bannerURL = fmt.Sprintf("https://cdn.discordapp.com/banners/%s/%s.png?size=512", guildID, guild.Banner)
+	}
+
+	// Final JSON for frontend
+	respondJSON(w, map[string]any{
+		"name":    guild.Name,
+		"icon":    iconURL,
+		"banner":  bannerURL,
+		"invite":  invite,
+		"members": guild.ApproximateMemberCount,
+		"online":  guild.ApproximatePresenceCount,
+	})
 }

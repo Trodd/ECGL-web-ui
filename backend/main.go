@@ -308,6 +308,46 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	discordID, _ := strconv.ParseInt(discordIDStr, 10, 64)
 
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	botToken := getEnv("DISCORD_BOT_TOKEN", "")
+
+	if guildID == "" || botToken == "" {
+		http.Error(w, "Server misconfigured: missing guild settings", http.StatusInternalServerError)
+		return
+	}
+
+	// Discord API: check if user is in the guild
+	checkURL := fmt.Sprintf(
+		"https://discord.com/api/v10/guilds/%s/members/%s",
+		guildID, discordIDStr,
+	)
+
+	reqCheck, _ := http.NewRequest("GET", checkURL, nil)
+	reqCheck.Header.Set("Authorization", "Bot "+botToken)
+
+	respCheck, err := http.DefaultClient.Do(reqCheck)
+	if err != nil {
+		http.Error(w, "Discord check failed — try again.", http.StatusServiceUnavailable)
+		return
+	}
+	defer respCheck.Body.Close()
+
+	// 404 = NOT IN SERVER → BLOCK REGISTRATION
+	if respCheck.StatusCode == 404 {
+		respondJSON(w, map[string]any{
+			"error":        true,
+			"message":      "You must join the official ECGL Discord server before registering.",
+			"need_discord": true,
+		})
+		return
+	}
+
+	// Anything except 200 = FAIL
+	if respCheck.StatusCode != 200 {
+		http.Error(w, "Unable to verify Discord membership.", http.StatusForbidden)
+		return
+	}
+
 	if req.Device == "quest_native" {
 		http.Error(w, "Echo Combat is only available on PC (Rift or Quest+Link)", http.StatusForbidden)
 		return
@@ -656,6 +696,7 @@ func main() {
 	r.HandleFunc("/api/team/archive", HandleGetTeamArchive).Methods("GET")
 	r.HandleFunc("/api/check-discord", HandleCheckDiscordMembership).Methods("GET")
 	r.HandleFunc("/api/discord/info", HandleGetDiscordServerInfo).Methods("GET")
+	r.HandleFunc("/api/discord/server-info", HandleGetDiscordServerInfo).Methods("GET")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()

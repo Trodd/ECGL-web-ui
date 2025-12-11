@@ -6,6 +6,7 @@ export default function Register() {
   const [me, setMe] = useState(null);
   const [team, setTeam] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showDiscordModal, setShowDiscordModal] = useState(false);
 
   const [role, setRole] = useState("");
   const [device, setDevice] = useState("");
@@ -74,26 +75,30 @@ export default function Register() {
     else localStorage.removeItem("playerID");
   }, [me]);
 
-  const [showDiscordModal, setShowDiscordModal] = useState(false);
-
-  useEffect(() => {
-    axios.get(`${import.meta.env.VITE_API_URL}/api/check-discord`, { withCredentials: true })
-      .then(res => {
-        if (res.data && res.data.in_guild === false) {
-          setShowDiscordModal(true);
-        }
-      })
-      .catch(() => {
-        setShowDiscordModal(true); // if error, assume not in guild
-      });
-  }, []);
-
+  // Render modal globally
+  const discordModalElement = (
+    <DiscordRequiredModal
+      show={showDiscordModal}
+      onClose={() => setShowDiscordModal(false)}
+    />
+  );
 
   // --- Register handler ---
   async function handleRegister(e) {
     e.preventDefault();
+
     try {
-      await axios.post(
+      // 1️⃣ Check server membership BEFORE registering
+      const check = await axios.get(`${urlBase}/api/check-discord`, { withCredentials: true });
+
+      if (!check.data?.in_guild) {
+        // ❌ Not in server → show modal & block registration
+        setShowDiscordModal(true);
+        return;
+      }
+
+      // 2️⃣ Proceed with actual registration
+      const res = await axios.post(
         `${urlBase}/api/register`,
         {
           username: me?.username,
@@ -103,11 +108,21 @@ export default function Register() {
         },
         { withCredentials: true }
       );
-      const res = await axios.get(`${urlBase}/api/me`, { withCredentials: true });
-      setMe(res.data);
+
+      const updated = await axios.get(`${urlBase}/api/me`, { withCredentials: true });
+      setMe(updated.data);
+
       alert("✅ Registered successfully");
+
     } catch (err) {
       console.error("Register failed:", err);
+
+      // Backend may also return need_discord
+      if (err.response?.data?.need_discord) {
+        setShowDiscordModal(true);
+        return;
+      }
+
       alert("Failed to register");
     }
   }
@@ -195,14 +210,6 @@ export default function Register() {
       }
     }
   }
-
-  // Always render the Discord modal
-  const discordModalElement = (
-    <DiscordRequiredModal
-      show={showDiscordModal}
-      onClose={() => setShowDiscordModal(false)}
-    />
-  );
 
   // --- Loading state ---
   if (loading)
@@ -442,6 +449,7 @@ export default function Register() {
           <button
             type="submit"
             className="btn btn-primary w-auto align-self-start"
+            disabled={showDiscordModal}
           >
             Register
           </button>
