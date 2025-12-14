@@ -752,3 +752,47 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Mobile-only zoom out for League Mod tab */
+@media (max-width: 768px) {
+  .league-mod-root {
+    zoom: 0.9;
+    /* Chrome / Edge / Android */
+  }
+}
+
+/* Safari fallback */
+@supports not (zoom: 1) {
+  @media (max-width: 768px) {
+    .league-mod-root {
+      transform: scale(0.9);
+      transform-origin: top center;
+      width: 111%;
+      /* compensates for scale */
+    }
+  }
+}
+
+/* Popup buttons */
+.role-popup .dropdown-item {
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+/* Hover highlight (desktop) */
+.role-popup .dropdown-item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  transform: translateX(2px);
+}
+
+/* Active role highlight */
+.role-popup .active-role {
+  background-color: rgba(0, 123, 255, 0.18);
+  font-weight: 600;
+}
+
+/* Mobile tap feedback */
+.role-popup .dropdown-item:active {
+  background-color: rgba(255, 255, 255, 0.15);
+}
