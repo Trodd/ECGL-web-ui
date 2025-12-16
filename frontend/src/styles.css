@@ -757,7 +757,6 @@ body {
 @media (max-width: 768px) {
   .league-mod-root {
     zoom: 0.9;
-    /* Chrome / Edge / Android */
   }
 }
 
@@ -768,9 +767,20 @@ body {
       transform: scale(0.9);
       transform-origin: top center;
       width: 111%;
-      /* compensates for scale */
     }
   }
+}
+
+/* Root stabilization */
+.league-mod-root {
+  position: relative;
+}
+
+/* Popup container hardening */
+.role-popup {
+  pointer-events: auto;
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 /* Popup buttons */
@@ -780,7 +790,7 @@ body {
   transition: background-color 0.15s ease, transform 0.1s ease;
 }
 
-/* Hover highlight (desktop) */
+/* Hover highlight (desktop only) */
 .role-popup .dropdown-item:hover {
   background-color: rgba(255, 255, 255, 0.08);
   transform: translateX(2px);
@@ -795,4 +805,19 @@ body {
 /* Mobile tap feedback */
 .role-popup .dropdown-item:active {
   background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Mobile spacing & readability */
+@media (max-width: 768px) {
+  .role-popup .dropdown-item {
+    padding: 0.65rem 0.75rem;
+    font-size: 0.95rem;
+  }
+}
+
+/* Disable hover motion on touch devices */
+@media (hover: none) {
+  .role-popup .dropdown-item:hover {
+    transform: none;
+  }
 }

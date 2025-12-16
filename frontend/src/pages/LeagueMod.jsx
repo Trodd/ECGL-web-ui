@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import FinalsBracket from "../components/FinalsBracket";
 import FinalsSeedEditor from "../components/FinalsSeedEditor";
@@ -31,6 +31,24 @@ export default function LeagueMod() {
     const [playerSuggestions, setPlayerSuggestions] = useState([]);
     const [openId, setOpenId] = useState(null);
     const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+    const menuRef = useRef(null);
+
+    useEffect(() => {
+        function handleClickOutside(e) {
+            if (openId && menuRef.current && !menuRef.current.contains(e.target)) {
+                setOpenId(null);
+            }
+        }
+
+        document.addEventListener("mousedown", handleClickOutside);
+        document.addEventListener("touchstart", handleClickOutside);
+
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+            document.removeEventListener("touchstart", handleClickOutside);
+        };
+    }, [openId]);
+
     const [mapScores, setMapScores] = useState({
         map1a: "",
         map1b: "",
@@ -1656,11 +1674,34 @@ export default function LeagueMod() {
                                                                             onClick={(e) => {
                                                                                 const rect = e.currentTarget.getBoundingClientRect();
 
-                                                                                setMenuPos({
-                                                                                    top: Math.min(rect.bottom + 6, window.innerHeight - 220),
-                                                                                    left: Math.min(rect.left, window.innerWidth - 200),
-                                                                                });
+                                                                                const MENU_WIDTH = 200;
+                                                                                const MENU_HEIGHT = 240;
+                                                                                const MARGIN = 8;
 
+                                                                                let left = rect.right - MENU_WIDTH; // prefer opening left of button
+                                                                                let top = rect.bottom + 6;
+
+                                                                                // ⬅️ Prevent right overflow
+                                                                                if (left + MENU_WIDTH > window.innerWidth - MARGIN) {
+                                                                                    left = window.innerWidth - MENU_WIDTH - MARGIN;
+                                                                                }
+
+                                                                                // ➡️ Prevent left overflow
+                                                                                if (left < MARGIN) {
+                                                                                    left = MARGIN;
+                                                                                }
+
+                                                                                // ⬆️ Prevent bottom overflow
+                                                                                if (top + MENU_HEIGHT > window.innerHeight - MARGIN) {
+                                                                                    top = rect.top - MENU_HEIGHT - 6;
+                                                                                }
+
+                                                                                // ⬇️ Prevent top overflow
+                                                                                if (top < MARGIN) {
+                                                                                    top = MARGIN;
+                                                                                }
+
+                                                                                setMenuPos({ top, left });
                                                                                 setOpenId(openId === m.player_id ? null : m.player_id);
                                                                             }}
                                                                         >
@@ -1669,6 +1710,7 @@ export default function LeagueMod() {
 
                                                                         {openId === m.player_id && (
                                                                             <div
+                                                                                ref={menuRef}
                                                                                 className="position-fixed p-2 rounded bg-dark border border-secondary shadow role-popup"
                                                                                 style={{
                                                                                     zIndex: 9999,
