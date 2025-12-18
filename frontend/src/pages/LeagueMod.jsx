@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import FinalsBracket from "../components/FinalsBracket";
 import FinalsSeedEditor from "../components/FinalsSeedEditor";
+import ConsolePanel from "../components/ConsolePanel";
 
 export default function LeagueMod() {
     const urlBase = import.meta.env.VITE_API_URL;
@@ -451,6 +452,22 @@ export default function LeagueMod() {
         } catch (err) {
             console.error("❌ API error:", err.response?.data || err.message);
             setMsg("❌ Request failed — check console for details.");
+        }
+    }
+
+    async function archiveFinals() {
+        if (!confirm("Archive finals for this season? This cannot be undone.")) return;
+
+        try {
+            await axios.post(
+                `${urlBase}/api/mod/finals/archive`,
+                {},
+                { withCredentials: true }
+            );
+
+            alert("🏁 Finals archived successfully");
+        } catch (err) {
+            alert(err.response?.data || "Failed to archive finals");
         }
     }
 
@@ -2569,6 +2586,13 @@ export default function LeagueMod() {
                                         </button>
 
                                         <button
+                                            className="btn btn-outline-warning btn-sm"
+                                            onClick={archiveFinals}
+                                        >
+                                            🏁 Archive Finals
+                                        </button>
+
+                                        <button
                                             className="btn btn-danger"
                                             style={{ minWidth: 170 }}
                                             onClick={() =>
@@ -2610,6 +2634,13 @@ export default function LeagueMod() {
                             <TeamRenameHistory urlBase={urlBase} />
                         }
                     />
+                    {/*<AccordionItem
+                        id="console"
+                        title="🖥️ Server Console"
+                        children={
+                            <ConsolePanel urlBase={urlBase} />
+                        }
+                    />*/}
                 </div>
             </div>
         </div>

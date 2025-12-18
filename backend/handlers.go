@@ -19,6 +19,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -1369,64 +1370,70 @@ func HandleLeaveTeam(w http.ResponseWriter, r *http.Request) {
 
 // --- Public: Get all matches grouped by season + week ---
 func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
-	season := r.URL.Query().Get("season")
-	week := r.URL.Query().Get("week")
+	seasonFilter := r.URL.Query().Get("season")
+	weekFilter := r.URL.Query().Get("week")
 
 	type MatchRow struct {
-		ID            uint       `json:"id"`
-		MatchCode     string     `json:"match_code"`
-		TeamAID       uint       `json:"team_a_id"`
-		TeamA         string     `json:"team_a"`
-		TeamBID       uint       `json:"team_b_id"`
-		TeamB         string     `json:"team_b"`
-		ScheduledDate *time.Time `json:"scheduled_date"`
-		Status        string     `json:"status"`
-		WinnerID      *uint      `json:"winner_id"`
-		LoserID       *uint      `json:"loser_id"`
+		ID            uint
+		MatchCode     string
+		TeamAID       uint
+		TeamA         string
+		TeamBID       uint
+		TeamB         string
+		ScheduledDate *time.Time
+		Status        string
+		WinnerID      *uint
+		LoserID       *uint
+		IsFinals      bool
+		Archived      bool
+		Bracket       string
+		BracketRound  int
 	}
 
 	var rows []MatchRow
 	if err := DB.Raw(`
-        SELECT 
-            m.id,
-            m.match_code,
-            m.team_a_id,
-            t1.name AS team_a,
-            m.team_b_id,
-            t2.name AS team_b,
-            m.scheduled_date,
-            m.status,
-            m.winner_id,
-            m.loser_id
-        FROM matches m
-        JOIN teams t1 ON t1.id = m.team_a_id
-        JOIN teams t2 ON t2.id = m.team_b_id
-        
-        -- 🔥 Proper season/week sorting (DESC = Newest on top)
-        ORDER BY
-			-- Season number
+		SELECT 
+			m.id,
+			m.match_code,
+			m.team_a_id,
+			t1.name AS team_a,
+			m.team_b_id,
+			t2.name AS team_b,
+			m.scheduled_date,
+			m.status,
+			m.winner_id,
+			m.loser_id,
+			m.is_finals,
+			m.archived,
+			m.bracket,
+			m.bracket_round
+		FROM matches m
+		JOIN teams t1 ON t1.id = m.team_a_id
+		JOIN teams t2 ON t2.id = m.team_b_id
+		ORDER BY
+			-- Season DESC
 			CASE 
 				WHEN split_part(m.match_code, '-', 1) ~ '^[0-9]+$' 
 				THEN CAST(split_part(m.match_code, '-', 1) AS INTEGER)
 				ELSE 0
 			END DESC,
 
-			-- Week number if numeric, Finals = 999
+			-- Finals FIRST
 			CASE
+				WHEN m.is_finals OR m.match_code ILIKE '%-Finals-%' THEN -1
 				WHEN m.match_code ILIKE '%Week%' 
 					AND split_part(split_part(m.match_code, 'Week', 2), '-', 1) ~ '^[0-9]+$'
 				THEN CAST(split_part(split_part(m.match_code, 'Week', 2), '-', 1) AS INTEGER)
 				ELSE 999
-			END DESC,
+			END ASC,
 
 			m.id DESC
-    `).Scan(&rows).Error; err != nil {
+	`).Scan(&rows).Error; err != nil {
 		log.Printf("❌ HandlePublicMatches query failed: %v", err)
 		http.Error(w, "failed to fetch matches", http.StatusInternalServerError)
 		return
 	}
 
-	// --- Normalize derived Season + Week ---
 	type PublicMatch struct {
 		ID            uint       `json:"id"`
 		MatchCode     string     `json:"match_code"`
@@ -1441,23 +1448,40 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 		WinnerID      *uint      `json:"winner_id"`
 		LoserID       *uint      `json:"loser_id"`
 		CastActive    bool       `json:"cast_active"`
+		IsFinals      bool       `json:"is_finals"`
+		Archived      bool       `json:"archived"`
+		Bracket       string     `json:"bracket"`
+		BracketRound  int        `json:"bracket_round"`
 	}
 
 	var normalized []PublicMatch
+
 	for _, m := range rows {
 		seasonLabel, weekLabel := deriveSeasonAndWeek(m.MatchCode)
+
+		// Detect finals
+		isFinal := m.IsFinals || strings.Contains(strings.ToLower(m.MatchCode), "-finals-")
+
+		if isFinal {
+			weekLabel = "Finals"
+		}
+
+		// 🔒 HARD RULES
+		// If match_code does NOT start with a number → Preseason
+		parts := strings.Split(m.MatchCode, "-")
+		if len(parts) == 0 || !regexp.MustCompile(`^\d+$`).MatchString(parts[0]) {
+			seasonLabel = "Preseason"
+		}
 
 		if seasonLabel == "" || strings.EqualFold(seasonLabel, "null") {
 			seasonLabel = "Preseason"
 		}
 		if weekLabel == "" {
-			weekLabel = "?"
+			weekLabel = "Unknown"
 		}
 
 		var cast CastLogMulti
 		DB.Where("match_id = ?", m.ID).First(&cast)
-
-		castActive := cast.ID != 0
 
 		normalized = append(normalized, PublicMatch{
 			ID:            m.ID,
@@ -1472,25 +1496,24 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 			Status:        m.Status,
 			WinnerID:      m.WinnerID,
 			LoserID:       m.LoserID,
-			CastActive:    castActive,
+			CastActive:    cast.ID != 0,
+			IsFinals:      isFinal,
+			Archived:      m.Archived,
+			Bracket:       m.Bracket,
+			BracketRound:  m.BracketRound,
 		})
 	}
 
-	// Filter by query
 	var filtered []PublicMatch
 	for _, m := range normalized {
-		if (season == "" || strings.EqualFold(m.Season, season)) &&
-			(week == "" || m.Week == week) {
+		if (seasonFilter == "" || strings.EqualFold(m.Season, seasonFilter)) &&
+			(weekFilter == "" || m.Week == weekFilter) {
 			filtered = append(filtered, m)
 		}
 	}
 
-	// Group by season + week
 	grouped := map[string]map[string][]PublicMatch{}
 	for _, m := range filtered {
-		if m.Season == "" || strings.EqualFold(m.Season, "null") {
-			m.Season = "Preseason"
-		}
 		if _, ok := grouped[m.Season]; !ok {
 			grouped[m.Season] = map[string][]PublicMatch{}
 		}
@@ -4860,8 +4883,8 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 		"Cancelled":      true,
 	}
 
-	// ALWAYS skip channel creation for finalized matches
-	if finalStatuses[strings.TrimSpace(match.Status)] {
+	// 🔥 Finals (including archived) are ALWAYS editable for casting
+	if finalStatuses[strings.TrimSpace(match.Status)] && !match.IsFinals {
 		respondJSON(w, map[string]any{
 			"success":      true,
 			"skip_channel": true,
@@ -4869,8 +4892,8 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Any other state must be "Scheduled" to create a channel.
-	if match.Status != "Scheduled" {
+	// Non-finals must be scheduled. Finals never require scheduling.
+	if !match.IsFinals && match.Status != "Scheduled" {
 		http.Error(w, "Match is not scheduled for casting.", http.StatusForbidden)
 		return
 	}
@@ -4975,13 +4998,19 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 	var casterIDs []int64
 	_ = json.Unmarshal(cast.Casters, &casterIDs)
 
+	scheduledTime := "TBD"
+	if match.ScheduledDate != nil {
+		ts := match.ScheduledDate.Unix()
+		scheduledTime = fmt.Sprintf("<t:%d:f> (<t:%d:R>)", ts, ts)
+	}
+
 	msgBody := map[string]any{
 		"content": fmt.Sprintf(
 			"🔴 **LIVE CAST MATCH** 🔴\n"+
 				"====================================\n"+
 				"**%s vs %s**\n"+
 				"**Match Code:** `%s`\n"+
-				"**Scheduled Time:** <t:%d:f> (<t:%d:R>)\n"+
+				"**Scheduled Time:** %s\n"+
 				"====================================\n\n"+
 				"Casters will join shortly.\n\n"+
 				"🔗 **TEAMS:** Please post all Taxi Links here.\n"+
@@ -4990,8 +5019,7 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 			teamA.Name,
 			teamB.Name,
 			match.MatchCode,
-			match.ScheduledDate.Unix(),
-			match.ScheduledDate.Unix(),
+			scheduledTime,
 			buildMentionList(rosterA, rosterB),
 		),
 	}
@@ -6283,6 +6311,7 @@ func HandleGetFinalsTeams(w http.ResponseWriter, r *http.Request) {
 	var finals []FinalsTeam
 	if err := DB.
 		Where("season = ?", season).
+		Where("NOT EXISTS (SELECT 1 FROM matches m WHERE m.season = finals_teams.season AND m.is_finals = true AND m.archived = true)").
 		Where("team_id != 0").
 		Order("seed ASC").
 		Find(&finals).Error; err != nil {
@@ -6341,7 +6370,7 @@ func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
 	// Load all finals matches for the season
 	var matches []Match
 	if err := DB.
-		Where("season = ? AND is_finals = ?", season, true).
+		Where("season = ? AND is_finals = ? AND archived = false", season, true).
 		Order("bracket ASC, bracket_round ASC, bracket_slot ASC").
 		Find(&matches).Error; err != nil {
 		http.Error(w, "Failed to load finals bracket", http.StatusInternalServerError)
@@ -6406,6 +6435,7 @@ func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
 		Bracket      string `json:"bracket"`
 		BracketRound int    `json:"bracket_round"`
 		BracketSlot  int    `json:"bracket_slot"`
+		Archived     bool   `json:"archived"`
 
 		TeamA   string `json:"team_a"`
 		TeamB   string `json:"team_b"`
@@ -6433,6 +6463,7 @@ func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
 			ID:           m.ID,
 			MatchCode:    m.MatchCode,
 			Bracket:      strings.ToLower(m.Bracket),
+			Archived:     m.Archived,
 			BracketRound: m.BracketRound,
 			BracketSlot:  m.BracketSlot,
 
@@ -6633,8 +6664,11 @@ func HandleModFinalsGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clear old finals
-	if err := DB.Where("season = ? AND is_finals = true", season).Delete(&Match{}).Error; err != nil {
+	// Clear only NON-ARCHIVED finals for this season (safe)
+	if err := DB.
+		Where("season = ? AND is_finals = true AND archived = false", season).
+		Delete(&Match{}).Error; err != nil {
+
 		http.Error(w, "Failed clearing old finals bracket", http.StatusInternalServerError)
 		return
 	}
@@ -6659,37 +6693,111 @@ func HandleModFinalsReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	season := strings.TrimSpace(currentSeason)
+	season := normalizeSeason(currentSeason)
 	if season == "" {
-		season = "0"
+		season = "Preseason"
 	}
 
-	// Delete finals teams
-	if err := DB.Where("season = ?", season).Delete(&FinalsTeam{}).Error; err != nil {
-		log.Printf("❌ HandleModFinalsReset: failed to delete finals teams: %v", err)
+	// Crash prevention: do everything in a transaction
+	tx := DB.Begin()
+	if tx.Error != nil {
+		log.Printf("❌ FinalsReset: failed to start tx: %v", tx.Error)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		// crash guard: if panic, rollback
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r)
+		}
+	}()
+
+	// Check if finals are archived for this season
+	var archivedCount int64
+	if err := tx.Model(&Match{}).
+		Where("season = ? AND is_finals = true AND archived = true", season).
+		Count(&archivedCount).Error; err != nil {
+
+		tx.Rollback()
+		log.Printf("❌ FinalsReset: archive check failed: %v", err)
+		http.Error(w, "failed to validate finals state", http.StatusInternalServerError)
+		return
+	}
+
+	// Always clear finals teams for that season (safe in both modes)
+	if err := tx.Where("season = ?", season).Delete(&FinalsTeam{}).Error; err != nil {
+		tx.Rollback()
+		log.Printf("❌ FinalsReset: failed to delete finals teams: %v", err)
 		http.Error(w, "Failed to reset finals teams", http.StatusInternalServerError)
 		return
 	}
 
-	// Delete finals matches + map scores
+	// ✅ If archived, do SOFT RESET: clear bracket layout only, keep matches + scores
+	if archivedCount > 0 {
+		if err := tx.Model(&Match{}).
+			Where("season = ? AND is_finals = true", season).
+			Updates(map[string]any{
+				"bracket":       "",
+				"bracket_round": 0,
+				"bracket_slot":  0,
+			}).Error; err != nil {
+
+			tx.Rollback()
+			log.Printf("❌ FinalsReset: failed to clear bracket view: %v", err)
+			http.Error(w, "Failed to clear bracket view", http.StatusInternalServerError)
+			return
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("❌ FinalsReset: commit failed: %v", err)
+			http.Error(w, "Commit failed", http.StatusInternalServerError)
+			return
+		}
+
+		LogGeneral(fmt.Sprintf("🧹 Finals soft-reset (archived bracket cleared) for %s", season))
+
+		respondJSON(w, map[string]any{
+			"success": true,
+			"mode":    "soft",
+			"season":  season,
+			"message": "Archived finals preserved. Bracket view cleared and seeds reset.",
+		})
+		return
+	}
+
+	// ❗ If NOT archived, do HARD RESET (your original behavior): delete finals matches + scores
 	var matches []Match
-	if err := DB.Where("season = ? AND is_finals = ?", season, true).Find(&matches).Error; err != nil {
-		log.Printf("⚠️ HandleModFinalsReset: failed to load finals matches: %v", err)
+	if err := tx.Where("season = ? AND is_finals = true", season).Find(&matches).Error; err != nil {
+		// not fatal, but log
+		log.Printf("⚠️ FinalsReset: failed to load finals matches: %v", err)
 	} else if len(matches) > 0 {
 		ids := make([]uint, 0, len(matches))
 		for _, m := range matches {
 			ids = append(ids, m.ID)
 		}
-		if err := DB.Where("match_id IN ?", ids).Delete(&MatchScore{}).Error; err != nil {
-			log.Printf("⚠️ HandleModFinalsReset: failed to delete finals map scores: %v", err)
+
+		if err := tx.Where("match_id IN ?", ids).Delete(&MatchScore{}).Error; err != nil {
+			log.Printf("⚠️ FinalsReset: failed to delete finals map scores: %v", err)
 		}
-		if err := DB.Where("id IN ?", ids).Delete(&Match{}).Error; err != nil {
-			log.Printf("⚠️ HandleModFinalsReset: failed to delete finals matches: %v", err)
+		if err := tx.Where("id IN ?", ids).Delete(&Match{}).Error; err != nil {
+			log.Printf("⚠️ FinalsReset: failed to delete finals matches: %v", err)
 		}
 	}
 
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("❌ FinalsReset: commit failed: %v", err)
+		http.Error(w, "Commit failed", http.StatusInternalServerError)
+		return
+	}
+
+	LogGeneral(fmt.Sprintf("♻️ Finals hard-reset (matches deleted) for %s", season))
+
 	respondJSON(w, map[string]any{
 		"success": true,
+		"mode":    "hard",
+		"season":  season,
+		"message": "Finals reset (not archived). Matches and scores removed.",
 	})
 }
 
@@ -6855,9 +6963,10 @@ func HandleModFinalsClearBracketView(w http.ResponseWriter, r *http.Request) {
 		season = "0"
 	}
 
-	// Find finals matches
+	// Find ONLY active (non-archived) finals matches
 	var finals []Match
-	if err := DB.Where("season = ? AND is_finals = ?", season, true).
+	if err := DB.
+		Where("season = ? AND is_finals = ? AND archived = false", season, true).
 		Find(&finals).Error; err != nil {
 
 		log.Printf("❌ FinalsClearView: failed to load finals: %v", err)
@@ -7099,7 +7208,8 @@ func HandleGenerateFinals(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clear previous finals
-	DB.Where("season = ? AND is_finals = true", season).Delete(&Match{})
+	DB.Where("season = ? AND is_finals = true AND archived = false", season).
+		Delete(&Match{})
 
 	// Save new matches
 	for _, m := range matches {
@@ -7692,4 +7802,139 @@ func HandleGetDiscordServerInfo(w http.ResponseWriter, r *http.Request) {
 		"members": guild.ApproximateMemberCount,
 		"online":  guild.ApproximatePresenceCount,
 	})
+}
+
+func BuildFinalsSnapshot(season string) (map[string]any, error) {
+	var matches []Match
+
+	if err := DB.
+		Where("season = ? AND is_finals = true", season).
+		Order("bracket, bracket_round, bracket_slot").
+		Find(&matches).Error; err != nil {
+		return nil, err
+	}
+
+	// Defensive: empty finals guard
+	if len(matches) == 0 {
+		return nil, errors.New("no finals matches found")
+	}
+
+	return map[string]any{
+		"season":      season,
+		"archived_at": time.Now(),
+		"matches":     matches,
+	}, nil
+}
+
+// POST /api/mod/finals/archive
+func HandleArchiveFinals(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	season := normalizeSeason(currentSeason)
+
+	tx := DB.Begin()
+	if tx.Error != nil {
+		http.Error(w, "failed to start transaction", 500)
+		return
+	}
+
+	// Prevent double-archive
+	var count int64
+	tx.Model(&FinalsArchive{}).
+		Where("season = ?", season).
+		Count(&count)
+
+	if count > 0 {
+		tx.Rollback()
+		http.Error(w, "finals already archived for this season", http.StatusConflict)
+		return
+	}
+
+	// Build snapshot
+	snapshot, err := BuildFinalsSnapshot(season)
+	if err != nil {
+		tx.Rollback()
+		http.Error(w, err.Error(), 400)
+		return
+	}
+
+	data, _ := json.Marshal(snapshot)
+
+	if err := tx.Create(&FinalsArchive{
+		Season:   season,
+		Snapshot: datatypes.JSON(data),
+	}).Error; err != nil {
+		tx.Rollback()
+		http.Error(w, "failed to archive finals", 500)
+		return
+	}
+
+	// 🔒 Mark finals matches archived
+	if err := tx.Model(&Match{}).
+		Where("season = ? AND is_finals = true", season).
+		Update("archived", true).Error; err != nil {
+		tx.Rollback()
+		http.Error(w, "failed to mark finals archived", 500)
+		return
+	}
+
+	// 🧹 THIS IS THE KEY STEP
+	if err := ClearLiveFinalsState(tx, season); err != nil {
+		tx.Rollback()
+		http.Error(w, "failed to clear live finals state", 500)
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		http.Error(w, "commit failed", 500)
+		return
+	}
+
+	LogGeneral(fmt.Sprintf("🏁 Finals archived & cleared for %s", season))
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"season":  season,
+	})
+}
+
+// GET /api/finals/archive?season=2
+func HandleGetFinalsArchive(w http.ResponseWriter, r *http.Request) {
+	season := strings.TrimSpace(r.URL.Query().Get("season"))
+	if season == "" {
+		http.Error(w, "missing season", http.StatusBadRequest)
+		return
+	}
+
+	var archive FinalsArchive
+	if err := DB.Where("season = ?", season).First(&archive).Error; err != nil {
+		http.Error(w, "archive not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(archive.Snapshot)
+}
+
+func ClearLiveFinalsState(tx *gorm.DB, season string) error {
+	// Remove finals teams (clears finals tab team list)
+	if err := tx.Where("season = ?", season).
+		Delete(&FinalsTeam{}).Error; err != nil {
+		return err
+	}
+
+	// Clear bracket layout ONLY (keep matches)
+	if err := tx.Model(&Match{}).
+		Where("season = ? AND is_finals = true", season).
+		Updates(map[string]any{
+			"bracket":       "",
+			"bracket_round": 0,
+			"bracket_slot":  0,
+		}).Error; err != nil {
+		return err
+	}
+
+	return nil
 }

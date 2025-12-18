@@ -3,58 +3,15 @@ import axios from "axios";
 import { Link } from "react-router-dom";
 
 export default function Matchups() {
-    const [matches, setMatches] = useState({});
+    const [flatMatches, setFlatMatches] = useState([]);
     const [selectedSeason, setSelectedSeason] = useState("All");
     const [selectedWeek, setSelectedWeek] = useState("All");
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    function normalizeSeasonKey(season) {
-        if (!season || season.trim() === "" || season === "0") return "Preseason";
-        return season;
-    }
-
-    function parseMatchCode(code) {
-        // Example patterns:
-        // Preseason: "Week1-M005", "CHAL-M002", "Finals-M003"
-        // Season 1: "1-Week1-M005", "1-CHAL-M002"
-        // Season Finals: "1-Finals-M003"
-
-        const parts = code.split("-"); // ["1","Week1","M005"] or ["Week1","M005"]
-
-        // Case 1: Preseason (does NOT start with a number)
-        if (isNaN(parts[0])) {
-            const weekPart = parts[0]; // Week1, CHAL, Finals
-            return {
-                season: "Preseason",
-                week: weekPart
-                    .replace("Week", "")      // Week3 → 3
-                    .replace("Finals", "Finals")
-                    .replace("CHAL", "CHAL")
-            };
-        }
-
-        // Case 2: Season X
-        const seasonNumber = parts[0]; // "1"
-        const weekPart = parts[1];     // "Week1", "CHAL", "Finals"
-
-        return {
-            season: seasonNumber,
-            week: weekPart
-                .replace("Week", "")       // Week3 → 3
-                .replace("Finals", "Finals")
-                .replace("CHAL", "CHAL")
-        };
-    }
-
-    function normalizeWeek(week) {
-        if (week === null || week === undefined) return "CHAL";
-        const w = String(week).trim();
-        if (w === "" || w === "0") return "CHAL";
-        return w;
-    }
-
-    // --- Fetch all matchups ---
+    // -----------------------------
+    // Fetch + FLATTEN (source of truth)
+    // -----------------------------
     useEffect(() => {
         setLoading(true);
         axios
@@ -63,122 +20,81 @@ export default function Matchups() {
                 if (!res.data.success) throw new Error("Invalid response");
 
                 const raw = res.data.matches || {};
-
-                // Step 1: flatten ALL matches from all keys the API gives
                 const flat = [];
-                Object.values(raw).forEach(seasonObj => {
-                    Object.values(seasonObj).forEach(list => {
-                        list.forEach(m => flat.push(m));
+
+                Object.entries(raw).forEach(([seasonKey, weeksObj]) => {
+                    Object.entries(weeksObj).forEach(([weekKey, list]) => {
+                        list.forEach(m => {
+                            flat.push({
+                                ...m,
+                                season: seasonKey,
+                                week: weekKey,
+                            });
+                        });
                     });
                 });
 
-                // Step 2: rebuild using REAL match_code logic
-                const rebuilt = {};
-
-                flat.forEach(m => {
-                    const { season, week } = parseMatchCode(m.match_code);
-
-                    if (!rebuilt[season]) rebuilt[season] = {};
-                    if (!rebuilt[season][week]) rebuilt[season][week] = [];
-
-                    rebuilt[season][week].push(m);
-                });
-
-                setMatches(rebuilt);
+                setFlatMatches(flat);
             })
             .catch((err) => setError(err.message))
             .finally(() => setLoading(false));
     }, []);
 
-    useEffect(() => {
-        if (localStorage.getItem("refresh_matchups") === "1") {
-            axios
-                .get(`${import.meta.env.VITE_API_URL}/api/matches/public`)
-                .then((res) => {
-                    const raw = res.data.matches || {};
-
-                    const flat = [];
-                    Object.values(raw).forEach(seasonObj => {
-                        Object.values(seasonObj).forEach(list => {
-                            list.forEach(m => flat.push(m));
-                        });
-                    });
-
-                    const rebuilt = {};
-                    flat.forEach(m => {
-                        const { season, week } = parseMatchCode(m.match_code);
-
-                        if (!rebuilt[season]) rebuilt[season] = {};
-                        if (!rebuilt[season][week]) rebuilt[season][week] = [];
-
-                        rebuilt[season][week].push(m);
-                    });
-
-                    setMatches(rebuilt);
-                })
-                .finally(() => localStorage.removeItem("refresh_matchups"));
-        }
-    }, []);
-
-    // --- Build season + week options dynamically and reactively ---
-    const [availableWeeks, setAvailableWeeks] = useState(["All"]);
-
-    useEffect(() => {
-        if (!matches) return;
-
-        const rawWeeks =
-            selectedSeason !== "All" && matches[selectedSeason]
-                ? Object.keys(matches[selectedSeason])
-                : [];
-
-        const weekOptions = [
-            "All",
-            ...rawWeeks.filter((w) => w === "Finals" || /^\d+$/.test(w)), // Finals + digits only
-        ];
-
-        setAvailableWeeks(weekOptions);
-    }, [matches, selectedSeason]);
-
-    const allSeasons = [
+    // -----------------------------
+    // SEASON FILTER OPTIONS
+    // -----------------------------
+    const seasonOptions = [
         "All",
-        ...Object.keys(matches || {}).sort((a, b) => {
-            if (a === "Preseason") return -1;
-            if (b === "Preseason") return 1;
+        ...Array.from(new Set(flatMatches.map(m => m.season))).sort((a, b) => {
+            if (a === "Preseason") return 1;
+            if (b === "Preseason") return -1;
             return Number(b) - Number(a);
         }),
     ];
 
-    // --------------------------------------
-    // 🔥 SORT SEASONS AND WEEKS (DESC)
-    // --------------------------------------
-    const sortedSeasons = Object.keys(matches || {}).sort((a, b) => {
-        const A = a === "Preseason" ? 0 : Number(a);
-        const B = b === "Preseason" ? 0 : Number(b);
-        return B - A; // newest → oldest
+    // -----------------------------
+    // WEEK FILTER OPTIONS
+    // -----------------------------
+    const weekOptions = [
+        "All",
+        ...Array.from(
+            new Set(
+                flatMatches
+                    .filter(m => selectedSeason === "All" || m.season === selectedSeason)
+                    .map(m => m.week)
+            )
+        ).sort((a, b) => {
+            if (a === "Finals") return -1;
+            if (b === "Finals") return 1;
+            return Number(b) - Number(a);
+        }),
+    ];
+
+    // -----------------------------
+    // APPLY FILTERS
+    // -----------------------------
+    const filtered = flatMatches.filter(m =>
+        (selectedSeason === "All" || m.season === selectedSeason) &&
+        (selectedWeek === "All" || m.week === selectedWeek)
+    );
+
+    // -----------------------------
+    // GROUP FOR DISPLAY
+    // -----------------------------
+    const grouped = {};
+    filtered.forEach(m => {
+        grouped[m.season] ??= {};
+        grouped[m.season][m.week] ??= [];
+        grouped[m.season][m.week].push(m);
     });
 
-    const sortedFiltered = [];
-
-    sortedSeasons.forEach((season) => {
-        if (selectedSeason !== "All" && selectedSeason !== season) return;
-
-        const weeks = matches[season] || {};
-
-        const sortedWeeks = Object.keys(weeks).sort(
-            (a, b) => Number(b) - Number(a) // newest → oldest
-        );
-
-        sortedWeeks.forEach((week) => {
-            const normalized = normalizeWeek(week);
-
-            if (selectedWeek !== "All" && selectedWeek !== normalized) return;
-
-            sortedFiltered.push({
-                season,
-                week: normalized,
-                list: weeks[week],
-            });
-        });
+    // -----------------------------
+    // SORT SEASONS
+    // -----------------------------
+    const sortedSeasons = Object.keys(grouped).sort((a, b) => {
+        if (a === "Preseason") return 1;
+        if (b === "Preseason") return -1;
+        return Number(b) - Number(a);
     });
 
     return (
@@ -200,12 +116,12 @@ export default function Matchups() {
                             setSelectedWeek("All");
                         }}
                     >
-                        {allSeasons.map((s) => (
+                        {seasonOptions.map(s => (
                             <option key={s} value={s}>
-                                {s === "Preseason"
-                                    ? "Preseason"
-                                    : s === "All"
-                                        ? "All Seasons"
+                                {s === "All"
+                                    ? "All Seasons"
+                                    : s === "Preseason"
+                                        ? "Preseason"
                                         : `Season ${s}`}
                             </option>
                         ))}
@@ -217,36 +133,43 @@ export default function Matchups() {
                         value={selectedWeek}
                         onChange={(e) => setSelectedWeek(e.target.value)}
                     >
-                        {availableWeeks.map((w) => (
+                        {weekOptions.map(w => (
                             <option key={w} value={w}>
-                                {w === "All" ? "All Weeks" : `Week ${w}`}
+                                {w === "All"
+                                    ? "All Weeks"
+                                    : w === "Finals"
+                                        ? "Finals 🏁"
+                                        : `Week ${w}`}
                             </option>
                         ))}
                     </select>
                 </div>
             )}
 
-            {/* Results */}
-            {!loading && !error && sortedFiltered.length === 0 && (
-                <p className="text-light">No matches found for the selected filters.</p>
+            {!loading && !error && filtered.length === 0 && (
+                <p className="text-light">No matches found.</p>
             )}
 
-            {!loading &&
-                !error &&
-                sortedFiltered.map(({ season, week, list }) => (
+            {!loading && !error && sortedSeasons.map(season => {
+                const weeks = grouped[season];
+                const sortedWeeks = Object.keys(weeks).sort((a, b) => {
+                    if (a === "Finals") return -1;
+                    if (b === "Finals") return 1;
+                    return Number(b) - Number(a);
+                });
+
+                return sortedWeeks.map(week => (
                     <div key={`${season}-${week}`} className="mb-4">
                         <h5 className="text-info border-bottom pb-1 mb-2">
-                            {season === "Preseason" ? "Preseason" : `Season ${season}`} — Week {week}
+                            {season === "Preseason"
+                                ? "Preseason"
+                                : `Season ${season}`} —{" "}
+                            {week === "Finals" ? "Finals 🏁" : `Week ${week}`}
                         </h5>
 
-                        {list.map((m) => {
-                            const winnerId = Number(m.winner_id);
-                            const teamAId = Number(m.team_a_id);
-                            const teamBId = Number(m.team_b_id);
-
-                            let winner = null;
-                            if (winnerId && winnerId === teamAId) winner = "A";
-                            if (winnerId && winnerId === teamBId) winner = "B";
+                        {weeks[week].map(m => {
+                            const winnerA = m.winner_id === m.team_a_id;
+                            const winnerB = m.winner_id === m.team_b_id;
 
                             return (
                                 <Link
@@ -259,68 +182,47 @@ export default function Matchups() {
                                         style={{
                                             background: "#181a1b",
                                             border: "1px solid #2a2d2f",
-                                            cursor: "pointer",
                                         }}
                                     >
                                         <div className="d-flex justify-content-between">
-                                            <div>
-                                                <span
-                                                    className={`fw-bold ${winner === "A"
-                                                        ? "text-success"
-                                                        : winner === "B"
-                                                            ? "text-danger"
-                                                            : "text-light"
-                                                        }`}
-                                                >
-                                                    {m.team_a} {winner === "A" && "🏆"}
-                                                </span>{" "}
-                                                vs{" "}
-                                                <span
-                                                    className={`fw-bold ${winner === "B"
-                                                        ? "text-success"
-                                                        : winner === "A"
-                                                            ? "text-danger"
-                                                            : "text-light"
-                                                        }`}
-                                                >
-                                                    {m.team_b} {winner === "B" && "🏆"}
+                                            <div className="d-flex align-items-center gap-2">
+                                                <span className={`fw-bold ${winnerA ? "text-success" : ""}`}>
+                                                    {m.team_a} {winnerA && "🏆"}
                                                 </span>
-                                            </div>
 
-                                            <div className="text-end small text-light d-flex align-items-center">
-                                                {/* ⭐ CAST INDICATOR */}
+                                                <span>vs</span>
+
+                                                <span className={`fw-bold ${winnerB ? "text-success" : ""}`}>
+                                                    {m.team_b} {winnerB && "🏆"}
+                                                </span>
+
                                                 {m.cast_active && (
                                                     <span
-                                                        className="me-2"
-                                                        title="This match is casted"
-                                                        style={{ fontSize: "1.1rem" }}
+                                                        className="ms-2"
+                                                        title="This match was casted"
+                                                        style={{ color: "#4ea1ff" }}
                                                     >
                                                         🔴 Casted
                                                     </span>
                                                 )}
+                                            </div>
 
+                                            <div className="small">
                                                 {m.scheduled_date
-                                                    ? new Date(m.scheduled_date).toLocaleString([], {
-                                                        dateStyle: "short",
-                                                        timeStyle: "short",
-                                                    })
+                                                    ? new Date(m.scheduled_date).toLocaleString()
                                                     : "TBD"}
                                             </div>
                                         </div>
 
                                         <div className="small text-secondary">
                                             Match ID: <b>{m.match_code}</b> | Status:{" "}
-                                            <span
-                                                className={
-                                                    m.status === "Completed"
-                                                        ? "text-success"
-                                                        : m.status === "Scheduled"
-                                                            ? "text-warning"
-                                                            : m.status === "Forfeit" || m.status === "Double Forfeit"
-                                                                ? "text-danger"
-                                                                : "text-secondary"
-                                                }
-                                            >
+                                            <span className={
+                                                m.status === "Completed"
+                                                    ? "text-success"
+                                                    : m.status === "Scheduled"
+                                                        ? "text-warning"
+                                                        : "text-danger"
+                                            }>
                                                 {m.status}
                                             </span>
                                         </div>
@@ -329,7 +231,8 @@ export default function Matchups() {
                             );
                         })}
                     </div>
-                ))}
+                ));
+            })}
         </div>
     );
 }

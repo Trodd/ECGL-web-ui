@@ -719,28 +719,41 @@ export default function MyTeam() {
             const activeMatches = (matches ?? []).filter((m) => {
               if (!m) return false;
 
-              // -------- Season normalization (same as backend) --------
+              const status = (m.status ?? "").trim();
+              const isFinished = ["Finished", "Completed", "Forfeit", "Cancelled"]
+                .includes(status);
+
+              if (isFinished) return false;
+
+              // 🏆 FINALS DETECTION (robust)
+              const isFinals =
+                m.is_finals === true ||
+                m.isFinals === true ||
+                m.week === "Finals" ||
+                m.round_type === "Finals" ||
+                ["W", "L", "G"].includes(m.bracket) ||
+                String(m.match_code ?? "").toUpperCase().includes("FINAL") ||
+                String(m.match_code ?? "").toUpperCase().startsWith("F-") ||
+                String(m.match_code ?? "").toUpperCase() === "GF";
+
+              if (isFinals) return true;
+
+              // -------- Regular season logic --------
               let seasonNum = String(m.season ?? "").trim().toLowerCase();
 
               if (!seasonNum || seasonNum === "preseason") {
-                // infer from match_code
                 const prefix = (m.match_code ?? "").split("-")[0];
-                seasonNum = /^\d+$/.test(prefix) ? prefix : "0"; // preseason = 0
+                seasonNum = /^\d+$/.test(prefix) ? prefix : "0";
               }
 
               if (seasonNum.startsWith("season ")) {
                 seasonNum = seasonNum.replace("season ", "");
               }
 
-              // Normalize current season ("Season 3" → "3")
               const currentSeasonNum =
                 currentSeason.replace("Season ", "").trim() || "0";
 
-              // Finished = NOT active
-              const isFinished = ["Finished", "Completed", "Forfeit", "Cancelled"]
-                .includes((m.status ?? "").trim());
-
-              return seasonNum === currentSeasonNum && !isFinished;
+              return seasonNum === currentSeasonNum;
             });
 
             if (activeMatches.length === 0)

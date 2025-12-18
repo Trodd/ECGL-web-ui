@@ -104,6 +104,7 @@ type Match struct {
 	Bracket                string         `json:"bracket" gorm:"default:''"`      // "winners", "losers", "grand_final"
 	BracketRound           int            `json:"bracket_round" gorm:"default:0"` // 1,2,...
 	BracketSlot            int            `json:"bracket_slot" gorm:"default:0"`  // match index within the round
+	Archived               bool           `json:"archived" gorm:"default:false"`
 }
 
 // --- Match Score ---
@@ -215,4 +216,11 @@ type TeamArchive struct {
 	Losses    int       `json:"losses"`
 	Matches   int       `json:"matches"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type FinalsArchive struct {
+	ID        uint   `gorm:"primaryKey"`
+	Season    string `gorm:"uniqueIndex"`
+	Snapshot  datatypes.JSON
+	CreatedAt time.Time
 }

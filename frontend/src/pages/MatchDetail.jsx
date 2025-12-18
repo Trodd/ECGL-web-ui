@@ -204,16 +204,14 @@ export default function MatchDetail() {
                     Match Details <small className="ms-2">#{match.id || id}</small>
                 </h2>
 
-                {(me?.is_caster || me?.is_mod) &&
-                    match.scheduled_date && ( // ⭐ must have a real datetime
-                        <button
-                            className="btn btn-info btn-sm"
-                            onClick={openCastEditor}
-                        >
-                            🎥 {existingCast ? "Edit Cast" : "Cast Match"}
-                        </button>
-                    )
-                }
+                {me && (match.isFinals || match.scheduled_date) && (
+                    <button
+                        className="btn btn-info btn-sm"
+                        onClick={openCastEditor}
+                    >
+                        🎥 {existingCast ? "Edit Cast" : "Cast Match"}
+                    </button>
+                )}
             </div>
 
             <CastModal

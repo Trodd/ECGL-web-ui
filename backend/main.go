@@ -697,6 +697,8 @@ func main() {
 	r.HandleFunc("/api/check-discord", HandleCheckDiscordMembership).Methods("GET")
 	r.HandleFunc("/api/discord/info", HandleGetDiscordServerInfo).Methods("GET")
 	r.HandleFunc("/api/discord/server-info", HandleGetDiscordServerInfo).Methods("GET")
+	r.HandleFunc("/api/mod/finals/archive", HandleArchiveFinals).Methods("POST")
+	r.HandleFunc("/api/finals/archive", HandleGetFinalsArchive).Methods("GET")
 
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()

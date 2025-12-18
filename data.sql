@@ -222,3 +222,12 @@ CREATE TABLE finals_teams (
     team_id INT NOT NULL REFERENCES teams(id),
     seed INT NOT NULL
 );
+
+CREATE TABLE finals_archive (
+    id SERIAL PRIMARY KEY,
+    season TEXT NOT NULL,
+    snapshot JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE (season)
+);
