@@ -7,6 +7,8 @@ export default function Register() {
   const [team, setTeam] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showDiscordModal, setShowDiscordModal] = useState(false);
+  const query = new URLSearchParams(window.location.search);
+  const asParam = query.get("as");
 
   const [role, setRole] = useState("");
   const [device, setDevice] = useState("");
@@ -44,9 +46,17 @@ export default function Register() {
   useEffect(() => {
     async function loadStatus() {
       try {
+        const meURL = asParam
+          ? `${urlBase}/api/me?as=${asParam}`
+          : `${urlBase}/api/me`;
+
+        const teamURL = asParam
+          ? `${urlBase}/api/myteam?as=${asParam}`
+          : `${urlBase}/api/myteam`;
+
         const [meRes, teamRes] = await Promise.all([
-          axios.get(`${urlBase}/api/me`, { withCredentials: true }),
-          axios.get(`${urlBase}/api/myteam`, { withCredentials: true }),
+          axios.get(meURL, { withCredentials: true }),
+          axios.get(teamURL, { withCredentials: true }),
         ]);
         setMe(meRes.data || null);
         setTeam(teamRes.data?.team || null);
@@ -99,7 +109,9 @@ export default function Register() {
 
       // 2️⃣ Proceed with actual registration
       const res = await axios.post(
-        `${urlBase}/api/register`,
+        asParam
+          ? `${urlBase}/api/register?as=${asParam}`
+          : `${urlBase}/api/register`,
         {
           username: me?.username,
           role,
@@ -129,9 +141,20 @@ export default function Register() {
 
   async function handleUnregister() {
     try {
-      await axios.post(`${urlBase}/api/unregister`, {}, { withCredentials: true });
+      await axios.post(
+        asParam
+          ? `${urlBase}/api/unregister?as=${asParam}`
+          : `${urlBase}/api/unregister`,
+        {},
+        { withCredentials: true }
+      );
       window.location.reload();
-      const res = await axios.get(`${urlBase}/api/me`, { withCredentials: true });
+      const res = await axios.get(
+        asParam
+          ? `${urlBase}/api/me?as=${asParam}`
+          : `${urlBase}/api/me`,
+        { withCredentials: true }
+      );
       setMe(res.data);
       setTeam(null);
       alert("✅ Unregistered successfully");
