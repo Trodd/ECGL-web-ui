@@ -3085,23 +3085,37 @@ func ModPlayerKick(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireLeagueMod(w, r); !ok {
 		return
 	}
+
 	var req struct {
 		TeamID   uint       `json:"team_id"`
 		PlayerID FlexibleID `json:"player_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TeamID == 0 || req.PlayerID.Int64() == 0 {
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+		req.TeamID == 0 || req.PlayerID.Int64() == 0 {
 		modJSONErr(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
 
-	// mirror your captain kick, but privileged
-	if err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, req.PlayerID.Int64()).
-		Delete(&TeamMember{}).Error; err != nil {
+	res := DB.
+		Unscoped().
+		Where("team_id = ? AND player_id = ?", req.TeamID, req.PlayerID.Int64()).
+		Delete(&TeamMember{})
+
+	if res.Error != nil {
 		modJSONErr(w, http.StatusInternalServerError, "failed to remove member")
 		return
 	}
 
-	respondJSON(w, map[string]any{"success": true, "message": "player removed"})
+	if res.RowsAffected == 0 {
+		modJSONErr(w, http.StatusNotFound, "player not found on that team")
+		return
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "player removed",
+	})
 }
 
 // POST /api/mod/player/ban
