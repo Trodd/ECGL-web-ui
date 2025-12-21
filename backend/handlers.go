@@ -3121,11 +3121,10 @@ func ModPlayerKick(w http.ResponseWriter, r *http.Request) {
 // POST /api/mod/player/ban
 // body: { "player_id": "<discord id or number>", "reason": "optional" }
 func ModPlayerBan(w http.ResponseWriter, r *http.Request) {
-	modDiscordID, ok := requireLeagueMod(w, r)
+	_, ok := requireLeagueMod(w, r)
 	if !ok {
 		return
 	}
-	actorDiscordID := modDiscordID
 
 	var req struct {
 		PlayerID FlexibleID `json:"player_id"`
@@ -3156,9 +3155,8 @@ func ModPlayerBan(w http.ResponseWriter, r *http.Request) {
 	// ⭐ MOD LOG — Ban
 	LogGeneral(
 		fmt.Sprintf(
-			"⛔ **Player Banned:** <@%d> by <@%s>%s",
+			"⛔ **Player Banned:** <@%d>%s",
 			p.ID,
-			actorDiscordID,
 			func() string {
 				if req.Reason != "" {
 					return "\n**Reason:** " + req.Reason
@@ -3178,11 +3176,10 @@ func ModPlayerBan(w http.ResponseWriter, r *http.Request) {
 // POST /api/mod/player/unban
 // body: { "player_id": "<discord id or number>" }
 func ModPlayerUnban(w http.ResponseWriter, r *http.Request) {
-	modDiscordID, ok := requireLeagueMod(w, r)
+	_, ok := requireLeagueMod(w, r)
 	if !ok {
 		return
 	}
-	actorDiscordID := modDiscordID
 
 	var req struct {
 		PlayerID FlexibleID `json:"player_id"`
@@ -3209,9 +3206,8 @@ func ModPlayerUnban(w http.ResponseWriter, r *http.Request) {
 	// ⭐ MOD LOG — Unban
 	LogGeneral(
 		fmt.Sprintf(
-			"♻️ **Player Unbanned:** <@%d> by <@%s>",
+			"♻️ **Player Unbanned:** <@%d>",
 			p.ID,
-			actorDiscordID,
 		),
 	)
 

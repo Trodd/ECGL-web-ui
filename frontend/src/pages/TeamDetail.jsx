@@ -185,186 +185,203 @@ export default function TeamDetail() {
   // 🔸 RENDER
   // ───────────────────────────────────────────────
   return (
-    <div>
-      <h2 className="text-light">{team.name}</h2>
-
-      <p>
-        Status:{" "}
-        <span
-          className={
-            team.status === "Disbanded"
-              ? "text-danger fw-bold"
-              : team.status === "Active"
-                ? "text-success fw-bold"
-                : "text-warning fw-bold"
-          }
-        >
-          {team.status}
-        </span>
-      </p>
-
-      {/* ===========================
-          ⚔️ CHALLENGE BUTTON SHOWS HERE
-          =========================== */}
-      {/* Challenge Button */}
-      {settings?.challenges_enabled ? (
-        team.status !== "Active" ? (
-          <p className="text-warning small mt-2">
-            🔒 This team is not active and cannot receive challenges.
-          </p>
-        ) : myTeam?.status !== "Active" ? (
-          <p className="text-warning small mt-2">
-            🔒 Your team must be active to issue challenges.
-          </p>
-        ) : canChallenge ? (
-          <button
-            className="btn btn-warning mt-3"
-            onClick={handleChallengeRequest}
-          >
-            ⚔️ Challenge This Team
-          </button>
-        ) : (
-          <p className="text-secondary small mt-2">
-            {teamSettings?.allow_challenges !== true
-              ? "🚫 This team is not accepting challenges."
-              : (myTeam?.weekly_challenges_used ?? 0) >=
-                (settings?.weekly_challenge_limit ?? 999)
-                ? "⚠️ Your team has used all weekly challenge attempts."
-                : !isCaptain
-                  ? "⛔ Only the captain or co-captain may issue challenges."
-                  : ""}
-          </p>
-        )
-      ) : (
-        <p className="text-warning small mt-2">
-          ⛔ Challenge matches are currently disabled league-wide.
-        </p>
-      )}
-
-      <h3>Roster</h3>
-      {roster.some(p => p.on_cooldown) && (
-        <p className="text-warning small mt-2 mb-1">
-          ⏳ Players on cooldown cannot participate in matches until the next matchup generation.
-        </p>
-      )}
-      {roster.length ? (
-        <ul className="list-group roster-list">
-          {roster.map((p) => (
-            <li
-              key={p.id ?? Math.random()}
-              className="list-group-item d-flex justify-content-between align-items-center"
+    <div
+      className="container text-light py-4"
+      style={{ maxWidth: 960 }}
+    >
+      {/* ================= TEAM HEADER ================= */}
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
+          <div>
+            <h2 className="mb-1">{team.name}</h2>
+            <span
+              className={`badge px-3 py-2 ${team.status === "Active"
+                  ? "bg-success"
+                  : team.status === "Disbanded"
+                    ? "bg-danger"
+                    : "bg-warning text-dark"
+                }`}
             >
-              <div className="d-flex align-items-center gap-2">
-                <strong>{p.display_name || p.username || "Unknown"}</strong>
-                <span className={`roster-role ${p.role?.toLowerCase() || ""}`}>
-                  {p.role || "-"}
+              {team.status}
+            </span>
+          </div>
+
+          {/* ⚔️ CHALLENGE CTA */}
+          <div className="text-end">
+            {settings?.challenges_enabled ? (
+              team.status !== "Active" ? (
+                <span className="text-warning small">
+                  🔒 Team inactive
                 </span>
-
-                {/* ⭐ Cooldown Badge */}
-                {p.on_cooldown && (
-                  <span className="badge bg-warning text-dark">
-                    ⏳ Cooldown
-                  </span>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-light">No roster found.</p>
-      )}
-
-      <h3 className="mt-4 mb-3 text-light">📜 Match History</h3>
-
-      {allSeasons.length > 1 && (
-        <div className="d-flex justify-content-end mb-2">
-          <select
-            className="form-select form-select-sm bg-dark text-light"
-            style={{ maxWidth: 200 }}
-            value={selectedSeason}
-            onChange={(e) => setSelectedSeason(e.target.value)}
-          >
-            {allSeasons.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {filteredMatches.length ? (
-        <div className="table-responsive">
-          <table className="table table-dark table-striped align-middle text-center table-hover">
-            <thead className="table-secondary">
-              <tr>
-                <th>#</th>
-                <th>Opponent</th>
-                <th>Date</th>
-                <th>Result</th>
-                <th>Match ID</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredMatches.map((m, idx) => (
-                <tr
-                  key={m.id || idx}
-                  className="match-row"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => navigate(`/match/${m.id}`)}
+              ) : myTeam?.status !== "Active" ? (
+                <span className="text-warning small">
+                  🔒 Your team inactive
+                </span>
+              ) : canChallenge ? (
+                <button
+                  className="btn btn-warning"
+                  onClick={handleChallengeRequest}
                 >
-                  <td>{idx + 1}</td>
-                  <td className="fw-semibold">
-                    {m.opponent || "Unknown"}
-                  </td>
-                  <td>
-                    {m.date
-                      ? new Date(m.date).toLocaleDateString()
-                      : "-"}
-                  </td>
-                  <td
-                    className={
-                      m.result === "Win"
-                        ? "text-success fw-bold"
-                        : m.result === "Loss"
-                          ? "text-danger fw-bold"
-                          : "text-warning fw-bold"
-                    }
-                  >
-                    {m.result || "Pending"}
-                  </td>
-                  <td>{m.match_code || m.id}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  ⚔️ Challenge Team
+                </button>
+              ) : (
+                <span className="text-secondary small">
+                  {teamSettings?.allow_challenges !== true
+                    ? "🚫 Not accepting challenges"
+                    : (myTeam?.weekly_challenges_used ?? 0) >=
+                      (settings?.weekly_challenge_limit ?? 999)
+                      ? "⚠️ Weekly challenge limit reached"
+                      : !isCaptain
+                        ? "⛔ Captain only"
+                        : ""}
+                </span>
+              )
+            ) : (
+              <span className="text-warning small">
+                ⛔ Challenges disabled league-wide
+              </span>
+            )}
+          </div>
         </div>
-      ) : (
-        <p className="text-light">No matches found for {selectedSeason}.</p>
-      )}
-      {archive.length > 0 && (
-        <div className="team-stats-card">
-          <h3>📦 Archived Team Stats</h3>
-          <table className="table table-dark table-striped">
-            <thead>
-              <tr>
-                <th>Season</th>
-                <th>Rating</th>
-                <th>Wins</th>
-                <th>Losses</th>
-                <th>Matches</th>
-              </tr>
-            </thead>
-            <tbody>
-              {archive.map(a => (
-                <tr key={a.id}>
-                  <td>{a.season}</td>
-                  <td>{a.rating}</td>
-                  <td>{a.wins}</td>
-                  <td>{a.losses}</td>
-                  <td>{a.matches}</td>
-                </tr>
+      </div>
+
+      {/* ================= ROSTER ================= */}
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+        <h4 className="mb-3">👥 Roster</h4>
+
+        {roster.some(p => p.on_cooldown) && (
+          <div className="alert alert-warning small py-2">
+            ⏳ Players on cooldown cannot participate in matches yet.
+          </div>
+        )}
+
+        {roster.length ? (
+          <ul className="list-group">
+            {roster.map(p => (
+              <li
+                key={p.id}
+                className="list-group-item bg-black text-light d-flex justify-content-between align-items-center"
+                style={{ borderColor: "#333" }}
+              >
+                <div className="d-flex align-items-center gap-2">
+                  <strong>{p.display_name || p.username || "Unknown"}</strong>
+                  <span className={`badge bg-secondary`}>
+                    {p.role || "-"}
+                  </span>
+                  {p.on_cooldown && (
+                    <span className="badge bg-warning text-dark">
+                      ⏳ Cooldown
+                    </span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-secondary mb-0">No roster found.</p>
+        )}
+      </div>
+
+      {/* ================= MATCH HISTORY ================= */}
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <h4 className="mb-0">📜 Match History</h4>
+
+          {allSeasons.length > 1 && (
+            <select
+              className="form-select form-select-sm bg-black text-light"
+              style={{ maxWidth: 200 }}
+              value={selectedSeason}
+              onChange={e => setSelectedSeason(e.target.value)}
+            >
+              {allSeasons.map(s => (
+                <option key={s}>{s}</option>
               ))}
-            </tbody>
-          </table>
+            </select>
+          )}
+        </div>
+
+        {filteredMatches.length ? (
+          <div className="table-responsive">
+            <table className="table table-dark table-striped table-hover align-middle text-center">
+              <thead className="table-secondary">
+                <tr>
+                  <th>#</th>
+                  <th>Opponent</th>
+                  <th>Date</th>
+                  <th>Result</th>
+                  <th>Match</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMatches.map((m, idx) => (
+                  <tr
+                    key={m.id}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => navigate(`/match/${m.id}`)}
+                  >
+                    <td>{idx + 1}</td>
+                    <td className="fw-semibold">
+                      {m.opponent || "Unknown"}
+                    </td>
+                    <td>
+                      {m.date
+                        ? new Date(m.date).toLocaleDateString()
+                        : "-"}
+                    </td>
+                    <td
+                      className={
+                        m.result === "Win"
+                          ? "text-success fw-bold"
+                          : m.result === "Loss"
+                            ? "text-danger fw-bold"
+                            : "text-warning fw-bold"
+                      }
+                    >
+                      {m.result || "Pending"}
+                    </td>
+                    <td>{m.match_code || m.id}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-secondary mb-0">
+            No matches found for {selectedSeason}.
+          </p>
+        )}
+      </div>
+
+      {/* ================= ARCHIVE ================= */}
+      {archive.length > 0 && (
+        <div className="card bg-dark border-secondary p-4 shadow-sm">
+          <h4 className="mb-3">📦 Archived Team Stats</h4>
+
+          <div className="table-responsive">
+            <table className="table table-dark table-striped text-center">
+              <thead className="table-secondary">
+                <tr>
+                  <th>Season</th>
+                  <th>Rating</th>
+                  <th>Wins</th>
+                  <th>Losses</th>
+                  <th>Matches</th>
+                </tr>
+              </thead>
+              <tbody>
+                {archive.map(a => (
+                  <tr key={a.id}>
+                    <td>{a.season}</td>
+                    <td>{a.rating}</td>
+                    <td>{a.wins}</td>
+                    <td>{a.losses}</td>
+                    <td>{a.matches}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

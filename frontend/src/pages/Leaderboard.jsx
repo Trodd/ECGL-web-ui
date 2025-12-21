@@ -36,92 +36,110 @@ export default function Leaderboard() {
   }
 
   return (
-    <div>
-      <h2>Leaderboard</h2>
+    <div
+      className="card bg-dark border-secondary p-4 shadow-sm mx-auto"
+      style={{ maxWidth: 900 }}
+    >
+      {/* ================= HEADER ================= */}
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <h2 className="mb-0 text-light">🏆 Leaderboard</h2>
 
-      {/* Filter toggle */}
-      <div className="btn-group mb-3">
-        <button
-          className={`btn ${view === "teams" ? "btn-primary" : "btn-outline-primary"}`}
-          onClick={() => setView("teams")}
-        >
-          🏆 Teams
-        </button>
-        <button
-          className={`btn ${view === "players" ? "btn-primary" : "btn-outline-primary"}`}
-          onClick={() => setView("players")}
-        >
-          🎮 Players
-        </button>
+        {/* Toggle */}
+        <div className="btn-group">
+          <button
+            className={`btn btn-sm ${view === "teams" ? "btn-primary" : "btn-outline-primary"
+              }`}
+            onClick={() => setView("teams")}
+          >
+            🏆 Teams
+          </button>
+          <button
+            className={`btn btn-sm ${view === "players" ? "btn-primary" : "btn-outline-primary"
+              }`}
+            onClick={() => setView("players")}
+          >
+            🎮 Players
+          </button>
+        </div>
       </div>
 
+      {/* ================= CONTENT ================= */}
       {view === "teams" ? (
-        <table className="table table-dark table-striped">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Team</th>
-              <th>Rank</th>
-              <th>Rating</th>
-              <th>W</th>
-              <th>L</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedTeams.map((t, idx) => (
-              <tr key={t.id}>
-                <td>{idx + 1}</td>
-                <td>{t.name}</td>
-
-                {/* ⭐ DIVISION + TIER */}
-                <td>
-                  <span className={getRankClass(t.division)}>
-                    {t.division} {t.tier}
-                  </span>
-                </td>
-
-                <td>{t.rating}</td>
-                <td>{t.wins}</td>
-                <td>{t.losses}</td>
+        <div className="table-responsive">
+          <table className="table table-dark table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th style={{ width: 50 }}>#</th>
+                <th>Team</th>
+                <th>Rank</th>
+                <th>Rating</th>
+                <th>W</th>
+                <th>L</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sortedTeams.map((t, idx) => (
+                <tr key={t.id}>
+                  <td className="fw-bold text-secondary">{idx + 1}</td>
+
+                  <td className="fw-semibold">
+                    {t.name}
+                  </td>
+
+                  <td>
+                    <span className={`rank-badge ${getRankClass(t.division)}`}>
+                      {t.division} {t.tier}
+                    </span>
+                  </td>
+
+                  <td className="fw-bold">{t.rating}</td>
+                  <td className="text-success fw-semibold">{t.wins}</td>
+                  <td className="text-danger fw-semibold">{t.losses}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
-        <table className="table table-dark table-striped">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Player</th>
-              <th>Rank</th>
-              <th>Rating</th>
-              <th>W</th>
-              <th>L</th>
-              <th>GP</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedPlayers.map((p, idx) => (
-              <tr key={p.id}>
-                <td>{idx + 1}</td>
-                <td>{p.display_name || p.username}</td>
-
-                {/* ⭐ DIVISION + TIER */}
-                <td>
-                  <span className={getRankClass(p.division)}>
-                    {p.division} {p.tier}
-                  </span>
-                </td>
-
-                <td>{p.rating}</td>
-                <td>{p.wins}</td>
-                <td>{p.losses}</td>
-                <td>{p.matches}</td>
+        <div className="table-responsive">
+          <table className="table table-dark table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th style={{ width: 50 }}>#</th>
+                <th>Player</th>
+                <th>Rank</th>
+                <th>Rating</th>
+                <th>W</th>
+                <th>L</th>
+                <th>GP</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sortedPlayers.map((p, idx) => (
+                <tr key={p.id}>
+                  <td className="fw-bold text-secondary">{idx + 1}</td>
+
+                  <td className="fw-semibold">
+                    {p.display_name || p.username}
+                  </td>
+
+                  <td>
+                    <span className={`rank-badge ${getRankClass(p.division)}`}>
+                      {p.division} {p.tier}
+                    </span>
+                  </td>
+
+                  <td className="fw-bold">{p.rating}</td>
+                  <td className="text-success fw-semibold">{p.wins}</td>
+                  <td className="text-danger fw-semibold">{p.losses}</td>
+                  <td className="fw-semibold">{p.matches}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
+
 }

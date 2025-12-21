@@ -268,643 +268,525 @@ export default function MyTeam() {
   }
 
   return (
-    <div
-      className="d-flex flex-column align-items-center text-center text-light"
-      style={{ width: "100%", minHeight: "100vh", padding: "2rem 1rem" }}
-    >
-      <div style={{ maxWidth: "900px", width: "100%" }}>
-        <h2>🧑{team.name}</h2>
-        <p>Status: {team.status || "Active"}</p>
+    <div className="container text-light py-4" style={{ maxWidth: 1100 }}>
+      {/* ================= TEAM HEADER ================= */}
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+          <div>
+            <h2 className="mb-1">🧑 {team?.name}</h2>
+            <span
+              className={`fw-bold ${team?.status === "Active"
+                ? "text-success"
+                : team?.status === "Inactive"
+                  ? "text-warning"
+                  : "text-danger"
+                }`}
+            >
+              {team?.status || "Active"}
+            </span>
+          </div>
 
-        {roster.some(p => p.on_cooldown && p.role === myRole) && (
-          <div className="alert alert-warning small mt-2">
-            ⏳ You recently left a team. You cannot play matches for your new team until the next matchup cycle.
+          {team?.id && (
+            !confirmLeave ? (
+              <button
+                className="btn btn-outline-danger btn-sm"
+                onClick={() => setConfirmLeave(true)}
+              >
+                🚪 Leave Team
+              </button>
+            ) : (
+              <div className="d-flex gap-2">
+                <button className="btn btn-danger btn-sm" onClick={handleLeaveTeam}>
+                  ✅ Confirm
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setConfirmLeave(false)}
+                >
+                  ❌ Cancel
+                </button>
+              </div>
+            )
+          )}
+        </div>
+
+        {/* COOLDOWN BANNER (dark readable text on yellow) */}
+        {roster?.some((p) => p?.on_cooldown && p?.role === myRole) && (
+          <div className="alert ecgl-alert-warning small mt-3 mb-0">
+            <strong>⏳ Cooldown:</strong> You recently left a team. You can’t play matches
+            for your new team until the next matchup cycle.
+            <br />
           </div>
         )}
 
+        {/* STATUS MSG */}
         {msg && (
           <div
-            className={`alert ${msg.startsWith("✅")
+            className={`alert mt-3 mb-0 ${msg.startsWith("✅")
               ? "alert-success"
               : msg.startsWith("⚠️")
                 ? "alert-warning"
                 : "alert-danger"
-              } small`}
+              }`}
           >
             {msg}
           </div>
         )}
+      </div>
 
-        {team?.id &&
-          (!confirmLeave ? (
-            <button
-              className="btn btn-outline-danger btn-sm mb-3"
-              onClick={() => setConfirmLeave(true)}
-            >
-              🚪 Leave Team
-            </button>
-          ) : (
-            <div className="d-flex gap-2 mb-3">
-              <button className="btn btn-danger btn-sm" onClick={handleLeaveTeam}>
-                ✅ Confirm Leave
-              </button>
+      {/* ================= TEAM SETTINGS ================= */}
+      {(myRole === "Captain" || myRole === "Co-Captain") && (
+        <div className="accordion mb-4" id="teamSettingsAccordion">
+          <div className="accordion-item bg-dark border-secondary rounded shadow-sm overflow-hidden">
+            <h2 className="accordion-header">
               <button
-                className="btn btn-secondary btn-sm"
-                onClick={() => setConfirmLeave(false)}
+                className={`accordion-button bg-dark text-light fw-semibold ${accordionOpen ? "" : "collapsed"
+                  }`}
+                type="button"
+                onClick={() => {
+                  const next = !accordionOpen;
+                  setAccordionOpen(next);
+                  localStorage.setItem("accordion_team_settings_open", next ? "true" : "false");
+                }}
               >
-                ❌ Cancel
+                ⚙️ Team Settings
               </button>
-            </div>
-          ))}
+            </h2>
 
-        {/* ⚙️ Captain/Co-Captain Settings Accordion with Persistent State */}
-        {(myRole === "Captain" || myRole === "Co-Captain") && (
-          <div
-            className="accordion mb-4"
-            id="teamSettingsAccordion"
-            style={{ maxWidth: "800px", margin: "0 auto" }}
-          >
-            <div className="accordion-item bg-dark text-light border-secondary rounded-3 overflow-hidden shadow">
-              <h2 className="accordion-header">
-                <button
-                  className={`accordion-button ${accordionOpen ? "" : "collapsed"
-                    } bg-dark text-light fw-semibold`}
-                  type="button"
-                  onClick={() => {
-                    const next = !accordionOpen;
-                    setAccordionOpen(next);
-                    localStorage.setItem("accordion_team_settings_open", next ? "true" : "false");
-                  }}
-                >
-                  ⚙️ Team Settings
-                </button>
-              </h2>
-
-              <div
-                id="teamSettingsCollapse"
-                className={`accordion-collapse collapse ${accordionOpen ? "show" : ""}`}
-                data-bs-parent="#teamSettingsAccordion"
-              >
-                <div className="accordion-body bg-black text-light">
-
-                  {/* 🧢 Rename Team */}
-                  {/*
-                    <div className="mb-4 border-bottom border-secondary pb-3">
-                      <h6 className="text-info mb-2">✏️ Rename Team</h6>
-                      <div className="d-flex align-items-center gap-2 flex-wrap">
-                        <input
-                          type="text"
-                          className="form-control form-control-sm bg-dark text-light"
-                          placeholder="New name..."
-                          style={{ width: "200px" }}
-                          value={newTeamName}
-                          onChange={(e) => setNewTeamName(e.target.value)}
-                        />
-                        <button
-                          className="btn btn-outline-info btn-sm"
-                          onClick={async () => {
-                            if (!newTeamName.trim())
-                              return alert("Enter a new team name first");
-                            try {
-                              await axios.post(
-                                `${urlBase}/api/team/rename`,
-                                { team_id: team.id, new_name: newTeamName.trim() },
-                                { withCredentials: true }
-                              );
-                              alert("✅ Team renamed successfully!");
-                              await loadTeam();
-                              setNewTeamName("");
-                            } catch (err) {
-                              console.error("❌ Rename failed:", err);
-                              alert(err.response?.data || "Failed to rename team");
-                            }
-                          }}
-                        >
-                          Save
-                        </button>
-                      </div>
-                    </div>
-                  )*/}
-
-                  {/* 🟢 Team Status Toggle */}
-                  <div className="mb-4 border-bottom border-secondary pb-3">
-                    <h6 className="text-warning mb-2">🏁 Team Status</h6>
-                    <div className="d-flex align-items-center gap-2">
-                      <div className="form-check form-switch m-0">
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          checked={team.status === "Active"}
-                          onChange={async (e) => {
-                            const nextStatus = e.target.checked ? "Active" : "Inactive";
-                            try {
-                              await axios.post(
-                                `${urlBase}/api/team/toggle-status`,
-                                { team_id: team.id, status: nextStatus },
-                                { withCredentials: true }
-                              );
-                              await loadTeam();
-                            } catch (err) {
-                              console.error("❌ Failed to update status:", err);
-                              alert("Failed to update team status");
-                            }
-                          }}
-                        />
-                      </div>
-                      <label className="text-light small ms-1">
-                        {team.status === "Active"
-                          ? "✅ Active / Match-Eligible"
-                          : "⛔ Inactive / Hidden"}
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* 🔒 Allow Join Requests */}
-                  <div className="mb-4 border-bottom border-secondary pb-3">
-                    <h6 className="text-success mb-2">👥 Join Requests</h6>
-
-                    <div className="d-flex align-items-center gap-2">
-
-                      {/* SWITCH WRAPPER — disable ONLY the switch */}
-                      <div
-                        className="form-check form-switch m-0"
-                        style={joinDisabled ? { opacity: 0.5, pointerEvents: "none" } : {}}
-                      >
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          checked={!!team.join_allowed}
-                          disabled={joinDisabled}
-                          onChange={async (e) => {
-                            if (joinDisabled) return;
-
-                            const newAllow = e.target.checked;
-
-                            try {
-                              setData(prev => ({
-                                ...prev,
-                                team: { ...prev.team, join_allowed: newAllow },
-                              }));
-
-                              const res = await axios.post(
-                                `${urlBase}/api/team/toggle-join`,
-                                { team_id: team.id, allow: newAllow },
-                                { withCredentials: true }
-                              );
-
-                              if (!res.data?.success) throw new Error("Backend rejected");
-                              await loadTeam();
-                            } catch (err) {
-                              console.error("❌ Toggle failed:", err);
-                              setData(prev => ({
-                                ...prev,
-                                team: { ...prev.team, join_allowed: !newAllow },
-                              }));
-                            }
-                          }}
-                        />
-                      </div>
-
-                      {/* LABEL — always explain why it's disabled */}
-                      <label className="form-check-label text-light small ms-2">
-                        {joinDisabled ? (
-                          <>
-                            {isLockedByMods ? (
-                              <span className="text-warning">🔒 Your team roster is locked.</span>
-                            ) : rosterLocked ? (
-                              <span className="text-warning">🔒 Rosters are Locked league-wide.</span>
-                            ) : null}
-                          </>
-                        ) : (
-                          // Normal active label
-                          <>
-                            {team.join_allowed ? "✅ Allowed" : "🚫 Disabled"}
-                          </>
-                        )}
-                      </label>
-                    </div>
-                  </div>
-                  {/* 🏆 Challenge Match Availability */}
-                  <div className="mb-4 border-bottom border-secondary pb-3">
-                    <h6 className="text-info mb-2">🏆 Challenge Match Availability</h6>
-
-                    <div className="d-flex align-items-center gap-2">
-                      <div className="form-check form-switch m-0">
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          checked={allowChallenges}
-                          disabled={
-                            team.status !== "Active" ||               // Team inactive
-                            !globalChallengesEnabled ||         // Global disabled
-                            !isCaptain                                // Only captains can toggle
+            <div className={`accordion-collapse collapse ${accordionOpen ? "show" : ""}`}>
+              <div className="accordion-body bg-black text-light">
+                {/* TEAM STATUS */}
+                <div className="mb-4 border-bottom border-secondary pb-3">
+                  <h6 className="text-warning mb-2">🏁 Team Status</h6>
+                  <div className="d-flex align-items-center gap-2">
+                    <div className="form-check form-switch m-0">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        checked={team?.status === "Active"}
+                        onChange={async (e) => {
+                          const nextStatus = e.target.checked ? "Active" : "Inactive";
+                          try {
+                            await axios.post(
+                              `${urlBase}/api/team/toggle-status`,
+                              { team_id: team.id, status: nextStatus },
+                              { withCredentials: true }
+                            );
+                            await loadTeam();
+                          } catch {
+                            alert("Failed to update team status");
                           }
-                          onChange={async (e) => {
-                            if (!globalChallengesEnabled) {
-                              return alert("🚫 League mods have globally disabled challenge matches.");
-                            }
+                        }}
+                      />
+                    </div>
+                    <span className="small">
+                      {team?.status === "Active"
+                        ? "✅ Active / Match-Eligible"
+                        : "⛔ Inactive / Hidden"}
+                    </span>
+                  </div>
+                </div>
 
-                            if (team.status !== "Active") {
-                              return alert("🚫 Your team must be active to enable challenges.");
-                            }
+                {/* JOIN REQUEST TOGGLE */}
+                <div className="mb-4 border-bottom border-secondary pb-3">
+                  <h6 className="text-success mb-2">👥 Join Requests</h6>
+                  <div className="d-flex align-items-center gap-2">
+                    <div
+                      className="form-check form-switch m-0"
+                      style={joinDisabled ? { opacity: 0.5, pointerEvents: "none" } : {}}
+                    >
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        checked={!!team?.join_allowed}
+                        disabled={joinDisabled}
+                        onChange={async (e) => {
+                          if (joinDisabled) return;
+                          const next = e.target.checked;
+                          try {
+                            await axios.post(
+                              `${urlBase}/api/team/toggle-join`,
+                              { team_id: team.id, allow: next },
+                              { withCredentials: true }
+                            );
+                            await loadTeam();
+                          } catch {
+                            alert("Failed to update join settings");
+                          }
+                        }}
+                      />
+                    </div>
+                    <span className="small">
+                      {joinDisabled
+                        ? "🔒 Roster is locked"
+                        : team?.join_allowed
+                          ? "✅ Allowed"
+                          : "🚫 Disabled"}
+                    </span>
+                  </div>
+                </div>
 
-                            if (!isCaptain) {
-                              return alert("⛔ Only the captain or co-captain can toggle this.");
-                            }
+                {/* CHALLENGE TOGGLE */}
+                <div>
+                  <h6 className="text-info mb-2">🏆 Challenge Matches</h6>
+                  <div className="d-flex align-items-center gap-2">
+                    <div className="form-check form-switch m-0">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        checked={!!allowChallenges}
+                        disabled={team?.status !== "Active" || !globalChallengesEnabled || !isCaptain}
+                        onChange={async (e) => {
+                          const next = e.target.checked;
 
-                            const next = e.target.checked;
+                          if (!globalChallengesEnabled) {
+                            return alert("🚫 League mods have globally disabled challenge matches.");
+                          }
+                          if (team?.status !== "Active") {
+                            return alert("🚫 Your team must be active to enable challenges.");
+                          }
+                          if (!isCaptain) {
+                            return alert("⛔ Only the captain or co-captain can toggle this.");
+                          }
 
-                            try {
-                              await axios.post(
-                                `${urlBase}/api/team/toggle-challenges`,
-                                { team_id: team.id, allow: next },
-                                { withCredentials: true }
-                              );
-                              setAllowChallenges(next);
-                            } catch (err) {
-                              console.error("Toggle challenges failed:", err);
-                              alert("❌ Failed to update challenge toggle.");
-                            }
-                          }}
-                        />
-                      </div>
-
-                      <label className="form-check-label text-light small ms-2">
-                        {!globalChallengesEnabled
-                          ? "⚠️ Challenge matches are currently disabled league-wide."
-                          : allowChallenges
-                            ? "✅ Accepting Challenge Matches"
-                            : "🚫 Not Accepting Challenges"}
-                      </label>
+                          try {
+                            await axios.post(
+                              `${urlBase}/api/team/toggle-challenges`,
+                              { team_id: team.id, allow: next },
+                              { withCredentials: true }
+                            );
+                            setAllowChallenges(next);
+                          } catch {
+                            alert("Failed to update challenge setting");
+                          }
+                        }}
+                      />
                     </div>
 
-                    {/* Inactive Team Warning */}
-                    {team.status !== "Active" && (
-                      <p className="text-warning small mt-2 mb-0">
-                        ⚠️ Team is <b>Inactive</b>. Challenge matches are disabled automatically.
-                      </p>
-                    )}
+                    <span className="small">
+                      {!globalChallengesEnabled
+                        ? "⚠️ Challenge matches disabled league-wide."
+                        : allowChallenges
+                          ? "✅ Accepting Challenges"
+                          : "🚫 Challenges Disabled"}
+                    </span>
                   </div>
+
+                  {team?.status !== "Active" && (
+                    <p className="text-warning small mt-2 mb-0">
+                      ⚠️ Team is <b>Inactive</b>. Challenge matches disabled automatically.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
-          </div>)}
-
-        {/* 👥 Roster - bounded width */}
-        <h4>👥 Roster</h4>
-        <div style={sectionStyle}>
-          <ul className="list-group">
-            {(roster ?? []).length > 0 ? (
-              roster.map((m) => (
-                <li
-                  key={`player-${m.id}`}
-                  className="list-group-item d-flex justify-content-between align-items-center px-3 py-2"
-                  style={{
-                    borderRadius: "0.5rem",
-                    marginBottom: "6px",
-                    backgroundColor: "#1c1c1c",
-                  }}
-                >
-                  <span>
-                    <strong>{m.display_name || m.username || "Unknown"}</strong>{" "}
-                    <span
-                      className={`roster-role ${m.role?.toLowerCase() || ""}`}
-                    >
-                      {m.role || "-"}
-                    </span>
-                    {/* ⭐ Cooldown Badge */}
-                    {m.on_cooldown && (
-                      <span className="badge bg-warning text-dark ms-2">
-                        ⏳ Cooldown
-                      </span>
-                    )}
-                  </span>
-
-                  {myRole === "Captain" && m.role !== "Captain" && (
-                    <div className="d-flex align-items-center gap-2">
-                      <select
-                        className="form-select form-select-sm bg-dark text-light"
-                        style={{ width: 160 }}
-                        defaultValue=""
-                        onChange={async (e) => {
-                          const newRole = e.target.value;
-                          if (!newRole) return;
-                          await handlePromote(m.id, newRole);
-                          e.target.value = "";
-                        }}
-                      >
-                        <option value="" disabled>
-                          Promote to...
-                        </option>
-                        <option value="Captain">Captain</option>
-                        <option value="Co-Captain">Co-Captain</option>
-                        <option value="Member">Member</option>
-                      </select>
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => handleKick(m.id)}
-                      >
-                        Kick
-                      </button>
-                    </div>
-                  )}
-                </li>
-              ))
-            ) : (
-              <li className="list-group-item">No members yet</li>
-            )}
-          </ul>
+          </div>
         </div>
-        {/* 📥 + ⚔️ SIDE-BY-SIDE REQUESTS */}
-        {(myRole === "Captain" || myRole === "Co-Captain") && (
-          <div
-            className="d-flex flex-wrap gap-3 justify-content-center mt-4"
-            style={{ width: "100%", maxWidth: "900px" }}
-          >
-            {/* LEFT COLUMN — JOIN REQUESTS */}
-            <div
-              className="p-3 rounded"
-              style={{
-                backgroundColor: "#1a1a1a",
-                border: "1px solid #333",
-                flex: "1 1 300px",
-                maxWidth: "420px",
-              }}
-            >
-              <h4 className="mb-3 text-light">📥 Join Requests</h4>
+      )}
+
+      {/* ================= ROSTER ================= */}
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+        <h4 className="mb-3">👥 Roster</h4>
+
+        <ul className="list-group">
+          {(roster ?? []).length > 0 ? (
+            roster.map((m) => (
+              <li
+                key={m.id}
+                className="list-group-item bg-dark text-light d-flex justify-content-between align-items-center mb-2 rounded"
+                style={{ borderColor: "#333" }}
+              >
+                <div>
+                  <strong className="text-info">{m.display_name || m.username || "Unknown"}</strong>{" "}
+                  <span className="text-secondary small">{m.role || "-"}</span>
+
+                  {m.on_cooldown && (
+                    <span className="badge bg-warning text-dark ms-2">
+                      ⏳ Cooldown
+                    </span>
+                  )}
+                </div>
+
+                {myRole === "Captain" && m.role !== "Captain" && (
+                  <div className="d-flex gap-2 align-items-center">
+                    <select
+                      className="form-select form-select-sm bg-dark text-light"
+                      style={{ width: 160 }}
+                      defaultValue=""
+                      onChange={async (e) => {
+                        if (!e.target.value) return;
+                        await handlePromote(m.id, e.target.value);
+                        e.target.value = "";
+                      }}
+                    >
+                      <option value="" disabled>
+                        Promote…
+                      </option>
+                      <option value="Captain">Captain</option>
+                      <option value="Co-Captain">Co-Captain</option>
+                      <option value="Member">Member</option>
+                    </select>
+
+                    <button className="btn btn-danger btn-sm" onClick={() => handleKick(m.id)}>
+                      Kick
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))
+          ) : (
+            <li className="list-group-item bg-dark text-light rounded" style={{ borderColor: "#333" }}>
+              No members yet.
+            </li>
+          )}
+        </ul>
+      </div>
+
+      {/* ================= JOIN & CHALLENGE REQUESTS ================= */}
+      {(myRole === "Captain" || myRole === "Co-Captain") && (
+        <div className="row g-4 mb-4">
+          {/* JOIN REQUESTS */}
+          <div className="col-12 col-lg-6">
+            <div className="card bg-dark border-secondary p-4 shadow-sm h-100">
+              <h4 className="mb-3">📥 Join Requests</h4>
 
               {requests.length === 0 ? (
-                <p className="text-light small">No join requests.</p>
+                <p className="text-secondary mb-0">No join requests.</p>
               ) : (
-                <ul className="list-group">
-                  {requests.map((req) => (
-                    <li
-                      key={req.id}
-                      className="list-group-item bg-dark text-light d-flex justify-content-between align-items-center px-2 py-2"
-                      style={{ borderRadius: "0.35rem", marginBottom: "4px" }}
-                    >
-                      <span>
-                        <strong>{req.display_name || req.username || "Unknown Player"}</strong>
-                      </span>
-
-                      <div className="d-flex gap-1">
-                        <button
-                          className="btn btn-success btn-sm"
-                          onClick={() => handleDecision(req.id, "accept")}
-                        >
-                          ✓
-                        </button>
-                        <button
-                          className="btn btn-danger btn-sm"
-                          onClick={() => handleDecision(req.id, "deny")}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {/* RIGHT COLUMN — CHALLENGE REQUESTS */}
-            <div
-              className="p-3 rounded"
-              style={{
-                backgroundColor: "#1a1a1a",
-                border: "1px solid #333",
-                flex: "1 1 300px",
-                maxWidth: "420px",
-              }}
-            >
-              <h4 className="mb-3 text-light">⚔️ Challenge Requests</h4>
-
-              {challengeRequests.length === 0 ? (
-                <p className="text-light small">No challenge requests.</p>
-              ) : (
-                challengeRequests.map((req) => (
+                requests.map((req) => (
                   <div
                     key={req.id}
-                    className="p-3 mb-2 border rounded bg-dark text-light shadow-sm"
-                    style={{ borderColor: "#555" }}
+                    className="border rounded p-3 mb-3"
+                    style={{ borderColor: "#444" }}
                   >
-                    <p className="mb-2">
-                      <strong>{req.requester_team_name}</strong> has challenged your team (Week{" "}
-                      {req.week}).
-                    </p>
+                    <strong className="text-info">
+                      {req.display_name || req.username || "Unknown Player"}
+                    </strong>
 
-                    <button
-                      className="btn btn-success btn-sm me-2"
-                      onClick={() => respondChallenge(req.id, true)}
-                    >
-                      Accept
-                    </button>
-
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={() => respondChallenge(req.id, false)}
-                    >
-                      Deny
-                    </button>
+                    <div className="d-flex gap-2 mt-2">
+                      <button
+                        className="btn btn-success btn-sm"
+                        onClick={() => handleDecision(req.id, "accept")}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={() => handleDecision(req.id, "deny")}
+                      >
+                        Deny
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
             </div>
           </div>
-        )}
-        {/* 📅 Active Matches */}
-        <h4 className="mt-4 mb-3">📅 Active Matches</h4>
-        <div className="d-flex flex-column align-items-center gap-3 w-100">
-          {(() => {
-            const activeMatches = (matches ?? []).filter((m) => {
-              if (!m) return false;
 
-              const status = (m.status ?? "").trim();
-              const isFinished = ["Finished", "Completed", "Forfeit", "Cancelled"]
-                .includes(status);
+          {/* CHALLENGE REQUESTS */}
+          <div className="col-12 col-lg-6">
+            <div className="card bg-dark border-secondary p-4 shadow-sm h-100">
+              <h4 className="mb-3">⚔️ Challenge Requests</h4>
 
-              if (isFinished) return false;
+              {challengeRequests.length === 0 ? (
+                <p className="text-secondary mb-0">No challenge requests.</p>
+              ) : (
+                challengeRequests.map((req) => (
+                  <div
+                    key={req.id}
+                    className="border rounded p-3 mb-3"
+                    style={{ borderColor: "#444" }}
+                  >
+                    <p className="mb-2">
+                      <strong className="text-info">{req.requester_team_name}</strong>{" "}
+                      challenged your team
+                      <span className="text-secondary"> (Week {req.week})</span>
+                    </p>
 
-              // 🏆 FINALS DETECTION (robust)
-              const isFinals =
-                m.is_finals === true ||
-                m.isFinals === true ||
-                m.week === "Finals" ||
-                m.round_type === "Finals" ||
-                ["W", "L", "G"].includes(m.bracket) ||
-                String(m.match_code ?? "").toUpperCase().includes("FINAL") ||
-                String(m.match_code ?? "").toUpperCase().startsWith("F-") ||
-                String(m.match_code ?? "").toUpperCase() === "GF";
+                    <div className="d-flex gap-2">
+                      <button
+                        className="btn btn-success btn-sm"
+                        onClick={() => respondChallenge(req.id, true)}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={() => respondChallenge(req.id, false)}
+                      >
+                        Deny
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
-              if (isFinals) return true;
+      {/* ================= ACTIVE MATCHES (Scheduled ONLY) ================= */}
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+        <h4 className="mb-3">📅 Active Matches</h4>
 
-              // -------- Regular season logic --------
-              let seasonNum = String(m.season ?? "").trim().toLowerCase();
+        {(() => {
+          const activeMatches = (matches ?? []).filter((m) => {
+            if (!m) return false;
+            return String(m.status ?? "").trim().toLowerCase() === "scheduled";
+          });
 
-              if (!seasonNum || seasonNum === "preseason") {
-                const prefix = (m.match_code ?? "").split("-")[0];
-                seasonNum = /^\d+$/.test(prefix) ? prefix : "0";
-              }
+          if (activeMatches.length === 0) {
+            return <p className="text-secondary mb-0">No active matches.</p>;
+          }
 
-              if (seasonNum.startsWith("season ")) {
-                seasonNum = seasonNum.replace("season ", "");
-              }
+          return activeMatches.map((m) => (
+            <div
+              key={m.id}
+              className="border rounded p-3 mb-3"
+              style={{ borderColor: "#444" }}
+            >
+              <h6 className="mb-1">
+                {m.match_code || `Match #${m.id}`}{" "}
+                <span className="text-info">vs {m.opponent || "Unknown"}</span>
+              </h6>
 
-              const currentSeasonNum =
-                currentSeason.replace("Season ", "").trim() || "0";
+              <p className="small text-secondary mb-2">
+                {m.date ? new Date(m.date).toLocaleString() : "Not scheduled yet"}
+              </p>
 
-              return seasonNum === currentSeasonNum;
-            });
+              {(myRole === "Captain" || myRole === "Co-Captain") ? (
+                <MatchCard
+                  match={m}
+                  team={team}
+                  urlBase={urlBase}
+                  loadTeam={loadTeam}
+                  myRole={myRole}
+                />
+              ) : (
+                <p className="text-secondary small mb-0">Waiting for captains…</p>
+              )}
+            </div>
+          ));
+        })()}
+      </div>
 
-            if (activeMatches.length === 0)
-              return <p className="text-light">No active matches.</p>;
+      {/* ================= PAST MATCHES (Card style like Active) ================= */}
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+        <h4 className="mb-3">🏁 Past Matches</h4>
 
-            return activeMatches.map((m) => (
-              <div
-                key={m.id}
-                className="p-3 border rounded bg-dark shadow-sm"
-                style={{ width: "100%", maxWidth: 700, borderColor: "#444" }}
-              >
-                <h5 className="text-light mb-2">
-                  {m.match_code || `Match #${m.id}`} —{" "}
-                  <span className="text-info">vs {m.opponent}</span>
-                </h5>
-
-                <p className="text-light mb-2">
-                  Scheduled:{" "}
-                  {m.date
-                    ? new Date(m.date).toLocaleString([], {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    })
-                    : "Not scheduled yet"}
-                </p>
-
-                {myRole === "Captain" || myRole === "Co-Captain" ? (
-                  <MatchCard
-                    match={m}
-                    team={team}
-                    urlBase={urlBase}
-                    loadTeam={loadTeam}
-                    myRole={myRole}
-                  />
-                ) : (
-                  <p className="text-secondary small mb-0">
-                    Waiting for captains to manage match details.
-                  </p>
-                )}
-              </div>
-            ));
-          })()}
+        {/* Season Filter */}
+        <div className="d-flex justify-content-end mb-3">
+          <select
+            className="form-select form-select-sm bg-dark text-light"
+            style={{ maxWidth: 200 }}
+            value={selectedSeason}
+            onChange={(e) => setSelectedSeason(e.target.value)}
+          >
+            {allSeasons.map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
         </div>
 
-        {/* 🏁 Past Matches */}
-        <section className="mt-4 mb-5">
-          <div
-            className="d-flex justify-content-between align-items-center mb-2"
-            style={{
-              maxWidth: "720px",
-              margin: "0 auto",
-              paddingLeft: "12px",
-            }}
-          >
-            <h4 className="text-light mb-0">🏁 Past Matches</h4>
+        {(() => {
+          const finishedStatuses = new Set([
+            "finished",
+            "completed",
+            "forfeit",
+            "double forfeit",
+            "cancelled",
+          ]);
 
-            <select
-              className="form-select form-select-sm bg-dark text-light"
-              style={{ maxWidth: 200 }}
-              value={selectedSeason}
-              onChange={(e) => setSelectedSeason(e.target.value)}
+          const currentSeasonNum = String(currentSeason ?? "")
+            .replace("Season ", "")
+            .trim()
+            .toLowerCase();
+
+          const pastMatches = (matches ?? [])
+            .filter((m) => {
+              if (!m) return false;
+
+              const status = String(m.status ?? "").trim().toLowerCase();
+              const isFinished = finishedStatuses.has(status);
+
+              // Treat anything not "Scheduled" as past-ish, but keep your original idea:
+              // "Past" = finished OR not current season
+              let seasonNum = String(m.season ?? "").trim().toLowerCase();
+              const prefix = String(m.match_code ?? "").split("-")[0];
+
+              if (!seasonNum || seasonNum === "preseason") {
+                seasonNum = /^\d+$/.test(prefix) ? prefix : "0";
+              }
+              if (seasonNum.startsWith("season ")) seasonNum = seasonNum.replace("season ", "");
+              if (currentSeasonNum === "preseason") {
+                // preseason in your UI corresponds to "0"
+                return isFinished || seasonNum !== "0";
+              }
+
+              const currentNum = /^\d+$/.test(currentSeasonNum) ? currentSeasonNum : "0";
+              return isFinished || seasonNum !== currentNum;
+            })
+            .filter((m) => {
+              // Apply dropdown filter
+              if (selectedSeason === "All") return true;
+
+              if (selectedSeason === "Preseason") {
+                let seasonNum = String(m.season ?? "").trim().toLowerCase();
+                const prefix = String(m.match_code ?? "").split("-")[0];
+                if (!seasonNum || seasonNum === "preseason") seasonNum = /^\d+$/.test(prefix) ? prefix : "0";
+                if (seasonNum.startsWith("season ")) seasonNum = seasonNum.replace("season ", "");
+                return seasonNum === "0";
+              }
+
+              const selectedNum = String(selectedSeason).replace("Season ", "").trim();
+              let seasonNum = String(m.season ?? "").trim().toLowerCase();
+              const prefix = String(m.match_code ?? "").split("-")[0];
+              if (!seasonNum || seasonNum === "preseason") seasonNum = /^\d+$/.test(prefix) ? prefix : "0";
+              if (seasonNum.startsWith("season ")) seasonNum = seasonNum.replace("season ", "");
+              return seasonNum === selectedNum;
+            });
+
+          if (pastMatches.length === 0) {
+            return <p className="text-secondary mb-0">No matches found for {selectedSeason}.</p>;
+          }
+
+          return pastMatches.map((m) => (
+            <div
+              key={m.id}
+              className="border rounded p-3 mb-3"
+              style={{ borderColor: "#444", cursor: "pointer" }}
+              onClick={() => navigate(`/match/${m.id}`)}
             >
-              {allSeasons.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-          </div>
+              <h6 className="mb-1">
+                {m.match_code || `Match #${m.id}`}{" "}
+                <span className="text-info">vs {m.opponent || "Unknown"}</span>
+              </h6>
 
-          <div className="table-responsive rounded shadow-sm" style={sectionStyle}>
-            <table className="table table-dark table-striped align-middle text-center table-hover mb-0">
-              <thead className="table-secondary">
-                <tr>
-                  <th>#</th>
-                  <th>Opponent</th>
-                  <th>Date</th>
-                  <th>Result</th>
-                  <th>Status</th>
-                  <th>Match ID</th>
-                </tr>
-              </thead>
+              <p className="small text-secondary mb-2">
+                {m.date ? new Date(m.date).toLocaleString() : "Date unavailable"}
+              </p>
 
-              <tbody>
-                {(matches ?? [])
-                  .filter((m) => {
-                    if (!m) return false;
+              <div className="d-flex flex-wrap gap-2 align-items-center">
+                <span
+                  className={`fw-bold ${m.result === "Win"
+                    ? "text-success"
+                    : m.result === "Loss"
+                      ? "text-danger"
+                      : "text-warning"
+                    }`}
+                >
+                  Result: {m.result || "Pending"}
+                </span>
 
-                    // --- Normalize season ---
-                    let seasonNum = String(m.season ?? "").trim().toLowerCase();
-                    const prefix = (m.match_code ?? "").split("-")[0];
-
-                    if (!seasonNum) {
-                      seasonNum = /^\d+$/.test(prefix) ? prefix : "0";
-                    }
-                    if (seasonNum.startsWith("season ")) {
-                      seasonNum = seasonNum.replace("season ", "");
-                    }
-
-                    const currentSeasonNum =
-                      currentSeason.replace("Season ", "").trim() || "0";
-
-                    const isFinished = ["Finished", "Completed", "Forfeit", "Cancelled"]
-                      .includes((m.status ?? "").trim());
-
-                    const isPast = isFinished || seasonNum !== currentSeasonNum;
-                    if (!isPast) return false;
-
-                    // APPLY FILTER DROPDOWN
-                    if (selectedSeason === "All") return true;
-                    if (selectedSeason === "Preseason") return seasonNum === "0";
-
-                    const selectedNum = selectedSeason.replace("Season ", "").trim();
-                    return seasonNum === selectedNum;
-                  })
-                  .map((m, idx) => (
-                    <tr
-                      key={m.id || idx}
-                      className="match-row"
-                      style={{ cursor: "pointer" }}
-                      onClick={() => (window.location.href = `/match/${m.id}`)}
-                    >
-                      <td>{idx + 1}</td>
-                      <td className="fw-semibold">{m.opponent || "Unknown"}</td>
-                      <td>{m.date ? new Date(m.date).toLocaleDateString() : "-"}</td>
-                      <td
-                        className={`fw-bold ${m.result === "Win"
-                          ? "text-success"
-                          : m.result === "Loss"
-                            ? "text-danger"
-                            : "text-warning"
-                          }`}
-                      >
-                        {m.result || "Pending"}
-                      </td>
-                      <td>{m.status}</td>
-                      <td>{m.match_code || m.id}</td>
-                    </tr>
-                  ))}
-
-                {filteredPastMatches.length === 0 && (
-                  <tr>
-                    <td colSpan="6" className="text-light py-3">
-                      No matches found for {selectedSeason}.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                <span className="text-secondary small">
+                  Status: {m.status || "-"}
+                </span>
+              </div>
+            </div>
+          ));
+        })()}
       </div>
-    </div >
+    </div>
   );
 }
 

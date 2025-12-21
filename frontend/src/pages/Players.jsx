@@ -80,72 +80,95 @@ export default function Players() {
   }, [players, search, roleFilter]);
 
   return (
-    <div>
-      <h2 className="text-light mb-3">👥 Registered Players</h2>
+    <div className="d-flex justify-content-center">
+      <div style={{ width: "100%", maxWidth: 760 }}>
+        <div className="card bg-dark border-secondary p-3 shadow-sm">
+          <h2 className="text-light mb-2">👥 Registered Players</h2>
 
-      {error && <div className="alert alert-danger">{error}</div>}
+          {error && (
+            <div className="alert alert-danger small py-2 px-3 mb-2">
+              {error}
+            </div>
+          )}
 
-      {/* Filters */}
-      <div className="d-flex flex-wrap gap-2 mb-3 align-items-center">
-        <input
-          type="text"
-          className="form-control bg-dark text-light"
-          style={{ maxWidth: 240, minWidth: 180 }}
-          placeholder="🔍 Search name"
-          value={search}
-          onChange={(e) => setSearch(e.target.value || "")}
-        />
+          {/* ================= FILTER BAR ================= */}
+          <div className="d-flex flex-wrap gap-2 mb-3 align-items-center">
+            <input
+              type="text"
+              className="form-control form-control-sm bg-dark text-light"
+              style={{ flex: "1 1 200px" }}
+              placeholder="🔍 Search player"
+              value={search}
+              onChange={(e) => setSearch(e.target.value || "")}
+            />
 
-        <select
-          className="form-select bg-dark text-light"
-          style={{ maxWidth: 200, minWidth: 160 }}
-          value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value || "all")}
-        >
-          <option value="all">All Roles</option>
-          <option value="player">Player</option>
-          <option value="league sub">League Sub</option>
-          <option value="banned">Banned</option>
-        </select>
+            <select
+              className="form-select form-select-sm bg-dark text-light"
+              style={{ flex: "0 0 160px" }}
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value || "all")}
+            >
+              <option value="all">All Roles</option>
+              <option value="player">Player</option>
+              <option value="league sub">League Sub</option>
+              <option value="banned">Banned</option>
+            </select>
+          </div>
+
+          {/* ================= PLAYER LIST ================= */}
+          {loading ? (
+            <p className="text-secondary small mb-0">Loading players…</p>
+          ) : filteredPlayers.length === 0 ? (
+            <p className="text-secondary small mb-0">No players found.</p>
+          ) : (
+            <div className="d-flex flex-column gap-1">
+              {filteredPlayers.map((p, idx) => (
+                <div
+                  key={p.id ?? idx}
+                  className="border rounded px-3 py-2 d-flex justify-content-between align-items-center"
+                  style={{
+                    borderColor: "#3a3a3a",
+                    backgroundColor: "#1c1c1c",
+                  }}
+                >
+                  {/* LEFT */}
+                  <div className="d-flex flex-column lh-sm">
+                    <span className="fw-semibold">
+                      {p.id ? (
+                        <Link
+                          to={`/players/${p.id}`}
+                          className="text-info text-decoration-none"
+                        >
+                          {p.display_name || "Unknown"}
+                        </Link>
+                      ) : (
+                        p.display_name || "Unknown"
+                      )}
+                    </span>
+
+                    <span className="text-secondary" style={{ fontSize: "0.8rem" }}>
+                      {p.timezone || "No timezone"}
+                    </span>
+                  </div>
+
+                  {/* RIGHT */}
+                  <span
+                    className={`rank-badge ${p.role === "Banned"
+                        ? "rank-bronze"
+                        : p.role === "League Sub"
+                          ? "rank-silver"
+                          : "rank-gold"
+                      }`}
+                    style={{ fontSize: "0.75rem" }}
+                  >
+                    {p.role || "Player"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-
-      {loading ? (
-        <p className="text-light">Loading players…</p>
-      ) : filteredPlayers.length === 0 ? (
-        <p className="text-light">No players found.</p>
-      ) : (
-        <table className="table table-dark table-striped align-middle">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Display Name</th>
-              <th>Role</th>
-              <th>Timezone</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredPlayers.map((p, idx) => (
-              <tr key={p.id ?? idx}>
-                <td>{idx + 1}</td>
-                <td>
-                  {p.id ? (
-                    <Link
-                      to={`/players/${p.id}`}
-                      className="text-info text-decoration-none fw-bold"
-                    >
-                      {p.display_name || "Unknown"}
-                    </Link>
-                  ) : (
-                    p.display_name || "Unknown"
-                  )}
-                </td>
-                <td>{p.role || "-"}</td>
-                <td>{p.timezone || "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
     </div>
   );
 }

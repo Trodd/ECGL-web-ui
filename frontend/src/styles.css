@@ -821,3 +821,112 @@ body {
     transform: none;
   }
 }
+
+/* ============================
+   Dark UI Readability Fix
+   ============================ */
+
+.card.bg-dark,
+.card.bg-dark * {
+  color: #e6e6e6;
+}
+
+.card.bg-dark .text-secondary {
+  color: #b0b0b0 !important;
+}
+
+.card.bg-dark .text-muted {
+  color: #9aa0a6 !important;
+}
+
+/* Headings inside dark cards */
+.card.bg-dark h1,
+.card.bg-dark h2,
+.card.bg-dark h3,
+.card.bg-dark h4,
+.card.bg-dark h5 {
+  color: #ffffff;
+}
+
+/* List groups inside dark cards */
+.card.bg-dark .list-group-item {
+  background-color: #1c1c1c;
+  color: #e6e6e6;
+  border-color: #333;
+}
+
+.card.bg-dark .list-group-item:hover {
+  background-color: #262626;
+}
+
+/* Inputs */
+.bg-dark.form-control,
+.bg-dark.form-select {
+  color: #ffffff;
+  background-color: #1b1b1b;
+  border-color: #444;
+}
+
+.bg-dark.form-control::placeholder {
+  color: #888;
+}
+
+/* Base button sizing for ECGL */
+.ecgl-btn {
+  height: 44px;
+  min-width: 150px;
+  padding: 0 18px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+/* Discord brand button */
+.ecgl-discord-btn {
+  background-color: #5865f2;
+  color: white;
+  border: none;
+}
+
+.ecgl-discord-btn:hover {
+  background-color: #4752c4;
+  color: white;
+}
+
+.discord-login-btn:hover {
+  background-color: #4752c4 !important;
+}
+
+/* ===========================
+   ECGL Yellow Warning Banner
+   =========================== */
+
+.card.bg-dark .ecgl-alert-warning {
+  background-color: #fff3cd !important;
+  border: 1px solid #ffe69c !important;
+  color: #2b2b2b !important;
+}
+
+.card.bg-dark .ecgl-alert-warning * {
+  color: #2b2b2b !important;
+}
+
+.card.bg-dark .ecgl-alert-warning strong {
+  color: #1a1a1a !important;
+}
+
+.ecgl-alert-warning {
+  background-color: #fff3cd;
+  /* soft yellow */
+  border: 1px solid #ffe69c;
+  color: #2b2b2b !important;
+  /* DARK readable text */
+}
+
+.ecgl-alert-warning * {
+  color: #2b2b2b !important;
+  /* stop bg-dark inheritance */
+}

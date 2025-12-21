@@ -170,94 +170,144 @@ export default function CastModal({
 
     return (
         <div className="cast-overlay">
-            <div className="cast-window bg-dark text-light p-3 rounded shadow">
-                <h4 className="text-info mb-3">
-                    {existingCast ? "🎥 Edit Cast" : "🎥 Schedule Cast"}
-                </h4>
+            <div className="cast-window card bg-dark border-secondary shadow-lg">
 
-                {/* === CASTER SEARCH + MULTI SELECT === */}
-                <label className="fw-bold mb-1">Casters</label>
-                <input
-                    type="text"
-                    className="form-control form-control-sm bg-dark text-light mb-2"
-                    placeholder="Search casters..."
-                    value={casterSearch}
-                    onChange={(e) => setCasterSearch(e.target.value)}
-                />
+                {/* ================= HEADER ================= */}
+                <div className="card-header d-flex justify-content-between align-items-center">
+                    <h5 className="mb-0 text-info">
+                        🎥 {existingCast ? "Edit Match Cast" : "Schedule Match Cast"}
+                    </h5>
 
-                <div className="mb-3" style={{ maxHeight: 170, overflowY: "auto" }}>
-                    {filteredCasters.length === 0 ? (
-                        <p className="text-warning small">No matching players found.</p>
-                    ) : (
-                        filteredCasters.map((p) => (
-                            <div key={p.id} className="form-check text-light">
-                                <input
-                                    type="checkbox"
-                                    className="form-check-input"
-                                    checked={casters.includes(String(p.id))}
-                                    onChange={() => toggleCaster(p.id)}
-                                />
-                                <label className="form-check-label">
-                                    {p.display_name || p.username}
-                                </label>
-                            </div>
-                        ))
-                    )}
+                    <button
+                        className="btn btn-sm btn-outline-light"
+                        onClick={onClose}
+                        title="Close"
+                    >
+                        ✕
+                    </button>
                 </div>
 
-                {/* === CAMERA OPERATOR SEARCH + SELECT === */}
-                <label className="fw-bold">Camera Operator</label>
-                <input
-                    type="text"
-                    className="form-control form-control-sm bg-dark text-light mb-2"
-                    placeholder="Search camera operator..."
-                    value={cameraSearch}
-                    onChange={(e) => setCameraSearch(e.target.value)}
-                />
+                <div className="card-body">
 
-                <select
-                    className="form-select bg-dark text-light mb-3"
-                    value={camera}
-                    onChange={(e) => setCamera(e.target.value)}
-                >
-                    <option value="">Select camera operator…</option>
-                    {filteredCameraPlayers.map((p) => (
-                        <option key={p.id} value={String(p.id)}>
-                            {p.display_name || p.username}
-                        </option>
-                    ))}
-                </select>
+                    {/* ================= CASTERS ================= */}
+                    <div className="mb-4">
+                        <label className="fw-bold mb-1">🎙 Casters</label>
 
-                {/* === STREAM URL === */}
-                <label className="fw-bold mt-2">YouTube Stream URL (Optional)</label>
-                <input
-                    type="text"
-                    className="form-control form-control-sm bg-dark text-light mb-2"
-                    placeholder="https://youtube.com/live/..."
-                    value={streamURL}
-                    onChange={(e) => {
-                        setStreamURL(e.target.value);
-                        setStreamError("");
-                    }}
-                />
+                        <input
+                            type="text"
+                            className="form-control form-control-sm bg-dark text-light mb-2"
+                            placeholder="Search players..."
+                            value={casterSearch}
+                            onChange={(e) => setCasterSearch(e.target.value)}
+                        />
 
-                {streamError && (
-                    <p className="text-danger small">{streamError}</p>
-                )}
+                        <div className="cast-scroll">
+                            {filteredCasters.length === 0 ? (
+                                <div className="text-warning small text-center py-2">
+                                    No matching players
+                                </div>
+                            ) : (
+                                filteredCasters.map((p) => (
+                                    <label
+                                        key={p.id}
+                                        className="d-flex align-items-center gap-2 cast-row"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            className="form-check-input"
+                                            checked={casters.includes(String(p.id))}
+                                            onChange={() => toggleCaster(p.id)}
+                                        />
+                                        <span>
+                                            {p.display_name || p.username}
+                                        </span>
+                                    </label>
+                                ))
+                            )}
+                        </div>
 
-                {/* === BUTTONS === */}
-                <div className="d-flex justify-content-between gap-2 mt-3">
-                    {existingCast && (
-                        <button className="btn btn-danger" onClick={deleteCast}>
-                            🗑 Remove
+                        {casters.length > 0 && (
+                            <div className="small text-secondary mt-1">
+                                Selected: {casters.length}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ================= CAMERA ================= */}
+                    <div className="mb-4">
+                        <label className="fw-bold mb-1">🎮 Camera Operator</label>
+
+                        <input
+                            type="text"
+                            className="form-control form-control-sm bg-dark text-light mb-2"
+                            placeholder="Search camera operator..."
+                            value={cameraSearch}
+                            onChange={(e) => setCameraSearch(e.target.value)}
+                        />
+
+                        <select
+                            className="form-select bg-dark text-light"
+                            value={camera}
+                            onChange={(e) => setCamera(e.target.value)}
+                        >
+                            <option value="">Select operator…</option>
+                            {filteredCameraPlayers.map((p) => (
+                                <option key={p.id} value={String(p.id)}>
+                                    {p.display_name || p.username}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* ================= STREAM ================= */}
+                    <div className="mb-3">
+                        <label className="fw-bold mb-1">📺 YouTube Stream URL (optional)</label>
+
+                        <input
+                            type="text"
+                            className="form-control form-control-sm bg-dark text-light"
+                            placeholder="https://youtube.com/live/…"
+                            value={streamURL}
+                            onChange={(e) => {
+                                setStreamURL(e.target.value);
+                                setStreamError("");
+                            }}
+                        />
+
+                        {streamError && (
+                            <div className="text-danger small mt-1">
+                                {streamError}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* ================= FOOTER ================= */}
+                <div className="card-footer d-flex justify-content-between align-items-center">
+
+                    {existingCast ? (
+                        <button
+                            className="btn btn-outline-danger btn-sm"
+                            onClick={deleteCast}
+                        >
+                            🗑 Remove Cast
                         </button>
+                    ) : (
+                        <span />
                     )}
 
                     <div className="d-flex gap-2">
-                        <button className="btn btn-success" onClick={saveCast}>
-                            Save
+                        <button
+                            className="btn btn-success btn-sm"
+                            onClick={saveCast}
+                        >
+                            💾 Save
                         </button>
-                        <button className="btn btn-secondary" onClick={onClose}>
+
+                        <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={onClose}
+                        >
                             Cancel
                         </button>
                     </div>
@@ -265,20 +315,45 @@ export default function CastModal({
             </div>
 
             <style>{`
-                .cast-overlay {
-                    position: fixed;
-                    inset: 0;
-                    background: rgba(0,0,0,0.55);
-                    z-index: 5000;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                }
-                .cast-window {
-                    width: 400px;
-                    max-width: 95%;
-                    border: 1px solid #444;
-                }
+            .cast-overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(0,0,0,0.6);
+                backdrop-filter: blur(4px);
+                z-index: 5000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .cast-window {
+                width: 460px;
+                max-width: 95%;
+                border-radius: 12px;
+            }
+
+            .cast-scroll {
+                max-height: 180px;
+                overflow-y: auto;
+                border: 1px solid #333;
+                border-radius: 8px;
+                padding: 6px;
+                background: #151515;
+            }
+
+            .cast-row {
+                padding: 6px 8px;
+                border-radius: 6px;
+                cursor: pointer;
+            }
+
+            .cast-row:hover {
+                background: rgba(255,255,255,0.06);
+            }
+
+            .cast-row input {
+                margin-top: 0;
+            }
             `}</style>
         </div>
     );

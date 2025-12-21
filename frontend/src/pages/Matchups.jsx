@@ -98,141 +98,154 @@ export default function Matchups() {
     });
 
     return (
-        <div className="container text-light" style={{ maxWidth: 800 }}>
-            <h2 className="mb-3">📅 Matchups</h2>
+        <div className="d-flex justify-content-center">
+            <div style={{ width: "100%", maxWidth: 820 }}>
+                <div className="card bg-dark border-secondary p-4 shadow-sm">
+                    <h2 className="mb-3">📅 Matchups</h2>
 
-            {loading && <p>⏳ Loading matchups...</p>}
-            {error && <p className="text-danger">⚠️ {error}</p>}
+                    {loading && <p className="text-secondary">⏳ Loading matchups…</p>}
+                    {error && <p className="text-danger">⚠️ {error}</p>}
 
-            {/* Filters */}
-            {!loading && !error && (
-                <div className="d-flex flex-wrap gap-2 mb-3">
-                    <select
-                        className="form-select bg-dark text-light"
-                        style={{ width: "auto" }}
-                        value={selectedSeason}
-                        onChange={(e) => {
-                            setSelectedSeason(e.target.value);
-                            setSelectedWeek("All");
-                        }}
-                    >
-                        {seasonOptions.map(s => (
-                            <option key={s} value={s}>
-                                {s === "All"
-                                    ? "All Seasons"
-                                    : s === "Preseason"
-                                        ? "Preseason"
-                                        : `Season ${s}`}
-                            </option>
-                        ))}
-                    </select>
+                    {/* ================= FILTER BAR ================= */}
+                    {!loading && !error && (
+                        <div className="d-flex flex-wrap gap-2 mb-4">
+                            <select
+                                className="form-select form-select-sm bg-dark text-light"
+                                style={{ width: 160 }}
+                                value={selectedSeason}
+                                onChange={(e) => {
+                                    setSelectedSeason(e.target.value);
+                                    setSelectedWeek("All");
+                                }}
+                            >
+                                {seasonOptions.map((s) => (
+                                    <option key={s} value={s}>
+                                        {s === "All"
+                                            ? "All Seasons"
+                                            : s === "Preseason"
+                                                ? "Preseason"
+                                                : `Season ${s}`}
+                                    </option>
+                                ))}
+                            </select>
 
-                    <select
-                        className="form-select bg-dark text-light"
-                        style={{ width: "auto" }}
-                        value={selectedWeek}
-                        onChange={(e) => setSelectedWeek(e.target.value)}
-                    >
-                        {weekOptions.map(w => (
-                            <option key={w} value={w}>
-                                {w === "All"
-                                    ? "All Weeks"
-                                    : w === "Finals"
-                                        ? "Finals 🏁"
-                                        : `Week ${w}`}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-            )}
+                            <select
+                                className="form-select form-select-sm bg-dark text-light"
+                                style={{ width: 140 }}
+                                value={selectedWeek}
+                                onChange={(e) => setSelectedWeek(e.target.value)}
+                            >
+                                {weekOptions.map((w) => (
+                                    <option key={w} value={w}>
+                                        {w === "All"
+                                            ? "All Weeks"
+                                            : w === "Finals"
+                                                ? "Finals 🏁"
+                                                : `Week ${w}`}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
 
-            {!loading && !error && filtered.length === 0 && (
-                <p className="text-light">No matches found.</p>
-            )}
+                    {!loading && !error && filtered.length === 0 && (
+                        <p className="text-secondary">No matches found.</p>
+                    )}
 
-            {!loading && !error && sortedSeasons.map(season => {
-                const weeks = grouped[season];
-                const sortedWeeks = Object.keys(weeks).sort((a, b) => {
-                    if (a === "Finals") return -1;
-                    if (b === "Finals") return 1;
-                    return Number(b) - Number(a);
-                });
+                    {/* ================= MATCHUPS ================= */}
+                    {!loading &&
+                        !error &&
+                        sortedSeasons.map((season) => {
+                            const weeks = grouped[season];
+                            const sortedWeeks = Object.keys(weeks).sort((a, b) => {
+                                if (a === "Finals") return -1;
+                                if (b === "Finals") return 1;
+                                return Number(b) - Number(a);
+                            });
 
-                return sortedWeeks.map(week => (
-                    <div key={`${season}-${week}`} className="mb-4">
-                        <h5 className="text-info border-bottom pb-1 mb-2">
-                            {season === "Preseason"
-                                ? "Preseason"
-                                : `Season ${season}`} —{" "}
-                            {week === "Finals" ? "Finals 🏁" : `Week ${week}`}
-                        </h5>
+                            return sortedWeeks.map((week) => (
+                                <div key={`${season}-${week}`} className="mb-4">
+                                    {/* Season / Week Header */}
+                                    <h5 className="text-info border-bottom pb-1 mb-3">
+                                        {season === "Preseason"
+                                            ? "Preseason"
+                                            : `Season ${season}`}{" "}
+                                        — {week === "Finals" ? "Finals 🏁" : `Week ${week}`}
+                                    </h5>
 
-                        {weeks[week].map(m => {
-                            const winnerA = m.winner_id === m.team_a_id;
-                            const winnerB = m.winner_id === m.team_b_id;
+                                    {weeks[week].map((m) => {
+                                        const winnerA = m.winner_id === m.team_a_id;
+                                        const winnerB = m.winner_id === m.team_b_id;
 
-                            return (
-                                <Link
-                                    to={`/match/${m.id}`}
-                                    key={m.id}
-                                    className="text-decoration-none text-light"
-                                >
-                                    <div
-                                        className="p-2 mb-2 rounded"
-                                        style={{
-                                            background: "#181a1b",
-                                            border: "1px solid #2a2d2f",
-                                        }}
-                                    >
-                                        <div className="d-flex justify-content-between">
-                                            <div className="d-flex align-items-center gap-2">
-                                                <span className={`fw-bold ${winnerA ? "text-success" : ""}`}>
-                                                    {m.team_a} {winnerA && "🏆"}
-                                                </span>
+                                        return (
+                                            <Link
+                                                to={`/match/${m.id}`}
+                                                key={m.id}
+                                                className="text-decoration-none"
+                                            >
+                                                <div
+                                                    className="border rounded p-3 mb-2 bg-dark shadow-sm"
+                                                    style={{ borderColor: "#3a3a3a" }}
+                                                >
+                                                    {/* Teams */}
+                                                    <div className="d-flex justify-content-between align-items-center mb-1">
+                                                        <div className="fw-semibold">
+                                                            <span className={winnerA ? "text-success" : ""}>
+                                                                {m.team_a} {winnerA && "🏆"}
+                                                            </span>{" "}
+                                                            <span className="text-secondary mx-1">vs</span>
+                                                            <span className={winnerB ? "text-success" : ""}>
+                                                                {m.team_b} {winnerB && "🏆"}
+                                                            </span>
 
-                                                <span>vs</span>
+                                                            {m.cast_active && (
+                                                                <span
+                                                                    className="badge bg-danger ms-2"
+                                                                    title="Live / Casted Match"
+                                                                >
+                                                                    LIVE
+                                                                </span>
+                                                            )}
+                                                        </div>
 
-                                                <span className={`fw-bold ${winnerB ? "text-success" : ""}`}>
-                                                    {m.team_b} {winnerB && "🏆"}
-                                                </span>
+                                                        {/* Date */}
+                                                        <span className="text-secondary small">
+                                                            {m.scheduled_date
+                                                                ? new Date(
+                                                                    m.scheduled_date
+                                                                ).toLocaleString([], {
+                                                                    dateStyle: "medium",
+                                                                    timeStyle: "short",
+                                                                })
+                                                                : "TBD"}
+                                                        </span>
+                                                    </div>
 
-                                                {m.cast_active && (
-                                                    <span
-                                                        className="ms-2"
-                                                        title="This match was casted"
-                                                        style={{ color: "#4ea1ff" }}
-                                                    >
-                                                        🔴 Casted
-                                                    </span>
-                                                )}
-                                            </div>
-
-                                            <div className="small">
-                                                {m.scheduled_date
-                                                    ? new Date(m.scheduled_date).toLocaleString()
-                                                    : "TBD"}
-                                            </div>
-                                        </div>
-
-                                        <div className="small text-secondary">
-                                            Match ID: <b>{m.match_code}</b> | Status:{" "}
-                                            <span className={
-                                                m.status === "Completed"
-                                                    ? "text-success"
-                                                    : m.status === "Scheduled"
-                                                        ? "text-warning"
-                                                        : "text-danger"
-                                            }>
-                                                {m.status}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </Link>
-                            );
+                                                    {/* Meta */}
+                                                    <div className="small text-secondary">
+                                                        <span className="me-2">
+                                                            Match ID: <b>{m.match_code}</b>
+                                                        </span>
+                                                        <span
+                                                            className={`badge ${m.status === "Completed"
+                                                                    ? "bg-success"
+                                                                    : m.status === "Scheduled"
+                                                                        ? "bg-warning text-dark"
+                                                                        : "bg-secondary"
+                                                                }`}
+                                                        >
+                                                            {m.status}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </Link>
+                                        );
+                                    })}
+                                </div>
+                            ));
                         })}
-                    </div>
-                ));
-            })}
+                </div>
+            </div>
         </div>
     );
 }

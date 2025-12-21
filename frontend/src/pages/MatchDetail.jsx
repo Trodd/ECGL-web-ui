@@ -197,12 +197,13 @@ export default function MatchDetail() {
     }
 
     return (
-        <div className="container py-3 text-light">
-            {/* --- Page Title & Caster Button --- */}
+        <div className="mx-auto text-light" style={{ maxWidth: 920 }}>
+
+            {/* ================= HEADER ================= */}
             <div className="d-flex justify-content-between align-items-center mb-3">
-                <h2 className="mb-0 text-light">
-                    Match Details <small className="ms-2">#{match.id || id}</small>
-                </h2>
+                <h3 className="mb-0">
+                    Match Details <span className="text-secondary">#{match.id || id}</span>
+                </h3>
 
                 {me && (match.isFinals || match.scheduled_date) && (
                     <button
@@ -222,156 +223,121 @@ export default function MatchDetail() {
                 urlBase={import.meta.env.VITE_API_URL}
                 onSaved={() => {
                     axios.get(`${import.meta.env.VITE_API_URL}/api/match/${id}`)
-                        .then((res) => setMatchData(res.data));
-
+                        .then(res => setMatchData(res.data));
                     axios.get(`${import.meta.env.VITE_API_URL}/api/match/cast/get/${id}`)
-                        .then((res) => setExistingCast(res.data));
+                        .then(res => setExistingCast(res.data));
                 }}
             />
 
-            {/* --- Header --- */}
+            {/* ================= MATCH HERO ================= */}
             <div className="card bg-dark border-secondary mb-4 shadow-sm">
                 <div className="card-body text-center">
-                    <h4 className="mb-3">
-                        <Link to={`/teams/${teamA.id}`} className="text-light fw-bold">
+
+                    <div className="d-flex justify-content-center align-items-center gap-3 mb-2">
+                        <Link to={`/teams/${teamA.id}`} className="text-info fw-bold fs-5 text-decoration-none">
                             {teamA.name}
-                        </Link>{" "}
-                        <span className="text-secondary">vs</span>{" "}
-                        <Link to={`/teams/${teamB.id}`} className="text-light fw-bold">
+                        </Link>
+
+                        <span className="text-secondary fw-semibold">vs</span>
+
+                        <Link to={`/teams/${teamB.id}`} className="text-info fw-bold fs-5 text-decoration-none">
                             {teamB.name}
                         </Link>
-                    </h4>
-                    <p className={`mb-2 fw-bold ${statusColor}`}>
-                        Status: {match.status || "Unknown"}
-                    </p>
-                    <p className="text-light mb-0">Scheduled: {formattedDate}</p>
+                    </div>
+
+                    <div className={`fw-semibold ${statusColor}`}>
+                        {match.status || "Unknown"}
+                    </div>
+
+                    <div className="match-date mt-2">
+                        {formattedDate}
+                    </div>
                 </div>
             </div>
 
-            {/* 🎥 CAST & BROADCAST */}
+            {/* ================= CAST & BROADCAST ================= */}
             {(castCasters.length > 0 || castCamera || streamURL) && (
                 <div className="card bg-dark border-info shadow-sm mb-4">
-                    <div className="card-header border-info text-info fw-bold d-flex align-items-center">
-                        <span style={{ fontSize: "1.4rem", marginRight: "8px" }}>🎥</span>
-                        Match Cast & Broadcast
+                    <div className="card-header text-info fw-bold">
+                        🔴 Match Broadcast
                     </div>
 
-                    <div className="card-body text-light">
+                    <div className="card-body">
 
-                        {/* === CAST INFO === */}
-                        <p className="mb-2">
-                            <strong className="text-info">Casters:</strong><br />
-                            {castCasters.length > 0
-                                ? castCasters.map((id) => getPlayerName(id)).join(", ")
-                                : "No casters assigned"}
-                        </p>
+                        <div className="mb-3">
+                            <div className="small text-secondary">Casters</div>
+                            <div className="fw-semibold">
+                                {castCasters.length
+                                    ? castCasters.map(id => getPlayerName(id)).join(", ")
+                                    : "None"}
+                            </div>
+                        </div>
 
-                        <p className="mb-4">
-                            <strong className="text-warning">Camera Operator:</strong><br />
-                            {castCamera
-                                ? getPlayerName(castCamera)
-                                : "None assigned"}
-                        </p>
+                        <div className="mb-4">
+                            <div className="small text-secondary">Camera Operator</div>
+                            <div className="fw-semibold">
+                                {castCamera ? getPlayerName(castCamera) : "None"}
+                            </div>
+                        </div>
 
-                        {/* === BROADCAST VIDEO === */}
                         {streamURL && embedURL && (
-                            <>
-                                <div
-                                    style={{
-                                        position: "relative",
-                                        paddingBottom: "56.25%",
-                                        height: 0,
-                                        overflow: "hidden",
-                                        borderRadius: "10px",
-                                    }}
-                                >
+                            <div className="rounded overflow-hidden border">
+                                <div style={{ aspectRatio: "16 / 9" }}>
                                     <iframe
                                         src={embedURL}
-                                        frameBorder="0"
-                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                        className="w-100 h-100"
                                         allowFullScreen
                                         title="Match Stream"
-                                        style={{
-                                            position: "absolute",
-                                            top: 0,
-                                            left: 0,
-                                            width: "100%",
-                                            height: "100%",
-                                            borderRadius: "10px",
-                                        }}
-                                    ></iframe>
+                                    />
                                 </div>
-
-                                <p className="mt-3 mb-0 text-center">
-                                    <a
-                                        href={streamURL}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-info"
-                                    >
-                                        🔗 Open on YouTube
-                                    </a>
-                                </p>
-                            </>
+                            </div>
                         )}
-
                     </div>
                 </div>
             )}
 
-            {/* --- Map Scores --- */}
-            <h4 className="text-light mb-3">🗺️ Map Scores</h4>
+            {/* ================= MAP SCORES ================= */}
+            <h4 className="mb-3">🗺️ Match Result</h4>
 
             {(() => {
-                const mapData = Array.isArray(matchData.map_scores)
-                    ? matchData.map_scores
-                    : [];
-
-                const validMaps = mapData.filter(
-                    (m) =>
-                        !(
-                            (m.team_a_score === null || m.team_a_score === 0) &&
-                            (m.team_b_score === null || m.team_b_score === 0)
-                        )
+                const maps = Array.isArray(matchData.map_scores) ? matchData.map_scores : [];
+                const validMaps = maps.filter(
+                    m => !(m.team_a_score === 0 && m.team_b_score === 0)
                 );
 
-                if (validMaps.length === 0)
-                    return <p className="text-light">No map scores recorded yet.</p>;
+                if (!validMaps.length) {
+                    return <p className="text-secondary">No map scores recorded.</p>;
+                }
 
-                const totalA = validMaps.filter(
-                    (m) => m.team_a_score > m.team_b_score
-                ).length;
-                const totalB = validMaps.filter(
-                    (m) => m.team_b_score > m.team_a_score
-                ).length;
-
+                const totalA = validMaps.filter(m => m.team_a_score > m.team_b_score).length;
+                const totalB = validMaps.filter(m => m.team_b_score > m.team_a_score).length;
                 const winner =
-                    totalA > totalB
-                        ? teamA.name
-                        : totalB > totalA
-                            ? teamB.name
-                            : null;
+                    totalA > totalB ? teamA.name :
+                        totalB > totalA ? teamB.name : null;
 
                 return (
                     <>
-                        <p className="text-info fw-bold mb-2">
-                            {teamA.name}: {totalA} – {totalB} : {teamB.name}{" "}
+                        <div className="text-center mb-3">
+                            <span className="badge bg-info fs-6 px-3 py-2">
+                                {teamA.name} {totalA} – {totalB} {teamB.name}
+                            </span>
+
                             {winner && (
-                                <span className="ms-2 text-success">
+                                <div className="text-success fw-bold mt-2">
                                     🏆 Winner: {winner}
-                                </span>
+                                </div>
                             )}
-                        </p>
+                        </div>
 
                         <div className="table-responsive">
                             <table className="table table-dark table-striped align-middle text-center">
-                                <thead className="table-secondary text-dark">
+                                <thead>
                                     <tr>
                                         <th>Map</th>
-                                        <th>Gamemode</th>
+                                        <th>Mode</th>
                                         <th>{teamA.name}</th>
                                         <th>{teamB.name}</th>
-                                        <th>Winner</th>
+                                        <th></th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -383,24 +349,15 @@ export default function MatchDetail() {
                                             <tr key={i}>
                                                 <td>Map {m.map ?? i + 1}</td>
                                                 <td>{m.mode || "Unknown"}</td>
-                                                <td className={`fw-bold ${aWin ? "text-success" : bWin ? "text-danger" : "text-light"}`}>
+                                                <td className={aWin ? "text-success fw-bold" : ""}>
                                                     {m.team_a_score}
                                                 </td>
-                                                <td className={`fw-bold ${bWin ? "text-success" : aWin ? "text-danger" : "text-light"}`}>
+                                                <td className={bWin ? "text-success fw-bold" : ""}>
                                                     {m.team_b_score}
                                                 </td>
                                                 <td>
-                                                    {aWin ? (
-                                                        <span className="text-success fw-semibold">
-                                                            ✅ {teamA.name}
-                                                        </span>
-                                                    ) : bWin ? (
-                                                        <span className="text-success fw-semibold">
-                                                            ✅ {teamB.name}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-secondary">Tie</span>
-                                                    )}
+                                                    {aWin && "✅ " + teamA.name}
+                                                    {bWin && "✅ " + teamB.name}
                                                 </td>
                                             </tr>
                                         );
@@ -412,58 +369,56 @@ export default function MatchDetail() {
                 );
             })()}
 
-            {/* --- League Subs --- */}
-            <h4 className="text-light mt-4 mb-3">🧍 League Subs</h4>
+            {/* ================= LEAGUE SUBS ================= */}
+            <h4 className="mt-4 mb-3">🧍 League Subs</h4>
 
-            <div className="card bg-dark border-secondary mb-4 shadow-sm">
-                <div className="card-body">
-                    <p className="mb-2">
-                        <strong className="text-info">{teamA.name} Sub:</strong>{" "}
-                        {match.league_sub_a
-                            ? getPlayerName(String(match.league_sub_a))
-                            : "None"}
-                    </p>
+            <div className="card bg-dark border-secondary shadow-sm mb-4">
+                <div className="card-body d-flex justify-content-between">
+                    <div>
+                        <div className="small text-secondary">{teamA.name}</div>
+                        <div className="fw-semibold">
+                            {match.league_sub_a ? getPlayerName(match.league_sub_a) : "None"}
+                        </div>
+                    </div>
 
-                    <p className="mb-0">
-                        <strong className="text-warning">{teamB.name} Sub:</strong>{" "}
-                        {match.league_sub_b
-                            ? getPlayerName(String(match.league_sub_b))
-                            : "None"}
-                    </p>
+                    <div>
+                        <div className="small text-secondary">{teamB.name}</div>
+                        <div className="fw-semibold">
+                            {match.league_sub_b ? getPlayerName(match.league_sub_b) : "None"}
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* --- Rosters --- */}
-            <h4 className="text-light mt-4 mb-3">👥 Rosters at Time of Match</h4>
-            <div className="row">
+            {/* ================= ROSTERS ================= */}
+            <h4 className="mt-4 mb-3">👥 Rosters at Match Time</h4>
+
+            <div className="row g-3">
                 {[{ team: teamA, roster: rosterA }, { team: teamB, roster: rosterB }].map(
                     ({ team, roster }, i) => (
-                        <div className="col-md-6 mb-3" key={i}>
-                            <div className="card bg-dark border-secondary">
-                                <div className="card-header text-center text-light fw-bold">
+                        <div className="col-md-6" key={i}>
+                            <div className="card bg-dark border-secondary h-100">
+                                <div className="card-header text-center fw-bold">
                                     {team.name}
                                 </div>
-                                <ul className="list-group list-group-flush">
-                                    {roster.length ? (
-                                        roster.map((p, idx) => (
-                                            <li
-                                                key={idx}
-                                                className="list-group-item bg-dark text-light d-flex justify-content-between align-items-center"
-                                            >
-                                                {/* CLICKABLE PLAYER NAME */}
-                                                <Link
-                                                    to={`/players/${p.player_id}`}
-                                                    className="text-info text-decoration-none fw-bold"
-                                                >
-                                                    {p.display_name || p.username}
-                                                </Link>
 
-                                                <span>{p.role || "-"}</span>
-                                            </li>
-                                        ))
-                                    ) : (
-                                        <li className="list-group-item bg-dark text-light text-center">
-                                            No recorded players.
+                                <ul className="list-group list-group-flush">
+                                    {roster.length ? roster.map(p => (
+                                        <li
+                                            key={p.player_id}
+                                            className="list-group-item bg-dark d-flex justify-content-between"
+                                        >
+                                            <Link
+                                                to={`/players/${p.player_id}`}
+                                                className="text-info fw-semibold text-decoration-none"
+                                            >
+                                                {p.display_name || p.username}
+                                            </Link>
+                                            <span className="text-secondary">{p.role}</span>
+                                        </li>
+                                    )) : (
+                                        <li className="list-group-item bg-dark text-secondary text-center">
+                                            No roster data
                                         </li>
                                     )}
                                 </ul>
@@ -473,9 +428,9 @@ export default function MatchDetail() {
                 )}
             </div>
 
-            {/* --- Back Button --- */}
+            {/* ================= BACK ================= */}
             <div className="mt-4">
-                <Link to={`/teams/${teamA.id}`} className="btn btn-secondary">
+                <Link to={`/teams/${teamA.id}`} className="btn btn-outline-light">
                     ← Back to {teamA.name}
                 </Link>
             </div>

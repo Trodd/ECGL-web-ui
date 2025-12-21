@@ -59,82 +59,91 @@ export default function Teams() {
   }, [teams, search]);
 
   return (
-    <div className="text-light mx-auto" style={{ maxWidth: "600px" }}>
-      <h2 className="mb-3">👥 Teams</h2>
+    <div className="d-flex justify-content-center">
+      <div style={{ width: "100%", maxWidth: 680 }}>
+        <div className="card bg-dark border-secondary p-4 shadow-sm">
+          <h2 className="mb-3">👥 Teams</h2>
 
-      {error && <div className="alert alert-danger">{error}</div>}
+          {error && (
+            <div className="alert alert-danger small mb-3">
+              {error}
+            </div>
+          )}
 
-      {/* 🔍 Search bar */}
-      <div className="d-flex mb-3">
-        <input
-          type="text"
-          className="form-control bg-dark text-light"
-          style={{ maxWidth: 300 }}
-          placeholder="🔍 Search team name..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value || "")}
-        />
-      </div>
+          {/* ================= SEARCH ================= */}
+          <div className="mb-4" style={{ maxWidth: 320 }}>
+            <input
+              type="text"
+              className="form-control bg-dark text-light"
+              placeholder="🔍 Search team name…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value || "")}
+            />
+          </div>
 
-      {filteredTeams.length === 0 ? (
-        <p>No teams found.</p>
-      ) : (
-        <ul className="list-group">
-          {filteredTeams.map((t) => (
-            <li
-              key={t.id}
-              className="list-group-item d-flex justify-content-between align-items-center px-3 py-2 mb-2"
-              style={{
-                backgroundColor: "#1c1c1c",
-                border: "1px solid #2a2a2a",
-                borderRadius: "0.5rem",
-              }}
-            >
-              <Link
-                to={`/teams/${t.id}`}
-                className="text-decoration-none text-light fw-semibold d-flex align-items-center"
-              >
-                {t.name}
-
-                {/* 🏆 Only show trophy if team is Active AND allows challenges */}
-                {t.status === "Active" && settings?.challenges_enabled && t.allow_challenges && (
-                  <span
+          {/* ================= TEAM LIST ================= */}
+          {filteredTeams.length === 0 ? (
+            <p className="text-secondary">No teams found.</p>
+          ) : (
+            <div className="d-flex flex-column gap-2">
+              {filteredTeams.map((t) => (
+                <Link
+                  key={t.id}
+                  to={`/teams/${t.id}`}
+                  className="text-decoration-none"
+                >
+                  <div
+                    className="border rounded p-3 d-flex justify-content-between align-items-center"
                     style={{
-                      marginLeft: "8px",
-                      color: "#ffd700",
-                      fontSize: "1.2rem",
+                      backgroundColor: "#1c1c1c",
+                      borderColor: "#3a3a3a",
                     }}
-                    title="This team is accepting challenge matches"
                   >
-                    🏆
-                  </span>
-                )}
+                    {/* LEFT — Team Name */}
+                    <div className="d-flex align-items-center gap-2 fw-semibold text-light">
+                      <span>{t.name}</span>
 
-                {/* 🚫 Indicate inactive/disbanded */}
-                {t.status !== "Active" && (
-                  <span
-                    style={{ marginLeft: "8px", color: "#ff4444", fontSize: "1.1rem" }}
-                    title="This team cannot receive or issue challenges"
-                  >
-                    🔒
-                  </span>
-                )}
-              </Link>
+                      {/* 🏆 Accepting Challenges */}
+                      {t.status === "Active" &&
+                        settings?.challenges_enabled &&
+                        t.allow_challenges && (
+                          <span
+                            className="badge bg-warning text-dark"
+                            title="Accepting challenge matches"
+                          >
+                            🏆
+                          </span>
+                        )}
 
-              <span
-                className={`badge ${t.status === "Active"
-                  ? "bg-success"
-                  : t.status === "Disbanded"
-                    ? "bg-danger"
-                    : "bg-secondary"
-                  }`}
-              >
-                {t.status || "Unknown"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+                      {/* 🔒 Inactive / Disbanded */}
+                      {t.status !== "Active" && (
+                        <span
+                          className="badge bg-danger"
+                          title="This team cannot receive or issue challenges"
+                        >
+                          🔒
+                        </span>
+                      )}
+                    </div>
+
+                    {/* RIGHT — Status */}
+                    <span
+                      className={`badge ${t.status === "Active"
+                        ? "bg-success"
+                        : t.status === "Disbanded"
+                          ? "bg-danger"
+                          : "bg-secondary"
+                        }`}
+                    >
+                      {t.status || "Unknown"}
+                    </span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
