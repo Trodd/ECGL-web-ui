@@ -105,6 +105,8 @@ type Match struct {
 	BracketRound           int            `json:"bracket_round" gorm:"default:0"` // 1,2,...
 	BracketSlot            int            `json:"bracket_slot" gorm:"default:0"`  // match index within the round
 	Archived               bool           `json:"archived" gorm:"default:false"`
+	DiscordChannelID       *string        `json:"discord_channel_id"`
+	ChannelCreatedAt       *time.Time     `json:"channel_created_at"`
 }
 
 // --- Match Score ---

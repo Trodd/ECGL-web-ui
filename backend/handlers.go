@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
 	"gorm.io/datatypes"
@@ -1966,6 +1967,20 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 	if err := DB.Save(&match).Error; err != nil {
 		http.Error(w, "Failed to update match", http.StatusInternalServerError)
 		return
+	}
+
+	// 🚀 Schedule Discord match channel lifecycle
+	if match.ScheduledDate != nil {
+		// Initialize Discord session for channel management
+		botToken := getEnv("DISCORD_BOT_TOKEN", "")
+		if botToken != "" {
+			dg, err := discordgo.New("Bot " + botToken)
+			if err == nil {
+				go scheduleMatchChannel(dg, &match)
+			} else {
+				log.Printf("⚠️ Failed to create Discord session for match channel: %v", err)
+			}
+		}
 	}
 
 	// --- Logging (console only) ---
