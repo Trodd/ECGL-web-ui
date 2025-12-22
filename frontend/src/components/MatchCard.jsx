@@ -175,221 +175,205 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
         }));
 
     return (
-        <div
-            className="p-3 border rounded bg-dark shadow-sm mx-auto text-light d-flex flex-column align-items-center"
-            style={{
-                width: "100%",
-                maxWidth: 700,
-                borderColor: "#444",
-                textAlign: "center",
-                backgroundColor: "#121212",
-            }}
-        >
-            <div className="d-flex justify-content-between align-items-center mb-2">
+        <div className="match-card-root mx-auto">
+
+            {/* ================= MATCH HEADER ================= */}
+            <div className="match-card-header">
+                <div className="d-flex justify-content-between align-items-center w-100">
+                    <h5 className="mb-0 fw-bold">
+                        {team.name} vs {match.opponent}
+                    </h5>
+                    <span className={`status-pill ${match.status || "Pending"}`}>
+                        {match.status || "Pending"}
+                    </span>
+                </div>
             </div>
 
-            <p className="text-light mb-2">
-                Status: <strong>{match.status || "Pending"}</strong>
-            </p>
+            {/* ================= CARD BODY ================= */}
+            <div className="match-card-body">
 
-            {/* 🗓️ Step 1: Schedule / Edit or View Time */}
-            <div className="mb-3">
+                {/* ================= SCHEDULE ================= */}
+                <div className="match-section">
+                    <h6 className="section-title">🗓️ Match Time</h6>
 
-                {/* 🧑 Captains get edit controls */}
-                {isCaptain && (
-                    <>
-                        {!match.date || editing ? (
-                            <div className="d-flex align-items-center gap-2 mt-2">
-                                <input
-                                    type="datetime-local"
-                                    className="form-control bg-dark text-light"
-                                    style={{ maxWidth: 240 }}
-                                    value={localDate}
-                                    onChange={(e) => setLocalDate(e.target.value)}
-                                />
-                                <button
-                                    className="btn btn-primary btn-sm"
-                                    onClick={handleSchedule}
-                                >
-                                    {match.date ? "Save Changes" : "Schedule"}
-                                </button>
-                                {editing && (
+                    {isCaptain && (
+                        <>
+                            {!match.date || editing ? (
+                                <div className="d-flex flex-wrap align-items-center gap-2 mt-2">
+                                    <input
+                                        type="datetime-local"
+                                        className="form-control bg-dark text-light"
+                                        style={{ maxWidth: 240 }}
+                                        value={localDate}
+                                        onChange={(e) => setLocalDate(e.target.value)}
+                                    />
+
                                     <button
-                                        className="btn btn-secondary btn-sm"
-                                        onClick={() => setEditing(false)}
+                                        className="btn btn-primary btn-sm"
+                                        onClick={handleSchedule}
                                     >
-                                        Cancel
+                                        {match.date ? "Save Changes" : "Schedule"}
                                     </button>
+
+                                    {editing && (
+                                        <button
+                                            className="btn btn-outline-secondary btn-sm"
+                                            onClick={() => setEditing(false)}
+                                        >
+                                            Cancel
+                                        </button>
+                                    )}
+                                </div>
+                            ) : (
+                                <button
+                                    className="btn btn-outline-warning btn-sm mt-2"
+                                    onClick={() => setEditing(true)}
+                                >
+                                    ✏️ Edit Date / Time
+                                </button>
+                            )}
+                        </>
+                    )}
+                </div>
+
+                {/* ================= SCORING ================= */}
+                {match.date && isCaptain && (
+                    <div className="match-section">
+
+                        <h6 className="section-title">🎯 Match Setup & Scoring</h6>
+
+                        {/* ================= COIN FLIP ================= */}
+                        <div className="sub-card">
+                            <label className="fw-bold mb-1 d-block">🎲 Coin Flip</label>
+
+                            <div className="d-flex align-items-center gap-2 flex-wrap">
+                                <select
+                                    className="form-select bg-dark text-light"
+                                    value={coinFlipCall}
+                                    disabled={coinFlipConfirmed}
+                                    onChange={(e) => {
+                                        setCoinFlipCall(e.target.value);
+                                        setCoinFlipConfirmed(false);
+                                    }}
+                                    style={{ maxWidth: 200 }}
+                                >
+                                    <option value="">Select…</option>
+                                    <option value="HEADS">Heads</option>
+                                    <option value="TAILS">Tails</option>
+                                </select>
+
+                                {!coinFlipConfirmed ? (
+                                    <button
+                                        className="btn btn-sm btn-primary"
+                                        disabled={!coinFlipCall}
+                                        onClick={async () => {
+                                            try {
+                                                const res = await axios.post(
+                                                    `${urlBase}/api/match/confirm-coinflip`,
+                                                    {
+                                                        match_id: match.id,
+                                                        team_id: team.id,
+                                                        coin_flip_call: coinFlipCall,
+                                                    },
+                                                    { withCredentials: true }
+                                                );
+                                                setCoinFlipConfirmed(true);
+                                                setCoinFlipResult(res.data?.winner || null);
+                                                alert("🎲 Coin flip confirmed!");
+                                            } catch {
+                                                alert("Failed to confirm coin flip.");
+                                            }
+                                        }}
+                                    >
+                                        Confirm Flip
+                                    </button>
+                                ) : (
+                                    <span className="text-success fw-semibold">✔ Confirmed</span>
                                 )}
                             </div>
-                        ) : (
-                            <button
-                                className="btn btn-outline-warning btn-sm mt-2"
-                                onClick={() => setEditing(true)}
-                            >
-                                ✏️ Edit Date / Time
-                            </button>
-                        )}
-                    </>
-                )}
-            </div>
+                        </div>
 
-            {/* 🎯 Step 2: Scoring */}
-            {match.date && isCaptain && (
-                <div className="mt-3">
-                    <h6 className="text-light mb-2">🎯 Confirm Scores</h6>
+                        {/* ================= SUBS ================= */}
+                        <div className="sub-card">
+                            <label className="fw-bold mb-2 d-block">🧍 League Subs</label>
 
-                    {/* 🎲 Coin Flip Section */}
-                    <div className="mb-3">
-                        <label className="form-label text-light fw-bold">🎲 Coin Flip — Your Call</label>
+                            <div className="d-flex flex-wrap gap-3">
+                                <select
+                                    className="form-select form-select-sm bg-dark text-light"
+                                    value={selectedSubA}
+                                    onChange={(e) => setSelectedSubA(e.target.value)}
+                                    disabled={myScoresConfirmed}
+                                    style={{ minWidth: 200 }}
+                                >
+                                    <option value="">Your Team Sub</option>
+                                    {leagueSubs.map((s) => (
+                                        <option key={s.id} value={s.id}>
+                                            {s.display_name || s.username}
+                                        </option>
+                                    ))}
+                                </select>
 
-                        <div className="d-flex align-items-center gap-2">
-                            <select
-                                className="form-select bg-dark text-light"
-                                value={coinFlipCall}
-                                disabled={coinFlipConfirmed}   // lock after confirming
-                                onChange={(e) => {
-                                    setCoinFlipCall(e.target.value);
-                                    setCoinFlipConfirmed(false); // reset if changed
-                                }}
-                                style={{ maxWidth: 200 }}
-                            >
-                                <option value="">Select...</option>
-                                <option value="HEADS">Heads</option>
-                                <option value="TAILS">Tails</option>
-                            </select>
+                                <select
+                                    className="form-select form-select-sm bg-dark text-light"
+                                    value={selectedSubB}
+                                    onChange={(e) => setSelectedSubB(e.target.value)}
+                                    disabled={myScoresConfirmed}
+                                    style={{ minWidth: 200 }}
+                                >
+                                    <option value="">Opponent Sub</option>
+                                    {leagueSubs.map((s) => (
+                                        <option key={s.id} value={s.id}>
+                                            {s.display_name || s.username}
+                                        </option>
+                                    ))}
+                                </select>
 
-                            {/* Confirm Button */}
-                            {!coinFlipConfirmed && (
                                 <button
-                                    className="btn btn-sm btn-primary"
-                                    disabled={!coinFlipCall}
-                                    onClick={async () => {
-                                        try {
-                                            const res = await axios.post(
-                                                `${urlBase}/api/match/confirm-coinflip`,
-                                                {
-                                                    match_id: match.id,
-                                                    team_id: team.id,
-                                                    coin_flip_call: coinFlipCall,
-                                                },
-                                                { withCredentials: true }
-                                            );
-
-                                            setCoinFlipConfirmed(true);
-                                            setCoinFlipResult(res.data?.winner || null);
-                                            alert("🎲 Coin flip confirmed!");
-                                        } catch (err) {
-                                            console.error("Coin flip confirm error:", err);
-                                            alert("Failed to confirm coin flip.");
-                                        }
-                                    }}
+                                    className="btn btn-warning btn-sm"
+                                    onClick={() => pingForSub(match.id, team.id)}
                                 >
-                                    Confirm Flip
+                                    🔔 Ping for Sub
                                 </button>
-                            )}
-
-                            {/* Show result if confirmed */}
-                            {coinFlipConfirmed && (
-                                <span className="text-success fw-bold">
-                                    ✔ Flip Confirmed
-                                </span>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* 🧍 League Subs */}
-                    <div className="d-flex flex-wrap align-items-center gap-3 mb-3">
-                        <div>
-                            <label className="form-label text-info small mb-1">
-                                League Sub for {team.name}
-                            </label>
-                            <select
-                                className="form-select form-select-sm bg-dark text-light"
-                                value={selectedSubA}
-                                onChange={(e) => setSelectedSubA(e.target.value)}
-                                disabled={myScoresConfirmed}
-                                style={{ minWidth: 200 }}
-                            >
-                                <option value="">None</option>
-                                {leagueSubs.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                        {s.display_name || s.username}
-                                    </option>
-                                ))}
-                            </select>
+                            </div>
                         </div>
 
-                        <div>
-                            <label className="form-label text-warning small mb-1">
-                                League Sub for {match.opponent}
-                            </label>
-                            <select
-                                className="form-select form-select-sm bg-dark text-light"
-                                value={selectedSubB}
-                                onChange={(e) => setSelectedSubB(e.target.value)}
-                                disabled={myScoresConfirmed}
-                                style={{ minWidth: 200 }}
-                            >
-                                <option value="">None</option>
-                                {leagueSubs.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                        {s.display_name || s.username}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <button
-                            className="btn btn-warning btn-sm"
-                            onClick={() => pingForSub(match.id, team.id)}
-                        >
-                            🔔 Ping for Sub
-                        </button>
-                    </div>
+                        {/* ================= MAPS ================= */}
+                        <div className="row g-3 mt-2">
+                            {[1, 2, 3].map((n) => (
+                                <div className="col-md-4" key={n}>
+                                    <div className="map-card">
+                                        <h6 className="mb-2">Map {n}</h6>
 
-                    <div className="row g-3">
-                        {[1, 2, 3].map((n) => (
-                            <div className="col-md-4" key={n}>
-                                <div
-                                    className="p-3 rounded shadow-sm"
-                                    style={{
-                                        backgroundColor: "#151515",
-                                        border: "1px solid rgba(255,255,255,0.1)",
-                                    }}
-                                >
-                                    <label className="form-label text-light mb-1">Map {n}</label>
-                                    <select
-                                        className="form-select form-select-sm bg-dark text-light mb-2"
-                                        value={scores[`map${n}`]?.mode || ""}
-                                        onChange={(e) =>
-                                            updateScore(`map${n}`, "mode", e.target.value)
-                                        }
-                                        disabled={myScoresConfirmed}
-                                    >
-                                        <option value="">Gamemode...</option>
-                                        <option value="Capture Point">Capture Point</option>
-                                        <option value="Payload">Payload</option>
-                                    </select>
+                                        <select
+                                            className="form-select form-select-sm bg-dark text-light mb-2"
+                                            value={scores[`map${n}`]?.mode || ""}
+                                            onChange={(e) =>
+                                                updateScore(`map${n}`, "mode", e.target.value)
+                                            }
+                                            disabled={myScoresConfirmed}
+                                        >
+                                            <option value="">Gamemode…</option>
+                                            <option value="Capture Point">Capture Point</option>
+                                            <option value="Payload">Payload</option>
+                                        </select>
 
-                                    <div className="mb-2">
-                                        <small className="text-info">Your Score:</small>
                                         <input
                                             type="number"
                                             min="0"
-                                            className="form-control form-control-sm bg-dark text-light"
+                                            className="form-control form-control-sm bg-dark text-light mb-2"
+                                            placeholder="Your score"
                                             value={scores[`map${n}`]?.our || ""}
                                             onChange={(e) =>
                                                 updateScore(`map${n}`, "our", e.target.value)
                                             }
                                             disabled={myScoresConfirmed}
                                         />
-                                    </div>
-                                    <div>
-                                        <small className="text-warning">Opponent’s Score:</small>
+
                                         <input
                                             type="number"
                                             min="0"
                                             className="form-control form-control-sm bg-dark text-light"
+                                            placeholder="Opponent score"
                                             value={scores[`map${n}`]?.their || ""}
                                             onChange={(e) =>
                                                 updateScore(`map${n}`, "their", e.target.value)
@@ -398,63 +382,48 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                                         />
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
+
+                        {/* ================= CONFIRM ================= */}
+                        <div className="d-flex align-items-center gap-2 mt-3">
+                            <button
+                                className="btn btn-success btn-sm"
+                                onClick={handleConfirmScores}
+                                disabled={bothTeamsConfirmedScores || myScoresConfirmed}
+                            >
+                                ✅ Confirm Scores
+                            </button>
+
+                            {myScoresConfirmed && !bothTeamsConfirmedScores && (
+                                <span className="text-warning small">
+                                    ⏳ Waiting for opponent…
+                                </span>
+                            )}
+                        </div>
                     </div>
+                )}
 
-                    <div className="d-flex gap-2 mt-3 align-items-center">
-                        <button
-                            className="btn btn-success btn-sm"
-                            onClick={handleConfirmScores}
-                            disabled={bothTeamsConfirmedScores || myScoresConfirmed}
-                        >
-                            ✅ Confirm Scores
-                        </button>
-
-                        {myScoresConfirmed && !bothTeamsConfirmedScores && (
-                            <p className="text-warning small mb-0">
-                                ⏳ Waiting for opponent to confirm (editing resets confirmation)...
-                            </p>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* ✅ Step 3: Finalized */}
-            {bothTeamsConfirmedScores && (
-                <div className="mt-3 text-light small">
-                    <p className="text-success mb-0 fw-semibold">
+                {/* ================= FINAL ================= */}
+                {bothTeamsConfirmedScores && (
+                    <div className="match-final">
                         ✅ Both teams confirmed — match completed!
-                    </p>
-                    {(selectedSubA || selectedSubB) && (
-                        <p className="text-light mt-1 mb-0">
-                            {selectedSubA &&
-                                `League Sub (Your Team): ${leagueSubs.find((s) => String(s.id) === String(selectedSubA))
-                                    ?.display_name ||
-                                "Unknown"
-                                }`}
-                            {selectedSubA && selectedSubB && " • "}
-                            {selectedSubB &&
-                                `Opponent Sub: ${leagueSubs.find((s) => String(s.id) === String(selectedSubB))?.display_name ||
-                                "Unknown"
-                                }`}
-                        </p>
-                    )}
-                </div>
-            )}
+                    </div>
+                )}
 
-            {msg && (
-                <p
-                    className={`small mt-2 mb-0 ${msg.startsWith("✅")
-                        ? "text-success"
-                        : msg.startsWith("⚠️")
-                            ? "text-warning"
-                            : "text-danger"
-                        }`}
-                >
-                    {msg}
-                </p>
-            )}
+                {msg && (
+                    <div
+                        className={`small mt-2 ${msg.startsWith("✅")
+                                ? "text-success"
+                                : msg.startsWith("⚠️")
+                                    ? "text-warning"
+                                    : "text-danger"
+                            }`}
+                    >
+                        {msg}
+                    </div>
+                )}
+            </div>
         </div>
     );
 }

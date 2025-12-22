@@ -273,7 +273,7 @@ export default function MyTeam() {
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
         <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
           <div>
-            <h2 className="mb-1">🧑 {team?.name}</h2>
+            <h2 className="mb-1"> {team?.name}</h2>
             <span
               className={`fw-bold ${team?.status === "Active"
                 ? "text-success"

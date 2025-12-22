@@ -1,11 +1,17 @@
 /* === ECGL Global Reset === */
 html,
-body,
-#root {
+body {
   margin: 0;
   padding: 0;
-  height: 100%;
   width: 100%;
+  min-height: 100%;
+  background-color: #0b0b0b;
+}
+
+#root {
+  width: 100%;
+  min-height: 100%;
+  position: relative;
 }
 
 body {
@@ -386,13 +392,6 @@ h3 {
   flex: 0 0 auto;
 }
 
-/* === Notch / Safe-Area Support === */
-
-/* Allow edge-to-edge fullscreen */
-html {
-  height: -webkit-fill-available;
-}
-
 /* ONLY the header should get safe-area padding */
 .ecgl-header {
   padding-top: max(env(safe-area-inset-top), 12px);
@@ -463,8 +462,7 @@ body {
   }
 
   /* Push content above bottom nav */
-  body,
-  .page-content {
+  body {
     padding-bottom: calc(90px + env(safe-area-inset-bottom)) !important;
   }
 }
@@ -929,4 +927,229 @@ body {
 .ecgl-alert-warning * {
   color: #2b2b2b !important;
   /* stop bg-dark inheritance */
+}
+
+.match-card-root {
+  max-width: 760px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #151515, #0f0f0f);
+  border: 1px solid #2c2c2c;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+}
+
+.match-card-header {
+  background: linear-gradient(180deg, #1e1e1e, #151515);
+  padding: 14px 18px;
+  border-bottom: 1px solid #2c2c2c;
+}
+
+.status-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.status-pill.Pending {
+  background: #333;
+}
+
+.status-pill.Completed {
+  background: #198754;
+  color: #000;
+}
+
+.match-card-body {
+  padding: 18px;
+}
+
+.match-section {
+  margin-bottom: 20px;
+}
+
+.section-title {
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.sub-card {
+  background: #121212;
+  border: 1px solid #2d2d2d;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.map-card {
+  background: #151515;
+  border: 1px solid #333;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.match-final {
+  background: linear-gradient(180deg, #1a3d2a, #10241a);
+  border: 1px solid #1f6f4a;
+  border-radius: 12px;
+  padding: 10px;
+  font-weight: 600;
+  color: #9df0c3;
+  text-align: center;
+}
+
+/* Dark text specifically for "Ping for Sub" button */
+.match-card-root .btn-warning {
+  color: #111 !important;
+  font-weight: 700;
+}
+
+.match-card-root .btn-warning:hover {
+  color: #000 !important;
+}
+
+
+
+/* =========================================================
+   GLOBAL BACKGROUND SYSTEM
+   Applies to entire website
+========================================================= */
+
+/* =========================================================
+   SUBTLE GRID OVERLAY (DEPTH, NOT NOISE)
+========================================================= */
+#root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px,
+      transparent 1px),
+    linear-gradient(90deg,
+      rgba(255, 255, 255, 0.035) 1px,
+      transparent 1px);
+  background-size: 48px 48px;
+  opacity: 0.12;
+}
+
+/* =========================================================
+   AMBIENT GRADIENT MOTION
+========================================================= */
+#root::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 20% 80%,
+      rgba(255, 80, 180, 0.05),
+      transparent 60%),
+    radial-gradient(circle at 80% 30%,
+      rgba(0, 160, 255, 0.06),
+      transparent 55%);
+  animation: ambientShift 28s ease-in-out infinite alternate;
+}
+
+/* Slow ambient motion */
+@keyframes ambientShift {
+  0% {
+    transform: translateY(0px);
+  }
+
+  100% {
+    transform: translateY(-60px);
+  }
+}
+
+/* =========================================================
+   ENSURE CONTENT FLOATS ABOVE BACKGROUND
+========================================================= */
+#root>* {
+  position: relative;
+  z-index: 1;
+}
+
+/* =========================================================
+   OPTIONAL: REDUCE BACKGROUND INTENSITY FOR MOBILE
+========================================================= */
+@media (max-width: 768px) {
+  #root::before {
+    opacity: 0.08;
+    background-size: 64px 64px;
+  }
+
+  #root::after {
+    opacity: 0.7;
+  }
+}
+
+/* =========================================================
+   FIXED / STICKY NAV + MOBILE SCROLL SAFETY
+========================================================= */
+
+/* 3️⃣ Fixed background layers must NEVER exceed viewport */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::before {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+  opacity: 0.1;
+}
+
+body::after {
+  background:
+    radial-gradient(circle at 20% 80%, rgba(255, 80, 180, 0.05), transparent 60%),
+    radial-gradient(circle at 80% 30%, rgba(0, 160, 255, 0.06), transparent 55%);
+  animation: ambientShift 28s ease-in-out infinite alternate;
+}
+
+/* =========================================================
+   FIXED NAV BAR PROTECTION
+========================================================= */
+
+/* Ensure nav is always above animated backgrounds */
+nav,
+.navbar,
+.bottom-nav,
+.mobile-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background-color: #0f0f0f;
+}
+
+/* =========================================================
+   PREVENT CONTENT FROM SCROLLING UNDER NAV
+========================================================= */
+
+/* TOP fixed nav (header-style) */
+body.has-top-nav {
+  padding-top: var(--nav-height, 64px);
+}
+
+/* BOTTOM fixed nav (mobile tab bar) */
+body.has-bottom-nav {
+  padding-bottom: calc(var(--nav-height, 64px) + env(safe-area-inset-bottom));
+}
+
+/* =========================================================
+   iOS SAFARI RUBBER-BAND FIX
+========================================================= */
+@supports (-webkit-touch-callout: none) {
+  body {
+    overscroll-behavior-y: none;
+  }
 }
