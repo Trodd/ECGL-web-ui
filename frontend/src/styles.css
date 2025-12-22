@@ -1153,3 +1153,116 @@ body.has-bottom-nav {
     overscroll-behavior-y: none;
   }
 }
+
+/* ==============================
+   ECGL FINALS — VISUAL COHESION
+   ============================== */
+
+.finals-root {
+  padding: 20px;
+}
+
+/* Section framing */
+.finals-section {
+  margin-bottom: 48px;
+  padding: 18px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #121212, #0c0c0c);
+  border: 1px solid #2a2a2a;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+/* Headers */
+.finals-header {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
+}
+
+.finals-header h3 {
+  margin: 0;
+  color: #9ecbff;
+  text-shadow: 0 0 12px rgba(59, 110, 165, 0.5);
+}
+
+.finals-header .finals-sub {
+  font-size: 0.85rem;
+  color: #9aa0a6;
+}
+
+/* Lanes */
+.finals-lanes {
+  display: flex;
+  gap: 26px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+}
+
+/* Round column */
+.finals-round {
+  min-width: 220px;
+}
+
+/* Round label */
+.round-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #c7d2fe;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Match card */
+.fb-match {
+  background: linear-gradient(180deg, #1a1a1a, #111);
+  border: 1px solid #2c2c2c;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.fb-match:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(0, 188, 212, 0.25);
+}
+
+/* Teams */
+.fb-team {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.9rem;
+}
+
+.fb-team-winner {
+  background: linear-gradient(90deg, #145214, #1f6f4a);
+  color: #9df0c3;
+  font-weight: 700;
+}
+
+/* SVG connectors */
+.fb-svg line {
+  stroke: rgba(120, 180, 255, 0.45);
+  filter: drop-shadow(0 0 6px rgba(120, 180, 255, 0.35));
+}
+
+/* Winners / Losers tint */
+.finals-section.winners {
+  border-color: rgba(59, 110, 165, 0.6);
+}
+
+.finals-section.losers {
+  border-color: rgba(186, 140, 58, 0.5);
+}
+
+.finals-section.grand-finals {
+  border-color: rgba(122, 43, 194, 0.6);
+  background: linear-gradient(180deg, #16102a, #0c0816);
+}
+
+/* Grand finals emphasis */
+.finals-header.grand h3 {
+  color: #d8b4fe;
+  text-shadow: 0 0 14px rgba(122, 43, 194, 0.65);
+}

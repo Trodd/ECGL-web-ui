@@ -41,6 +41,63 @@ export default function PlayerDetail() {
           <div><b>Username:</b> {player.username || "-"}</div>
           <div><b>Role:</b> {player.role || "-"}</div>
           <div><b>Timezone:</b> {player.timezone || "-"}</div>
+
+          {/* Discord User ID */}
+          {player.id && (
+            <div
+              className="d-inline-flex align-items-center gap-2 mt-2 px-3 py-2 rounded"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid #3b6ea5",
+              }}
+            >
+              {/* Clickable Discord profile */}
+              <a
+                href={`https://discord.com/users/${player.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-decoration-none"
+                title="Open Discord Profile"
+                style={{
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.textShadow =
+                    "0 0 10px rgba(158,203,255,0.7)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.textShadow = "none";
+                }}
+              >
+                <span className="fw-semibold text-light">Discord ID:</span>{" "}
+                <span
+                  style={{
+                    fontFamily: "monospace",
+                    color: "#9ecbff",
+                  }}
+                >
+                  {player.id}
+                </span>{" "}
+                <span style={{ opacity: 0.6 }}>↗</span>
+              </a>
+
+              {/* Copy button */}
+              <button
+                className="btn btn-sm btn-outline-info"
+                title="Copy Discord ID"
+                onClick={() => {
+                  navigator.clipboard.writeText(player.id);
+                }}
+                style={{
+                  borderRadius: "6px",
+                  padding: "2px 8px",
+                }}
+              >
+                📋
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
