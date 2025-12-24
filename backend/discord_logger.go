@@ -223,6 +223,43 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 		},
 	}
 
+	// ✅ ALLOW BOT (REQUIRED)
+	botUserID := os.Getenv("DISCORD_CLIENT_ID")
+	if botUserID != "" {
+		overwrites = append(overwrites, &discordgo.PermissionOverwrite{
+			ID:   botUserID,
+			Type: discordgo.PermissionOverwriteTypeMember,
+			Allow: discordgo.PermissionViewChannel |
+				discordgo.PermissionSendMessages |
+				discordgo.PermissionReadMessageHistory |
+				discordgo.PermissionEmbedLinks |
+				discordgo.PermissionAttachFiles,
+		})
+	}
+
+	var casterIDs []int64
+	{
+		var cast CastLogMulti
+		if err := DB.Where("match_id = ?", m.ID).First(&cast).Error; err == nil {
+			if len(cast.Casters) > 0 {
+				_ = json.Unmarshal(cast.Casters, &casterIDs)
+			}
+		}
+	}
+
+	if len(casterIDs) > 0 {
+		casterRoleID := os.Getenv("DISCORD_CASTER_ROLE_ID")
+		if casterRoleID != "" {
+			overwrites = append(overwrites, &discordgo.PermissionOverwrite{
+				ID:   casterRoleID,
+				Type: discordgo.PermissionOverwriteTypeRole,
+				Allow: discordgo.PermissionViewChannel |
+					discordgo.PermissionSendMessages |
+					discordgo.PermissionReadMessageHistory,
+			})
+		}
+	}
+
 	var membersA, membersB []TeamMember
 	DB.Where("team_id = ?", m.TeamAID).Find(&membersA)
 	DB.Where("team_id = ?", m.TeamBID).Find(&membersB)
@@ -230,7 +267,8 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 	seen := map[int64]bool{}
 	mentions := []string{}
 
-	add := func(id int64) {
+	// 🔧 split helper: add with optional ping
+	add := func(id int64, ping bool) {
 		if id == 0 || seen[id] {
 			return
 		}
@@ -244,16 +282,35 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 				discordgo.PermissionReadMessageHistory,
 		})
 
-		mentions = append(mentions, fmt.Sprintf("<@%d>", id))
+		if ping {
+			mentions = append(mentions, fmt.Sprintf("<@%d>", id))
+		}
 	}
 
+	// 🔵 Team rosters (pinged)
 	for _, tm := range membersA {
-		add(tm.PlayerID)
+		add(tm.PlayerID, true)
 	}
 	for _, tm := range membersB {
-		add(tm.PlayerID)
+		add(tm.PlayerID, true)
 	}
 
+	// 🔧 ADD CASTERS (permissions only, NO ping)
+	{
+		var cast CastLogMulti
+		if err := DB.Where("match_id = ?", m.ID).First(&cast).Error; err == nil {
+			var casterIDs []int64
+			if len(cast.Casters) > 0 {
+				_ = json.Unmarshal(cast.Casters, &casterIDs)
+			}
+
+			for _, cid := range casterIDs {
+				add(cid, false) // ← no mention
+			}
+		}
+	}
+
+	// 🔨 Create channel
 	channel, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
 		Name:                 fmt.Sprintf("match-%d", m.ID),
 		Type:                 discordgo.ChannelTypeGuildText,
@@ -309,6 +366,126 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 			Users: userIDs,
 		},
 	})
+
+	if len(casterIDs) > 0 {
+		mentions := []string{}
+		for _, id := range casterIDs {
+			mentions = append(mentions, fmt.Sprintf("<@%d>", id))
+		}
+
+		castMsg := fmt.Sprintf(
+			"🎥 **THIS MATCH IS BEING CASTED**\n\n"+
+				"Casters: %s\n\n"+
+				"⛔ **DO NOT START THE MATCH** until the **casters** give the green light.\n"+
+				"🎙️ Please coordinate stream setup here.",
+			strings.Join(mentions, " "),
+		)
+
+		_, err := s.ChannelMessageSend(channel.ID, castMsg)
+		if err != nil {
+			log.Printf("❌ Failed to send cast message on channel create: %v", err)
+		} else {
+			log.Printf("✅ Cast message sent on channel creation (%s)", channel.ID)
+		}
+	}
+}
+
+func addCasterToExistingChannel(
+	s *discordgo.Session,
+	channelID string,
+	casterID int64,
+) {
+	if s == nil || channelID == "" || casterID == 0 {
+		return
+	}
+
+	queueRoleJob(func() {
+		allow := int64(
+			discordgo.PermissionViewChannel |
+				discordgo.PermissionSendMessages |
+				discordgo.PermissionReadMessageHistory,
+		)
+
+		deny := int64(0)
+
+		// ✅ YOUR discordgo order: (channelID, targetID, type, allow, deny)
+		err := s.ChannelPermissionSet(
+			channelID,
+			strconv.FormatInt(casterID, 10),
+			discordgo.PermissionOverwriteTypeMember,
+			allow,
+			deny,
+		)
+
+		if err != nil {
+			log.Printf("❌ Failed to add caster %d to channel %s: %v", casterID, channelID, err)
+		}
+	})
+}
+
+func ensureCasterRoleOverwrite(
+	s *discordgo.Session,
+	channelID string,
+) {
+	casterRoleID := os.Getenv("DISCORD_CASTER_ROLE_ID")
+	if s == nil || channelID == "" || casterRoleID == "" {
+		return
+	}
+
+	queueRoleJob(func() {
+		allow := int64(
+			discordgo.PermissionViewChannel |
+				discordgo.PermissionSendMessages |
+				discordgo.PermissionReadMessageHistory,
+		)
+
+		// 🔴 IMPORTANT: explicitly override deny
+		deny := int64(0)
+
+		err := s.ChannelPermissionSet(
+			channelID,
+			casterRoleID,
+			discordgo.PermissionOverwriteTypeRole,
+			allow,
+			deny,
+		)
+
+		if err != nil {
+			log.Printf("❌ Failed caster ROLE overwrite %s: %v", channelID, err)
+		} else {
+			log.Printf("✅ Ensured caster ROLE overwrite on %s", channelID)
+		}
+	})
+}
+
+func sendChannelMessageHTTP(channelID, content, botToken string) error {
+	if channelID == "" || content == "" || botToken == "" {
+		return fmt.Errorf("missing params")
+	}
+
+	payload := map[string]any{
+		"content": content,
+	}
+
+	b, _ := json.Marshal(payload)
+
+	url := fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages", channelID)
+	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(b))
+	req.Header.Set("Authorization", "Bot "+botToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("send message failed %s %s", resp.Status, body)
+	}
+
+	return nil
 }
 
 func deleteMatchChannel(s *discordgo.Session, m *Match) {

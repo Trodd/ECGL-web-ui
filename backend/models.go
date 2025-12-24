@@ -107,6 +107,7 @@ type Match struct {
 	Archived               bool           `json:"archived" gorm:"default:false"`
 	DiscordChannelID       *string        `json:"discord_channel_id"`
 	ChannelCreatedAt       *time.Time     `json:"channel_created_at"`
+	CasterMessageID        *string        `json:"caster_message_id"`
 }
 
 // --- Match Score ---

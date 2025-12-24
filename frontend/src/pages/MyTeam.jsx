@@ -149,7 +149,55 @@ export default function MyTeam() {
 
 
   if (loading) return <p>⏳ Fetching team data…</p>;
-  if (!team?.id) return <p>❌ You are not in a team.</p>;
+  if (!team?.id) {
+    return (
+      <div
+        className="d-flex justify-content-center align-items-center text-light"
+        style={{ minHeight: "60vh" }}
+      >
+        <div
+          className="text-center p-4 rounded-4 shadow"
+          style={{
+            background: "linear-gradient(145deg, #121212, #1a1a1a)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            maxWidth: 420,
+            width: "100%",
+          }}
+        >
+          <div
+            className="mb-3"
+            style={{ fontSize: "3rem", opacity: 0.85 }}
+          >
+            👥
+          </div>
+
+          <h4 className="fw-semibold mb-2">
+            You’re not on a team yet
+          </h4>
+
+          <p className="text-secondary small mb-4">
+            Join an existing team or create your own to start competing in ECGL.
+          </p>
+
+          <div className="d-flex justify-content-center gap-2 flex-wrap">
+            <a
+              href="/teams"
+              className="btn btn-outline-info btn-sm px-4"
+            >
+              Browse Teams
+            </a>
+
+            <a
+              href="/register"
+              className="btn btn-outline-success btn-sm px-4"
+            >
+              Create / Join team
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Build list of season options
   const allSeasons = ["All", "Preseason"];

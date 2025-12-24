@@ -25,6 +25,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+var discordSession *discordgo.Session
 var GlobalChallengesEnabled = true
 
 func getEnvInt(key string, def int) int {
@@ -4844,42 +4845,48 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// --- session ---
 	session, _ := store.Get(r, "session")
 	discordIDStr, ok := session.Values["discord_id"].(string)
-	if !ok || discordIDStr == "" {
+	if !ok || strings.TrimSpace(discordIDStr) == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
+	// --- player exists ---
 	var player Player
 	if err := DB.First(&player, "id = ?", discordIDStr).Error; err != nil {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
 
+	// --- env ---
 	casterRoleID := getEnv("DISCORD_CASTER_ROLE_ID", "")
 	guildID := getEnv("DISCORD_GUILD_ID", "")
 	botToken := getEnv("DISCORD_BOT_TOKEN", "")
-
 	if casterRoleID == "" || guildID == "" || botToken == "" {
 		http.Error(w, "Caster role not configured", http.StatusInternalServerError)
 		return
 	}
 
-	// Check guild roles
+	// --- verify caster role ---
 	isCaster := false
 	{
-		url := fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordIDStr)
+		url := fmt.Sprintf(
+			"https://discord.com/api/v10/guilds/%s/members/%s",
+			guildID,
+			discordIDStr,
+		)
 		req2, _ := http.NewRequest("GET", url, nil)
 		req2.Header.Set("Authorization", "Bot "+botToken)
+
 		resp, err := http.DefaultClient.Do(req2)
-		if err == nil && resp.StatusCode == 200 {
+		if err == nil && resp != nil && resp.StatusCode == 200 {
+			defer resp.Body.Close()
 			var member struct {
 				Roles []string `json:"roles"`
 			}
 			_ = json.NewDecoder(resp.Body).Decode(&member)
-			resp.Body.Close()
-
 			for _, r := range member.Roles {
 				if r == casterRoleID {
 					isCaster = true
@@ -4888,18 +4895,19 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
 	if !isCaster {
 		http.Error(w, "You are not a caster", http.StatusForbidden)
 		return
 	}
 
+	// --- load match ---
 	var match Match
 	if err := DB.First(&match, req.MatchID).Error; err != nil {
 		http.Error(w, "Match not found", http.StatusNotFound)
 		return
 	}
 
+	// --- status rules ---
 	finalStatuses := map[string]bool{
 		"Finished":       true,
 		"Completed":      true,
@@ -4908,173 +4916,136 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 		"Cancelled":      true,
 	}
 
-	// 🔥 Finals (including archived) are ALWAYS editable for casting
 	if finalStatuses[strings.TrimSpace(match.Status)] && !match.IsFinals {
 		respondJSON(w, map[string]any{
-			"success":      true,
-			"skip_channel": true,
+			"success": true,
+			"message": "Match already final — cast saved only.",
 		})
 		return
 	}
 
-	// Non-finals must be scheduled. Finals never require scheduling.
 	if !match.IsFinals && match.Status != "Scheduled" {
 		http.Error(w, "Match is not scheduled for casting.", http.StatusForbidden)
 		return
 	}
 
-	var teamA, teamB Team
-	DB.First(&teamA, match.TeamAID)
-	DB.First(&teamB, match.TeamBID)
-
-	var rosterA []TeamMember
-	var rosterB []TeamMember
-	DB.Where("team_id = ?", match.TeamAID).Find(&rosterA)
-	DB.Where("team_id = ?", match.TeamBID).Find(&rosterB)
-
-	categoryID := getEnv("DISCORD_CAST_CATEGORY_ID", "")
-	if categoryID == "" {
-		http.Error(w, "Cast category not configured", http.StatusInternalServerError)
+	// --- caster ID ---
+	casterID, err := strconv.ParseInt(discordIDStr, 10, 64)
+	if err != nil || casterID == 0 {
+		http.Error(w, "Invalid caster ID", http.StatusBadRequest)
 		return
 	}
 
-	const (
-		PermViewChannel        = 1 << 10 // 1024
-		PermSendMessages       = 1 << 11 // 2048
-		PermReadMessageHistory = 1 << 16 // 65536
-	)
+	// -------------------------------------------------
+	// ✅ SAVE CASTER (SOURCE OF TRUTH)
+	// -------------------------------------------------
+	casters, wasNew := upsertAddCaster(match.ID, casterID)
 
-	// -----------------------
-	// Permission overwrites
-	// -----------------------
-	overwrites := []map[string]any{
-		{
-			"id":   guildID,
-			"type": 0,
-			"deny": fmt.Sprint(PermViewChannel),
-		},
-		{
-			"id":    casterRoleID,
-			"type":  0,
-			"allow": fmt.Sprint(PermViewChannel | PermSendMessages | PermReadMessageHistory),
-		},
-	}
+	// -------------------------------------------------
+	// ✅ APPLY DISCORD PERMS IMMEDIATELY (IF CHANNEL EXISTS)
+	// -------------------------------------------------
+	addedToChannel := false
+	channelID := ""
 
-	modRoleID := getEnv("DISCORD_LEAGUE_MOD_ROLE_ID", "")
-	if modRoleID != "" {
-		overwrites = append(overwrites, map[string]any{
-			"id":    modRoleID,
-			"type":  0,
-			"allow": fmt.Sprint(PermViewChannel | PermReadMessageHistory),
-		})
-	}
+	if match.DiscordChannelID != nil &&
+		strings.TrimSpace(*match.DiscordChannelID) != "" &&
+		discordSession != nil {
 
-	// Add roster players
-	for _, tm := range append(rosterA, rosterB...) {
-		overwrites = append(overwrites, map[string]any{
-			"id":    fmt.Sprint(tm.PlayerID),
-			"type":  1,
-			"allow": fmt.Sprint(PermViewChannel | PermReadMessageHistory),
-		})
-	}
+		channelID = *match.DiscordChannelID
 
-	body := map[string]any{
-		"name":                  fmt.Sprintf("cast-%s", match.MatchCode),
-		"type":                  0,
-		"parent_id":             categoryID,
-		"permission_overwrites": overwrites,
-	}
+		// Always add MEMBER overwrite (specific caster)
+		addCasterToExistingChannel(discordSession, channelID, casterID)
 
-	jsonBody, _ := json.Marshal(body)
-
-	req3, _ := http.NewRequest("POST",
-		fmt.Sprintf("https://discord.com/api/v10/guilds/%s/channels", guildID),
-		strings.NewReader(string(jsonBody)))
-
-	req3.Header.Set("Authorization", "Bot "+botToken)
-	req3.Header.Set("Content-Type", "application/json")
-
-	resp3, err := http.DefaultClient.Do(req3)
-	if err != nil {
-		http.Error(w, "Failed to create Discord channel", http.StatusInternalServerError)
-		return
-	}
-	defer resp3.Body.Close()
-
-	if resp3.StatusCode != 201 {
-		bodyBytes, _ := io.ReadAll(resp3.Body)
-		log.Println("Discord API error:", resp3.Status)
-		log.Println("Response:", string(bodyBytes))
-		http.Error(w, "Discord API error", http.StatusInternalServerError)
-		return
-	}
-
-	var created struct {
-		ID string `json:"id"`
-	}
-	json.NewDecoder(resp3.Body).Decode(&created)
-
-	// ----------------------
-	// Send message inside channel
-	// ----------------------
-	var cast CastLogMulti
-	DB.Where("match_id = ?", req.MatchID).First(&cast)
-
-	var casterIDs []int64
-	_ = json.Unmarshal(cast.Casters, &casterIDs)
-
-	scheduledTime := "TBD"
-	if match.ScheduledDate != nil {
-		ts := match.ScheduledDate.Unix()
-		scheduledTime = fmt.Sprintf("<t:%d:f> (<t:%d:R>)", ts, ts)
-	}
-
-	msgBody := map[string]any{
-		"content": fmt.Sprintf(
-			"🔴 **LIVE CAST MATCH** 🔴\n"+
-				"====================================\n"+
-				"**%s vs %s**\n"+
-				"**Match Code:** `%s`\n"+
-				"**Scheduled Time:** %s\n"+
-				"====================================\n\n"+
-				"Casters will join shortly.\n\n"+
-				"🔗 **TEAMS:** Please post all Taxi Links here.\n"+
-				"⚠️ **Do NOT start the match** until casters give the green light.\n\n"+
-				"%s",
-			teamA.Name,
-			teamB.Name,
-			match.MatchCode,
-			scheduledTime,
-			buildMentionList(rosterA, rosterB),
-		),
-	}
-
-	msgJSON, _ := json.Marshal(msgBody)
-
-	msgReq, _ := http.NewRequest("POST",
-		fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages", created.ID),
-		strings.NewReader(string(msgJSON)),
-	)
-
-	msgReq.Header.Set("Authorization", "Bot "+botToken)
-	msgReq.Header.Set("Content-Type", "application/json")
-
-	msgResp, err := http.DefaultClient.Do(msgReq)
-	if err != nil {
-		log.Println("❌ Failed to send cast message:", err)
-	} else {
-		defer msgResp.Body.Close()
-		if msgResp.StatusCode >= 300 {
-			bodyBytes, _ := io.ReadAll(msgResp.Body)
-			log.Println("❌ Discord message error:", msgResp.Status)
-			log.Println("Response:", string(bodyBytes))
+		if len(casters) > 0 {
+			ensureCasterRoleOverwrite(discordSession, channelID)
 		}
+
+		addedToChannel = true
 	}
 
 	respondJSON(w, map[string]any{
-		"success":    true,
-		"channel_id": created.ID,
+		"success":          true,
+		"saved":            wasNew,
+		"added_to_channel": addedToChannel,
+		"channel_id":       channelID,
+		"casters_count":    len(casters),
 	})
+}
+
+// Inserts/loads CastLogMulti for match and appends casterID if missing.
+// Returns current caster list and whether it was newly added.
+func upsertAddCaster(matchID uint, casterID int64) ([]int64, bool) {
+	var multi CastLogMulti
+	_ = DB.Where("match_id = ?", matchID).First(&multi).Error // ok if not found
+
+	var casterIDs []int64
+	if len(multi.Casters) > 0 {
+		_ = json.Unmarshal(multi.Casters, &casterIDs)
+	}
+	// de-dupe
+	for _, id := range casterIDs {
+		if id == casterID {
+			return casterIDs, false
+		}
+	}
+	casterIDs = append(casterIDs, casterID)
+
+	b, _ := json.Marshal(casterIDs)
+
+	// create if missing
+	if multi.ID == 0 {
+		multi.MatchID = matchID
+		multi.Casters = b
+		_ = DB.Create(&multi).Error
+	} else {
+		_ = DB.Model(&multi).Update("casters", b).Error
+	}
+
+	return casterIDs, true
+}
+
+// Adds a member permission overwrite to an existing channel via Discord HTTP API.
+// Crash-safe: returns error instead of panicking.
+func addMemberOverwriteHTTP(channelID string, userID int64, botToken string) error {
+	if channelID == "" || userID == 0 || botToken == "" {
+		return fmt.Errorf("missing channelID/userID/botToken")
+	}
+
+	// Same perms you use in createMatchChannel for players:
+	allow := discordgo.PermissionViewChannel |
+		discordgo.PermissionSendMessages |
+		discordgo.PermissionReadMessageHistory
+
+	deny := int64(0)
+
+	payload := map[string]any{
+		"type":  1, // member
+		"allow": fmt.Sprint(allow),
+		"deny":  fmt.Sprint(deny),
+	}
+
+	b, _ := json.Marshal(payload)
+
+	url := fmt.Sprintf("https://discord.com/api/v10/channels/%s/permissions/%d", channelID, userID)
+	req, _ := http.NewRequest("PUT", url, bytes.NewBuffer(b))
+	req.Header.Set("Authorization", "Bot "+botToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("⚠️ addMemberOverwriteHTTP error: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Discord returns 204 No Content on success
+	if resp.StatusCode != 204 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		log.Printf("⚠️ addMemberOverwriteHTTP failed: %s %s", resp.Status, string(bodyBytes))
+		return fmt.Errorf("discord api status %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 func buildMentionList(a []TeamMember, b []TeamMember) string {
@@ -5721,6 +5692,17 @@ func HandleSetCast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🔍 Load previous casters (for diff)
+	var previousCasters []int64
+	{
+		var prev CastLogMulti
+		if err := DB.Where("match_id = ?", req.MatchID).First(&prev).Error; err == nil {
+			if len(prev.Casters) > 0 {
+				_ = json.Unmarshal(prev.Casters, &previousCasters)
+			}
+		}
+	}
+
 	// Marshal casters JSONB
 	castersJSON, err := json.Marshal(casterIDs)
 	if err != nil {
@@ -5765,6 +5747,52 @@ func HandleSetCast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var match Match
+	if err := DB.First(&match, req.MatchID).Error; err == nil &&
+		match.DiscordChannelID != nil &&
+		strings.TrimSpace(*match.DiscordChannelID) != "" {
+
+		// Build lookup of previous casters
+		prev := map[int64]bool{}
+		for _, id := range previousCasters {
+			prev[id] = true
+		}
+
+		// Find newly added casters
+		newCasters := []int64{}
+		for _, id := range casterIDs {
+			if !prev[id] {
+				newCasters = append(newCasters, id)
+			}
+		}
+
+		if match.DiscordChannelID != nil &&
+			strings.TrimSpace(*match.DiscordChannelID) != "" {
+
+			channelID := *match.DiscordChannelID
+			botToken := os.Getenv("DISCORD_BOT_TOKEN")
+
+			mentions := []string{}
+			for _, id := range casterIDs {
+				mentions = append(mentions, fmt.Sprintf("<@%d>", id))
+			}
+
+			msg := fmt.Sprintf(
+				"🎥 **THIS MATCH IS BEING CASTED**\n\n"+
+					"Casters: %s\n\n"+
+					"⛔ **DO NOT START THE MATCH** until the **casters** give the green light.\n"+
+					"🎙️ Please coordinate stream setup here.",
+				strings.Join(mentions, " "),
+			)
+
+			if err := sendChannelMessageHTTP(channelID, msg, botToken); err != nil {
+				log.Printf("❌ Failed to send cast message: %v", err)
+			} else {
+				log.Printf("✅ Cast message sent to channel %s", channelID)
+			}
+		}
+	}
+
 	respondJSON(w, map[string]any{
 		"success": true,
 		"message": "Cast saved.",
@@ -5795,6 +5823,8 @@ func HandleGetCast(w http.ResponseWriter, r *http.Request) {
 		if multi.CameraID != 0 {
 			cameraStr = strconv.FormatInt(multi.CameraID, 10)
 		}
+
+		reconcileCastPermissions(uint(matchID))
 
 		respondJSON(w, map[string]any{
 			"match_id":   matchID,
@@ -5828,6 +5858,84 @@ func HandleGetCast(w http.ResponseWriter, r *http.Request) {
 		"casters":  []string{},
 		"camera":   "",
 	})
+}
+
+func reconcileCastPermissions(matchID uint) {
+	var match Match
+	if err := DB.First(&match, matchID).Error; err != nil {
+		return
+	}
+
+	if match.DiscordChannelID == nil ||
+		strings.TrimSpace(*match.DiscordChannelID) == "" {
+		return
+	}
+
+	channelID := *match.DiscordChannelID
+	botToken := os.Getenv("DISCORD_BOT_TOKEN")
+	casterRoleID := os.Getenv("DISCORD_CASTER_ROLE_ID")
+
+	var cast CastLogMulti
+	if err := DB.Where("match_id = ?", matchID).First(&cast).Error; err != nil {
+		return
+	}
+
+	var casterIDs []int64
+	_ = json.Unmarshal(cast.Casters, &casterIDs)
+	if len(casterIDs) == 0 {
+		return
+	}
+
+	// ✅ ROLE overwrite (HTTP, no session needed)
+	if casterRoleID != "" {
+		_ = addRoleOverwriteHTTP(channelID, casterRoleID, botToken)
+	}
+
+	// ✅ MEMBER overwrites (HTTP, no session needed)
+	for _, cid := range casterIDs {
+		_ = addMemberOverwriteHTTP(channelID, cid, botToken)
+	}
+}
+
+func addRoleOverwriteHTTP(channelID, roleID, botToken string) error {
+	if channelID == "" || roleID == "" || botToken == "" {
+		return fmt.Errorf("missing params")
+	}
+
+	allow := discordgo.PermissionViewChannel |
+		discordgo.PermissionSendMessages |
+		discordgo.PermissionReadMessageHistory
+
+	payload := map[string]any{
+		"type":  0, // role
+		"allow": fmt.Sprint(allow),
+		"deny":  "0",
+	}
+
+	b, _ := json.Marshal(payload)
+
+	url := fmt.Sprintf(
+		"https://discord.com/api/v10/channels/%s/permissions/%s",
+		channelID,
+		roleID,
+	)
+
+	req, _ := http.NewRequest("PUT", url, bytes.NewBuffer(b))
+	req.Header.Set("Authorization", "Bot "+botToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 204 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("role overwrite failed %s %s", resp.Status, body)
+	}
+
+	return nil
 }
 
 func HandleDeleteCast(w http.ResponseWriter, r *http.Request) {
