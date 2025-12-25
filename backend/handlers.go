@@ -1012,7 +1012,7 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		IsTeamJoin: true,
 	})
 
-	go DiscordAddRole(discordID, os.Getenv("DISCORD_CAPTAIN_ROLE_ID"))
+	syncDiscordRolesForPlayer(playerID)
 
 	// confirm
 	var check TeamMember
@@ -1246,123 +1246,97 @@ func HandleLeaveTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	playerID, _ := strconv.ParseInt(discordIDStr, 10, 64)
 
-	// Load team
+	// load team
 	var team Team
 	if err := DB.First(&team, req.TeamID).Error; err != nil {
 		http.Error(w, "Team not found", http.StatusNotFound)
 		return
 	}
 
-	// Load membership
+	// load membership
 	var member TeamMember
-	err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, playerID).First(&member).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, playerID).
+		First(&member).Error; err != nil {
 		http.Error(w, "Not a team member", http.StatusForbidden)
 		return
 	}
-	if err != nil {
-		log.Printf("❌ DB error verifying membership: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
-		return
-	}
 
-	// Save role before removal
-	role := member.Role
+	wasCaptain := member.Role == "Captain"
 
-	// Discord role IDs
-	roleCaptain := os.Getenv("DISCORD_CAPTAIN_ROLE_ID")
-	roleCoCaptain := os.Getenv("DISCORD_CO_CAPTAIN_ROLE_ID")
-
-	// ⭐ ALWAYS remove Discord roles for the leaving member
-	if role == "Captain" {
-		go DiscordRemoveRole(discordIDStr, roleCaptain)
-	}
-	if role == "Co-Captain" {
-		go DiscordRemoveRole(discordIDStr, roleCoCaptain)
-	}
-
-	// Remove the member
+	// remove member from team
 	if err := DB.Delete(&member).Error; err != nil {
 		http.Error(w, "Failed to leave team", http.StatusInternalServerError)
 		return
 	}
 
-	// ⭐ Set cooldown timestamp so player cannot play until next matchup generation
+	// cooldown
 	now := time.Now()
-	if err := DB.Model(&Player{}).
+	DB.Model(&Player{}).
 		Where("id = ?", playerID).
-		Update("last_left_team_at", now).Error; err != nil {
-		log.Printf("⚠️ Failed to update player cooldown timestamp: %v", err)
-	}
+		Update("last_left_team_at", now)
 
-	// Count remaining members
+	// remaining members
 	var remaining []TeamMember
 	DB.Where("team_id = ?", req.TeamID).Find(&remaining)
 
-	// ------------------------------------------------------------
-	// EMPTY TEAM → AUTO DISBAND
-	// ------------------------------------------------------------
+	// ------------------------------------
+	// EMPTY TEAM → DISBAND
+	// ------------------------------------
 	if len(remaining) == 0 {
-
 		DB.Model(&Team{}).
 			Where("id = ?", req.TeamID).
 			Update("status", "Disbanded")
 
-		// Log
-		SendDiscordLog(
-			fmt.Sprintf(
-				"🗑️ **Team Disbanded:** **%s (#%d)** — last member left",
-				team.Name, team.ID,
-			),
-		)
+		SendDiscordLog(fmt.Sprintf(
+			"🗑️ **Team Disbanded:** **%s (#%d)** — last member left",
+			team.Name, team.ID,
+		))
 
-		respondJSON(w, map[string]any{"success": true, "message": "Team disbanded"})
+		// sync leaving player (remove captain/co-captain roles)
+		syncDiscordRolesForPlayer(playerID)
+
+		respondJSON(w, map[string]any{
+			"success": true,
+			"message": "Team disbanded",
+		})
 		return
 	}
 
-	// ------------------------------------------------------------
-	// CAPTAIN LEFT → AUTO-PROMOTE SOMEONE
-	// ------------------------------------------------------------
-	if role == "Captain" {
-
+	// ------------------------------------
+	// CAPTAIN LEFT → AUTO-PROMOTE
+	// ------------------------------------
+	if wasCaptain {
 		var next TeamMember
 
-		// Prefer Co-Captain
-		if err := DB.Where("team_id = ? AND role = ?", req.TeamID, "Co-Captain").First(&next).Error; err == nil {
+		// prefer Co-Captain
+		if err := DB.Where("team_id = ? AND role = ?", req.TeamID, "Co-Captain").
+			First(&next).Error; err == nil {
 
-			DB.Model(&next).Update("role", "Captain")
+			DB.Model(&TeamMember{}).
+				Where("team_id = ? AND player_id = ?", req.TeamID, next.PlayerID).
+				Update("role", "Captain")
 
-			nextDiscordID := strconv.FormatInt(next.PlayerID, 10)
+		} else if err := DB.Where("team_id = ?", req.TeamID).
+			First(&next).Error; err == nil {
 
-			// ⭐ Discord roles
-			go DiscordAddRole(nextDiscordID, roleCaptain)
-			go DiscordRemoveRole(nextDiscordID, roleCoCaptain)
+			DB.Model(&TeamMember{}).
+				Where("team_id = ? AND player_id = ?", req.TeamID, next.PlayerID).
+				Update("role", "Captain")
+		}
 
-			log.Printf("👑 Promoted Co-Captain %d → Captain (team %d)", next.PlayerID, req.TeamID)
-
-		} else if err := DB.Where("team_id = ?", req.TeamID).First(&next).Error; err == nil {
-
-			DB.Model(&next).Update("role", "Captain")
-
-			nextDiscordID := strconv.FormatInt(next.PlayerID, 10)
-
-			// ⭐ Discord roles
-			go DiscordAddRole(nextDiscordID, roleCaptain)
-			go DiscordRemoveRole(nextDiscordID, roleCoCaptain)
-
-			log.Printf("👑 Promoted Member %d → Captain (team %d)", next.PlayerID, req.TeamID)
+		// sync newly promoted captain
+		if next.PlayerID != 0 {
+			syncDiscordRolesForPlayer(next.PlayerID)
 		}
 	}
 
-	// ------------------------------------------------------------
-	// LOG + RESPONSE
-	// ------------------------------------------------------------
-	SendDiscordLog(
-		fmt.Sprintf(
-			"🚪 <@%s> has left team **%s (#%d)**",
-			discordIDStr, team.Name, team.ID,
-		),
-	)
+	// sync leaving player LAST (removes all team roles)
+	syncDiscordRolesForPlayer(playerID)
+
+	SendDiscordLog(fmt.Sprintf(
+		"🚪 <@%s> has left team **%s (#%d)**",
+		discordIDStr, team.Name, team.ID,
+	))
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -1594,6 +1568,8 @@ func HandleKickMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	syncDiscordRolesForPlayer(playerID)
+
 	// Fetch team to get its name
 	var team Team
 	DB.First(&team, req.TeamID)
@@ -1656,10 +1632,9 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 	}
 	requesterID, _ := strconv.ParseInt(discordID, 10, 64)
 
-	// target
-	playerID := req.PlayerID.Int64()
+	targetID := req.PlayerID.Int64()
 
-	// ⭐ Allow all 3 team roles
+	// allowed roles
 	validRoles := map[string]bool{
 		"Captain":    true,
 		"Co-Captain": true,
@@ -1670,95 +1645,83 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ⭐ Prevent captain from demoting themselves (must always have a captain)
-	if requesterID == playerID && req.Role != "Captain" {
-		http.Error(w, "Captain cannot demote themselves", http.StatusForbidden)
-		return
-	}
-
+	// requester must be captain
 	role, err := getMemberRole(req.TeamID, requesterID)
 	if err != nil || role != "Captain" {
 		http.Error(w, "Only Captains can promote players", http.StatusForbidden)
 		return
 	}
 
+	// cannot demote self
+	if requesterID == targetID && req.Role != "Captain" {
+		http.Error(w, "Captain cannot demote themselves", http.StatusForbidden)
+		return
+	}
+
+	// fetch target member
 	var member TeamMember
-	if err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, playerID).
+	if err := DB.Where("team_id = ? AND player_id = ?", req.TeamID, targetID).
 		First(&member).Error; err != nil {
 		http.Error(w, "Member not found", http.StatusNotFound)
 		return
 	}
 
-	// ⭐ ENV role IDs
-	roleCaptain := os.Getenv("DISCORD_CAPTAIN_ROLE_ID")
-	roleCoCaptain := os.Getenv("DISCORD_CO_CAPTAIN_ROLE_ID")
-	targetDiscordID := strconv.FormatInt(playerID, 10)
-
-	// ⭐ If promoting to Captain:
+	// if promoting to Captain, demote existing Captain → Co-Captain
 	if req.Role == "Captain" {
-		// demote existing captain → Co-Captain
 		var oldCap TeamMember
 		if err := DB.Where("team_id = ? AND role = ?", req.TeamID, "Captain").
 			First(&oldCap).Error; err == nil {
-
-			oldCapID := strconv.FormatInt(oldCap.PlayerID, 10)
 
 			DB.Model(&TeamMember{}).
 				Where("team_id = ? AND player_id = ?", req.TeamID, oldCap.PlayerID).
 				Update("role", "Co-Captain")
 
-			// Discord roles: demote captain
-			go DiscordRemoveRole(oldCapID, roleCaptain)
-			go DiscordAddRole(oldCapID, roleCoCaptain)
+			// resync old captain later
+			defer syncDiscordRolesForPlayer(oldCap.PlayerID)
 		}
-
-		// New captain gets captain role
-		go DiscordAddRole(targetDiscordID, roleCaptain)
-		go DiscordRemoveRole(targetDiscordID, roleCoCaptain)
 	}
 
-	// ⭐ If promoting to Co-Captain:
-	if req.Role == "Co-Captain" {
-		// give co-captain, remove captain if they had it
-		go DiscordAddRole(targetDiscordID, roleCoCaptain)
-		go DiscordRemoveRole(targetDiscordID, roleCaptain)
-	}
-
-	// update DB for the target member
+	// update target role
 	DB.Model(&TeamMember{}).
-		Where("team_id = ? AND player_id = ?", req.TeamID, playerID).
+		Where("team_id = ? AND player_id = ?", req.TeamID, targetID).
 		Update("role", req.Role)
 
-	// history tracking
+	// history
 	var existing PlayerHistory
-	if err := DB.Where("player_id = ? AND team_id = ? AND season = ? AND role = ?",
-		playerID, req.TeamID, currentSeason, req.Role).
-		First(&existing).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := DB.Where(
+		"player_id = ? AND team_id = ? AND season = ? AND role = ?",
+		targetID, req.TeamID, currentSeason, req.Role,
+	).First(&existing).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+
 		DB.Create(&PlayerHistory{
-			PlayerID: playerID,
+			PlayerID: targetID,
 			TeamID:   req.TeamID,
 			Role:     req.Role,
 			Season:   currentSeason,
 		})
 	}
 
-	// ⭐ Get team name for logging
-	var team Team
-	teamName := fmt.Sprintf("Team #%d", req.TeamID) // fallback
+	// 🔑 SINGLE SOURCE OF TRUTH
+	syncDiscordRolesForPlayer(targetID)
 
-	if err := DB.First(&team, req.TeamID).Error; err == nil && strings.TrimSpace(team.Name) != "" {
+	// log
+	var team Team
+	teamName := fmt.Sprintf("Team #%d", req.TeamID)
+	if err := DB.First(&team, req.TeamID).Error; err == nil && team.Name != "" {
 		teamName = team.Name
 	}
 
-	// log (with real team name if available)
 	SendDiscordLog(fmt.Sprintf(
 		"⬆️ **Promotion:** <@%d> is now **%s** on **%s**",
-		playerID,
+		targetID,
 		req.Role,
 		teamName,
 	))
 
-	respondJSON(w, map[string]any{"success": true, "message": "Member promoted to " + req.Role})
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "Member promoted to " + req.Role,
+	})
 }
 
 // --- Captain-only: Update team active/inactive status ---
@@ -8070,4 +8033,219 @@ func ClearLiveFinalsState(tx *gorm.DB, season string) error {
 	}
 
 	return nil
+}
+
+func buildDesiredDiscordRoles(
+	p Player,
+	teamMember *TeamMember,
+) []string {
+
+	roles := []string{}
+
+	// League sub (only if applicable)
+	if p.Role == "sub" {
+		roles = append(roles, os.Getenv("DISCORD_LEAGUE_SUB_ROLE_ID"))
+	}
+
+	// Team-based roles
+	if teamMember != nil {
+		switch strings.ToLower(teamMember.Role) {
+		case "captain":
+			roles = append(roles, os.Getenv("DISCORD_CAPTAIN_ROLE_ID"))
+		case "co-captain":
+			roles = append(roles, os.Getenv("DISCORD_CO_CAPTAIN_ROLE_ID"))
+		}
+	}
+
+	return roles
+}
+
+func syncDiscordRolesForPlayer(playerID int64) {
+	guildID := os.Getenv("DISCORD_GUILD_ID")
+	botToken := os.Getenv("DISCORD_BOT_TOKEN")
+
+	if guildID == "" || botToken == "" {
+		return
+	}
+
+	var p Player
+	if err := DB.First(&p, playerID).Error; err != nil {
+		return
+	}
+
+	var tm TeamMember
+	var tmPtr *TeamMember = nil
+
+	err := DB.
+		Where("player_id = ?", playerID).
+		Order("team_id DESC").
+		Limit(1).
+		Find(&tm).Error
+
+	if err == nil && tm.TeamID != 0 {
+		tmPtr = &tm
+	}
+
+	desired := buildDesiredDiscordRoles(p, tmPtr)
+
+	syncMemberRoles(
+		guildID,
+		playerID,
+		desired,
+		botToken,
+	)
+}
+
+func isManagedRole(roleID string) bool {
+	switch roleID {
+	case os.Getenv("DISCORD_LEAGUE_SUB_ROLE_ID"),
+		os.Getenv("DISCORD_CAPTAIN_ROLE_ID"),
+		os.Getenv("DISCORD_CO_CAPTAIN_ROLE_ID"):
+		return true
+	default:
+		return false
+	}
+}
+
+func SyncAllDiscordRoles() {
+	var players []Player
+	DB.Find(&players)
+
+	for _, p := range players {
+		syncDiscordRolesForPlayer(p.ID)
+	}
+}
+
+func fetchMemberRoles(
+	guildID string,
+	userID int64,
+	botToken string,
+) ([]string, error) {
+
+	url := fmt.Sprintf(
+		"https://discord.com/api/v10/guilds/%s/members/%d",
+		guildID,
+		userID,
+	)
+
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", "Bot "+botToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("fetch member failed %s %s", resp.Status, body)
+	}
+
+	var data struct {
+		Roles []string `json:"roles"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, err
+	}
+
+	return data.Roles, nil
+}
+
+func addGuildRoleHTTP(guildID string, userID int64, roleID, botToken string) error {
+	url := fmt.Sprintf(
+		"https://discord.com/api/v10/guilds/%s/members/%d/roles/%s",
+		guildID,
+		userID,
+		roleID,
+	)
+
+	req, _ := http.NewRequest("PUT", url, nil)
+	req.Header.Set("Authorization", "Bot "+botToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 204 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("add role failed %s %s", resp.Status, body)
+	}
+
+	return nil
+}
+
+func removeGuildRoleHTTP(guildID string, userID int64, roleID, botToken string) error {
+	url := fmt.Sprintf(
+		"https://discord.com/api/v10/guilds/%s/members/%d/roles/%s",
+		guildID,
+		userID,
+		roleID,
+	)
+
+	req, _ := http.NewRequest("DELETE", url, nil)
+	req.Header.Set("Authorization", "Bot "+botToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 204 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("remove role failed %s %s", resp.Status, body)
+	}
+
+	return nil
+}
+
+func syncMemberRoles(
+	guildID string,
+	playerID int64,
+	desiredRoles []string,
+	botToken string,
+) {
+	currentRoles, err := fetchMemberRoles(guildID, playerID, botToken)
+	if err != nil {
+		log.Printf("❌ role fetch failed for %d: %v", playerID, err)
+		return
+	}
+
+	current := map[string]bool{}
+	for _, r := range currentRoles {
+		current[r] = true
+	}
+
+	desired := map[string]bool{}
+	for _, r := range desiredRoles {
+		if r != "" {
+			desired[r] = true
+		}
+	}
+
+	// ➕ ADD missing roles
+	for roleID := range desired {
+		if !current[roleID] {
+			if err := addGuildRoleHTTP(guildID, playerID, roleID, botToken); err != nil {
+				log.Printf("❌ add role %s to %d failed: %v", roleID, playerID, err)
+			} else {
+				log.Printf("✅ added role %s → %d", roleID, playerID)
+			}
+		}
+	}
+
+	// ➖ REMOVE managed roles that should not exist
+	for roleID := range current {
+		if isManagedRole(roleID) && !desired[roleID] {
+			if err := removeGuildRoleHTTP(guildID, playerID, roleID, botToken); err != nil {
+				log.Printf("❌ remove role %s from %d failed: %v", roleID, playerID, err)
+			} else {
+				log.Printf("🧹 removed role %s ← %d", roleID, playerID)
+			}
+		}
+	}
 }
