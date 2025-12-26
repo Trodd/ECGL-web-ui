@@ -7088,8 +7088,6 @@ func HandleModFinalsReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	LogGeneral(fmt.Sprintf("♻️ Finals hard-reset (matches deleted) for %s", season))
-
 	respondJSON(w, map[string]any{
 		"success": true,
 		"mode":    "hard",
