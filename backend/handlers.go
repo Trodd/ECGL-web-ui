@@ -6463,12 +6463,15 @@ func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
 		season = "0"
 	}
 
-	// Load all finals matches for the season
+	// -----------------------------------
+	// Load all active finals matches
+	// -----------------------------------
 	var matches []Match
 	if err := DB.
-		Where("season = ? AND is_finals = ? AND archived = false", season, true).
+		Where("season = ? AND is_finals = true AND archived = false", season).
 		Order("bracket ASC, bracket_round ASC, bracket_slot ASC").
 		Find(&matches).Error; err != nil {
+
 		http.Error(w, "Failed to load finals bracket", http.StatusInternalServerError)
 		return
 	}
@@ -6484,7 +6487,9 @@ func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Collect team IDs
+	// -----------------------------------
+	// Collect team IDs for name lookup
+	// -----------------------------------
 	teamIDs := map[uint]bool{}
 	for _, m := range matches {
 		if m.TeamAID != 0 {
@@ -6498,7 +6503,6 @@ func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fetch names
 	ids := make([]uint, 0, len(teamIDs))
 	for id := range teamIDs {
 		ids = append(ids, id)
@@ -6524,7 +6528,22 @@ func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
 		return fmt.Sprintf("Team #%d", id)
 	}
 
-	// Prepare DTO struct
+	// -----------------------------------
+	// Build lookup table for NEXT MATCH
+	// -----------------------------------
+	matchByKey := map[string]uint{}
+
+	key := func(bracket string, round, slot int) string {
+		return fmt.Sprintf("%s:%d:%d", strings.ToLower(bracket), round, slot)
+	}
+
+	for _, m := range matches {
+		matchByKey[key(m.Bracket, m.BracketRound, m.BracketSlot)] = m.ID
+	}
+
+	// -----------------------------------
+	// DTO
+	// -----------------------------------
 	type dto struct {
 		ID           uint   `json:"id"`
 		MatchCode    string `json:"match_code"`
@@ -6538,27 +6557,50 @@ func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
 		TeamAID uint   `json:"team_a_id"`
 		TeamBID uint   `json:"team_b_id"`
 
-		WinnerID *uint  `json:"winner_id"`
-		Winner   string `json:"winner"`
+		WinnerID        *uint  `json:"winner_id"`
+		Winner          string `json:"winner"`
+		WinnerToMatchID *uint  `json:"winner_to_match_id"`
+		LoserToMatchID  *uint  `json:"loser_to_match_id"`
+		NextMatchID     *uint  `json:"next_match_id"`
 	}
 
 	out := make([]dto, 0, len(matches))
-
-	// Also build grouped structure
 	winners := map[int][]dto{}
 	losers := map[int][]dto{}
 	grandFinals := []dto{}
 
+	// -----------------------------------
+	// Build DTOs WITH next_match_id
+	// -----------------------------------
 	for _, m := range matches {
 		winnerName := "TBD"
 		if m.WinnerID != nil && *m.WinnerID != 0 {
 			winnerName = nameFor(*m.WinnerID)
 		}
 
+		var nextID *uint
+		br := strings.ToLower(m.Bracket)
+
+		switch br {
+		case "winners", "wb", "upper":
+			r := m.BracketRound + 1
+			s := (m.BracketSlot + 1) / 2
+			if id, ok := matchByKey[key("winners", r, s)]; ok {
+				nextID = &id
+			}
+
+		case "losers", "lb", "lower":
+			r := m.BracketRound + 1
+			s := (m.BracketSlot + 1) / 2
+			if id, ok := matchByKey[key("losers", r, s)]; ok {
+				nextID = &id
+			}
+		}
+
 		item := dto{
 			ID:           m.ID,
 			MatchCode:    m.MatchCode,
-			Bracket:      strings.ToLower(m.Bracket),
+			Bracket:      br,
 			Archived:     m.Archived,
 			BracketRound: m.BracketRound,
 			BracketSlot:  m.BracketSlot,
@@ -6568,27 +6610,28 @@ func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
 			TeamAID: m.TeamAID,
 			TeamBID: m.TeamBID,
 
-			WinnerID: m.WinnerID,
-			Winner:   winnerName,
+			WinnerID:        m.WinnerID,
+			Winner:          winnerName,
+			WinnerToMatchID: m.WinnerToMatchID,
+			LoserToMatchID:  m.LoserToMatchID,
+			NextMatchID:     nextID,
 		}
 
 		out = append(out, item)
 
-		br := strings.ToLower(m.Bracket)
-
 		switch br {
 		case "winners", "wb", "upper":
 			winners[m.BracketRound] = append(winners[m.BracketRound], item)
-
 		case "losers", "lb", "lower":
 			losers[m.BracketRound] = append(losers[m.BracketRound], item)
-
 		case "grand_final", "gf", "grandfinal":
 			grandFinals = append(grandFinals, item)
 		}
 	}
 
-	// Convert maps → sorted arrays of rounds
+	// -----------------------------------
+	// Sort rounds
+	// -----------------------------------
 	sortKeys := func(m map[int][]dto) []int {
 		keys := make([]int, 0, len(m))
 		for k := range m {
@@ -6598,22 +6641,21 @@ func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
 		return keys
 	}
 
-	wKeys := sortKeys(winners)
-	lKeys := sortKeys(losers)
-
-	winnerRounds := make([][]dto, 0, len(wKeys))
-	for _, k := range wKeys {
+	winnerRounds := [][]dto{}
+	for _, k := range sortKeys(winners) {
 		winnerRounds = append(winnerRounds, winners[k])
 	}
 
-	loserRounds := make([][]dto, 0, len(lKeys))
-	for _, k := range lKeys {
+	loserRounds := [][]dto{}
+	for _, k := range sortKeys(losers) {
 		loserRounds = append(loserRounds, losers[k])
 	}
 
-	// Reset possible if there is EXACTLY one completed GF and one GF unfinished
 	resetPossible := len(grandFinals) == 1 && grandFinals[0].WinnerID != nil
 
+	// -----------------------------------
+	// Respond
+	// -----------------------------------
 	respondJSON(w, map[string]any{
 		"matches":        out,
 		"winners":        winnerRounds,
@@ -6731,7 +6773,6 @@ func HandleModFinalsRemoveTeam(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/mod/finals/generate
 func HandleModFinalsGenerate(w http.ResponseWriter, r *http.Request) {
-	// Must be league mod
 	if _, ok := requireLeagueMod(w, r); !ok {
 		return
 	}
@@ -6741,26 +6782,22 @@ func HandleModFinalsGenerate(w http.ResponseWriter, r *http.Request) {
 		season = "0"
 	}
 
-	// Load finals teams
 	var finalsTeams []FinalsTeam
 	if err := DB.Where("season = ?", season).Order("seed ASC").Find(&finalsTeams).Error; err != nil {
 		http.Error(w, "Failed to load finals teams", http.StatusInternalServerError)
 		return
 	}
-
 	if len(finalsTeams) < 2 {
 		http.Error(w, "Not enough finals teams", http.StatusBadRequest)
 		return
 	}
 
-	// Generate bracket
 	matches, err := GenerateDoubleElimBracket(finalsTeams, season)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// Clear only NON-ARCHIVED finals for this season (safe)
 	if err := DB.
 		Where("season = ? AND is_finals = true AND archived = false", season).
 		Delete(&Match{}).Error; err != nil {
@@ -6769,7 +6806,6 @@ func HandleModFinalsGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create new matches
 	for _, m := range matches {
 		if err := DB.Create(&m).Error; err != nil {
 			http.Error(w, "Failed saving finals match", http.StatusInternalServerError)
@@ -6777,10 +6813,175 @@ func HandleModFinalsGenerate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// reload
+	var created []Match
+	DB.Where("season = ? AND is_finals = true AND archived = false", season).Find(&created)
+
+	byCode := map[string]uint{}
+	for _, m := range created {
+		byCode[m.MatchCode] = m.ID
+	}
+
+	bracketSize := 1
+	for bracketSize < len(finalsTeams) {
+		bracketSize *= 2
+	}
+	if bracketSize > 16 {
+		bracketSize = 16
+	}
+
+	k := 0
+	for (1 << k) < bracketSize {
+		k++
+	}
+	lbRounds := 2*k - 2
+
+	code := func(br string, r, s int) string {
+		return fmt.Sprintf("%s-Finals-%s-R%dS%d", season, br, r, s)
+	}
+
+	lbMatchCount := func(r int) int {
+		exp := 2 + (r-1)/2
+		if exp > k {
+			exp = k
+		}
+		n := bracketSize / (1 << exp)
+		if n < 1 {
+			n = 1
+		}
+		return n
+	}
+
+	patch := func(from string, winTo, loseTo *string) {
+		id, ok := byCode[from]
+		if !ok {
+			return
+		}
+
+		var wID *uint
+		var lID *uint
+
+		if winTo != nil {
+			if x, ok := byCode[*winTo]; ok {
+				tmp := x
+				wID = &tmp
+			}
+		}
+		if loseTo != nil {
+			if x, ok := byCode[*loseTo]; ok {
+				tmp := x
+				lID = &tmp
+			}
+		}
+
+		DB.Model(&Match{}).Where("id = ?", id).Updates(map[string]any{
+			"winner_to_match_id": wID,
+			"loser_to_match_id":  lID,
+		})
+	}
+
+	for r := 1; r <= k; r++ {
+		mc := bracketSize / (1 << r)
+		for s := 1; s <= mc; s++ {
+			from := code("winners", r, s)
+
+			var winTo *string
+			if r < k {
+				n := code("winners", r+1, (s+1)/2)
+				winTo = &n
+			} else {
+				n := code("grand_final", 1, 1)
+				winTo = &n
+			}
+
+			var loseTo *string
+			if r == 1 {
+				n := code("losers", 1, (s+1)/2)
+				loseTo = &n
+			} else {
+				n := code("losers", 2*(r-1), s)
+				loseTo = &n
+			}
+
+			patch(from, winTo, loseTo)
+		}
+	}
+
+	for r := 1; r <= lbRounds; r++ {
+		mc := lbMatchCount(r)
+		for s := 1; s <= mc; s++ {
+			from := code("losers", r, s)
+
+			var winTo *string
+			if r < lbRounds {
+				ns := s
+				if r%2 == 0 {
+					ns = (s + 1) / 2
+				}
+				n := code("losers", r+1, ns)
+				winTo = &n
+			} else {
+				n := code("grand_final", 1, 1)
+				winTo = &n
+			}
+
+			patch(from, winTo, nil)
+		}
+	}
+
+	{
+		a := code("grand_final", 1, 1)
+		b := code("grand_final", 2, 1)
+		patch(a, nil, &b)
+	}
+	{
+		a := code("grand_final", 2, 1)
+		patch(a, nil, nil)
+	}
+
+	ResolveFinalsByes(season)
+
 	respondJSON(w, map[string]string{
 		"status":  "ok",
 		"message": "Finals bracket generated",
 	})
+}
+
+func ResolveFinalsByes(season string) {
+	changed := true
+	for changed {
+		changed = false
+
+		var ms []Match
+		DB.Where("season = ? AND is_finals = true AND archived = false", season).
+			Find(&ms)
+
+		for _, m := range ms {
+			if m.WinnerID != nil && *m.WinnerID != 0 {
+				continue
+			}
+			// exactly one team present
+			if (m.TeamAID != 0 && m.TeamBID == 0) || (m.TeamAID == 0 && m.TeamBID != 0) {
+				w := m.TeamAID
+				l := m.TeamBID
+				if w == 0 {
+					w = m.TeamBID
+					l = m.TeamAID
+				}
+
+				m.WinnerID = &w
+				if l != 0 {
+					m.LoserID = &l
+				}
+				m.Status = "Completed"
+
+				if err := DB.Save(&m).Error; err == nil {
+					advanceFinalsBracket(m)
+					changed = true
+				}
+			}
+		}
+	}
 }
 
 // POST /api/mod/finals/reset
@@ -6969,82 +7170,66 @@ func HandleModFinalsUpdateMatch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func advanceFinalsBracket(m Match) {
-	season := strings.TrimSpace(currentSeason)
-	if season == "" {
-		season = "0"
-	}
-
-	if m.WinnerID == nil {
+func insertIntoMatch(matchID uint, teamID uint) {
+	if matchID == 0 || teamID == 0 {
 		return
 	}
-	winner := *m.WinnerID
 
-	var loser uint
-	if *m.WinnerID == m.TeamAID {
-		loser = m.TeamBID
+	var next Match
+	if err := DB.First(&next, matchID).Error; err != nil {
+		log.Printf("⚠️ Finals advance: target match %d missing: %v", matchID, err)
+		return
+	}
+
+	// idempotent: already inserted
+	if next.TeamAID == teamID || next.TeamBID == teamID {
+		return
+	}
+
+	if next.TeamAID == 0 {
+		next.TeamAID = teamID
+	} else if next.TeamBID == 0 {
+		next.TeamBID = teamID
 	} else {
-		loser = m.TeamAID
+		log.Printf("⚠️ Finals advance: target match %d full", matchID)
+		return
 	}
 
-	forward := func(bracket string, round, slot int, teamID uint) {
-		var next Match
-		err := DB.Where(
-			"season = ? AND is_finals = ? AND bracket = ? AND bracket_round = ? AND bracket_slot = ?",
-			season, true, bracket, round, slot,
-		).First(&next).Error
+	// if we changed participants, clear completion (safe)
+	next.WinnerID = nil
+	next.LoserID = nil
+	next.Status = "Scheduled"
 
-		if err != nil {
-			log.Printf("⚠️ Finals auto-advance: missing target (%s R%d S%d)", bracket, round, slot)
-			return
-		}
+	if err := DB.Save(&next).Error; err != nil {
+		log.Printf("❌ Finals advance: save target match %d failed: %v", matchID, err)
+	}
+}
 
-		if next.TeamAID == 0 {
-			next.TeamAID = teamID
-		} else if next.TeamBID == 0 {
-			next.TeamBID = teamID
+func advanceFinalsBracket(m Match) {
+	if m.WinnerID == nil || *m.WinnerID == 0 {
+		return
+	}
+
+	// compute loser safely if missing
+	var loser uint
+	if m.LoserID != nil && *m.LoserID != 0 {
+		loser = *m.LoserID
+	} else {
+		if *m.WinnerID == m.TeamAID {
+			loser = m.TeamBID
 		} else {
-			log.Printf("⚠️ Finals auto-advance: target match full (%s R%d S%d)", bracket, round, slot)
-			return
-		}
-
-		if err := DB.Save(&next).Error; err != nil {
-			log.Printf("❌ Finals auto-advance: failed to save next match: %v", err)
+			loser = m.TeamAID
 		}
 	}
 
-	// --- ADVANCEMENT LOGIC FOR 4-TEAM DOUBLE ELIM --- //
-
-	// Winners Round 1
-	if m.Bracket == "winners" && m.BracketRound == 1 {
-		forward("winners", 2, 1, winner) // to Winners Final
-		forward("losers", 1, 1, loser)   // loser of WB R1 → Losers R1
-		return
+	// winner route
+	if m.WinnerToMatchID != nil && *m.WinnerToMatchID != 0 {
+		insertIntoMatch(*m.WinnerToMatchID, *m.WinnerID)
 	}
 
-	// Winners Final
-	if m.Bracket == "winners" && m.BracketRound == 2 {
-		forward("grand_final", 1, 1, winner)
-		forward("losers", 2, 1, loser) // loser drops to LB R2
-		return
-	}
-
-	// Losers Round 1
-	if m.Bracket == "losers" && m.BracketRound == 1 {
-		forward("losers", 2, 1, winner)
-		return
-	}
-
-	// Losers Round 2 (losers rep → GF)
-	if m.Bracket == "losers" && m.BracketRound == 2 {
-		forward("grand_final", 1, 1, winner)
-		return
-	}
-
-	// Grand Final
-	if m.Bracket == "grand_final" {
-		// Add GF reset logic later if needed
-		return
+	// loser route
+	if loser != 0 && m.LoserToMatchID != nil && *m.LoserToMatchID != 0 {
+		insertIntoMatch(*m.LoserToMatchID, loser)
 	}
 }
 
@@ -7173,38 +7358,35 @@ func HandleModFinalsSetSeeds(w http.ResponseWriter, r *http.Request) {
 }
 
 func GenerateDoubleElimBracket(finalsTeams []FinalsTeam, season string) ([]Match, error) {
-	// Sort by seed
-	sort.Slice(finalsTeams, func(i, j int) bool {
-		return finalsTeams[i].Seed < finalsTeams[j].Seed
-	})
+	sort.Slice(finalsTeams, func(i, j int) bool { return finalsTeams[i].Seed < finalsTeams[j].Seed })
 
 	teamCount := len(finalsTeams)
 	if teamCount < 2 {
 		return nil, fmt.Errorf("need at least 2 teams for finals")
 	}
 
-	// Normalize bracket to next power of two (2, 4, 8)
-	// But allow up to 10 by using BYE entries
+	// normalize to power of two up to 16
 	bracketSize := 1
 	for bracketSize < teamCount {
 		bracketSize *= 2
 	}
-	// Max 16 for safety
 	if bracketSize > 16 {
 		bracketSize = 16
 	}
 
-	// Fill BYE entries
+	// fill BYEs with TeamID=0
 	for len(finalsTeams) < bracketSize {
-		finalsTeams = append(finalsTeams, FinalsTeam{
-			TeamID: 0,
-			Seed:   999,
-		})
+		finalsTeams = append(finalsTeams, FinalsTeam{TeamID: 0, Seed: 999})
 	}
 
-	// --- Helper to create matches ---
-	createMatch := func(aID, bID uint, bracket string, round, slot int) Match {
-		now := time.Now()
+	// how many WB rounds
+	k := 0
+	for (1 << k) < bracketSize {
+		k++
+	}
+
+	now := time.Now()
+	create := func(aID, bID uint, bracket string, round, slot int) Match {
 		return Match{
 			Season:       season,
 			MatchCode:    fmt.Sprintf("%s-Finals-%s-R%dS%d", season, bracket, round, slot),
@@ -7219,62 +7401,209 @@ func GenerateDoubleElimBracket(finalsTeams []FinalsTeam, season string) ([]Match
 		}
 	}
 
+	// --- seeding pairs: 1 vs N, 2 vs N-1, ...
+	seedToTeam := make([]uint, bracketSize+1) // 1-indexed
+	for i := 0; i < bracketSize; i++ {
+		seedToTeam[i+1] = finalsTeams[i].TeamID
+	}
+
+	// create WB matches in memory
+	// wb[round][slot] = index in matches slice
+	wb := make([][]int, k+1) // 1..k
+	for r := 1; r <= k; r++ {
+		matchCount := bracketSize / (1 << r)
+		wb[r] = make([]int, matchCount+1) // 1..matchCount
+	}
+
+	// create LB matches
+	lbRounds := 2*k - 2
+	lb := make([][]int, lbRounds+1) // 1..lbRounds
+	lbMatchCount := func(round int) int {
+		// exp = min(k, 2 + floor((round-1)/2))
+		exp := 2 + (round-1)/2
+		if exp > k {
+			exp = k
+		}
+		cnt := bracketSize / (1 << exp)
+		if cnt < 1 {
+			cnt = 1
+		}
+		return cnt
+	}
+	for r := 1; r <= lbRounds; r++ {
+		mc := lbMatchCount(r)
+		lb[r] = make([]int, mc+1)
+	}
+
 	var matches []Match
 
-	// ============================================
-	// 1️⃣ Generate Winners Bracket
-	// ============================================
+	// ============== BUILD WB R1 with seed pairs
+	// Pair slots: (1 vs N), (2 vs N-1), ...
+	// match slot i uses seed i and seed (N-i+1)
+	wbR1Count := bracketSize / 2
+	for s := 1; s <= wbR1Count; s++ {
+		aSeed := s
+		bSeed := bracketSize - s + 1
+		aID := seedToTeam[aSeed]
+		bID := seedToTeam[bSeed]
 
-	roundTeams := make([]FinalsTeam, len(finalsTeams))
-	copy(roundTeams, finalsTeams)
-
-	round := 1
-	slot := 1
-	for len(roundTeams) >= 2 {
-		var nextRound []FinalsTeam
-
-		for i := 0; i < len(roundTeams); i += 2 {
-			a := roundTeams[i]
-			b := roundTeams[i+1]
-
-			matches = append(matches, createMatch(a.TeamID, b.TeamID, "winners", round, slot))
-
-			// Winner placeholder advances
-			// Winner placeholder advances
-			nextRound = append(nextRound, FinalsTeam{
-				TeamID: 0,
-				Seed:   999,
-			})
-			slot++
-		}
-
-		roundTeams = nextRound
-		round++
-		slot = 1
+		m := create(aID, bID, "winners", 1, s)
+		matches = append(matches, m)
+		wb[1][s] = len(matches) - 1
 	}
 
-	// ============================================
-	// 2️⃣ Generate Losers Bracket (automatic sizing)
-	// ============================================
-
-	// LB is always (#WB rounds * 2 - 1)
-	wbRounds := round - 1
-	lbRounds := wbRounds*2 - 1
-
-	for lr := 1; lr <= lbRounds; lr++ {
-		// Each LB round has up to (bracketSize/2) matches
-		for ls := 1; ls <= bracketSize/2; ls++ {
-			// Create placeholder matches
-			matches = append(matches, createMatch(0, 0, "losers", lr, ls))
+	// ============== BUILD remaining WB rounds as placeholders
+	for r := 2; r <= k; r++ {
+		mc := bracketSize / (1 << r)
+		for s := 1; s <= mc; s++ {
+			matches = append(matches, create(0, 0, "winners", r, s))
+			wb[r][s] = len(matches) - 1
 		}
 	}
 
-	// ============================================
-	// 3️⃣ Grand Final + Reset GF
-	// ============================================
+	// ============== BUILD LB rounds as placeholders
+	for r := 1; r <= lbRounds; r++ {
+		mc := lbMatchCount(r)
+		for s := 1; s <= mc; s++ {
+			matches = append(matches, create(0, 0, "losers", r, s))
+			lb[r][s] = len(matches) - 1
+		}
+	}
 
-	matches = append(matches, createMatch(0, 0, "grand_final", 1, 1))
-	matches = append(matches, createMatch(0, 0, "grand_final", 2, 1))
+	// ============== BUILD GF1 + GF2 (reset)
+	matches = append(matches, create(0, 0, "grand_final", 1, 1))
+	gf1Idx := len(matches) - 1
+
+	matches = append(matches, create(0, 0, "grand_final", 2, 1))
+	gf2Idx := len(matches) - 1
+
+	// ----------------------------------------------------
+	// WIRING (graph)
+	// ----------------------------------------------------
+
+	// WB winner -> next WB
+	for r := 1; r < k; r++ {
+		mc := bracketSize / (1 << r)
+		for s := 1; s <= mc; s++ {
+			nextSlot := (s + 1) / 2
+			nextIdx := wb[r+1][nextSlot]
+			targetID := &matches[nextIdx].ID // not set yet, we will patch after DB insert
+			_ = targetID
+		}
+	}
+
+	// LB winner -> next LB (pattern)
+	// odd rounds -> next round same slot
+	// even rounds -> next round slot=(s+1)/2
+	for r := 1; r < lbRounds; r++ {
+		mc := lbMatchCount(r)
+		for s := 1; s <= mc; s++ {
+			var nextSlot int
+			if r%2 == 1 {
+				nextSlot = s
+			} else {
+				nextSlot = (s + 1) / 2
+			}
+			nextIdx := lb[r+1][nextSlot]
+			_ = nextIdx
+		}
+	}
+
+	// We'll patch IDs AFTER DB insert, so store routes by indices now.
+	type route struct {
+		fromIdx int
+		winTo   *int
+		loseTo  *int
+	}
+	var routes []route
+
+	// --- WB routes (winner to WB, loser to LB)
+	// Winner: WB r,s -> WB r+1,(s+1)/2 (except WB final -> GF1)
+	// Loser:
+	//   WB R1 losers -> LB R1 slot=(s+1)/2
+	//   WB Rr (r>=2) losers -> LB R(2*(r-1)) slot=s
+	for r := 1; r <= k; r++ {
+		mc := bracketSize / (1 << r)
+		for s := 1; s <= mc; s++ {
+			from := wb[r][s]
+
+			// winner destination
+			var winTo *int
+			if r < k {
+				ns := (s + 1) / 2
+				nidx := wb[r+1][ns]
+				winTo = &nidx
+			} else {
+				winTo = &gf1Idx
+			}
+
+			// loser destination
+			var loseTo *int
+			if r == 1 {
+				ls := (s + 1) / 2
+				lidx := lb[1][ls]
+				loseTo = &lidx
+			} else {
+				lr := 2 * (r - 1)
+				// clamp in case (should exist)
+				if lr < 1 {
+					lr = 1
+				}
+				if lr > lbRounds {
+					lr = lbRounds
+				}
+				// slot aligns with WB slot in that round
+				lidx := lb[lr][s]
+				loseTo = &lidx
+			}
+
+			routes = append(routes, route{fromIdx: from, winTo: winTo, loseTo: loseTo})
+		}
+	}
+
+	// --- LB routes (winner to next LB; LB final winner -> GF1)
+	for r := 1; r <= lbRounds; r++ {
+		mc := lbMatchCount(r)
+		for s := 1; s <= mc; s++ {
+			from := lb[r][s]
+
+			var winTo *int
+			if r < lbRounds {
+				var ns int
+				if r%2 == 1 {
+					ns = s
+				} else {
+					ns = (s + 1) / 2
+				}
+				nidx := lb[r+1][ns]
+				winTo = &nidx
+			} else {
+				// LB champion -> GF1
+				winTo = &gf1Idx
+			}
+
+			// loser in LB is eliminated (no route)
+			routes = append(routes, route{fromIdx: from, winTo: winTo, loseTo: nil})
+		}
+	}
+
+	// GF1 winner -> champion (no route)
+	// GF1 loser -> GF2 (optional reset; you can enforce later)
+	// We'll set winner_to nil, loser_to -> gf2
+	{
+		winTo := (*int)(nil)
+		loseTo := &gf2Idx
+		routes = append(routes, route{fromIdx: gf1Idx, winTo: winTo, loseTo: loseTo})
+	}
+	// GF2 no routes
+	routes = append(routes, route{fromIdx: gf2Idx, winTo: nil, loseTo: nil})
+
+	// We return matches with routes stored by indices; IDs get assigned after DB insert.
+	// We'll temporarily store the route indices inside unused fields? No.
+	// Instead, we return matches + a separate patcher is hard.
+	//
+	// ✅ EASIEST: patch using MatchCode after insert.
+	// So ensure match codes are stable and unique (they are), then patch by MatchCode lookup in generate handler.
 
 	return matches, nil
 }

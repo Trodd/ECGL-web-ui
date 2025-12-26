@@ -108,6 +108,10 @@ type Match struct {
 	DiscordChannelID       *string        `json:"discord_channel_id"`
 	ChannelCreatedAt       *time.Time     `json:"channel_created_at"`
 	CasterMessageID        *string        `json:"caster_message_id"`
+
+	// Finals bracket routing (precomputed graph)
+	WinnerToMatchID *uint `json:"winner_to_match_id" gorm:"index"`
+	LoserToMatchID  *uint `json:"loser_to_match_id"  gorm:"index"`
 }
 
 // --- Match Score ---

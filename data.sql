@@ -231,3 +231,6 @@ CREATE TABLE finals_archive (
 
     UNIQUE (season)
 );
+
+CREATE INDEX IF NOT EXISTS idx_matches_winner_to_match_id ON matches (winner_to_match_id);
+CREATE INDEX IF NOT EXISTS idx_matches_loser_to_match_id  ON matches (loser_to_match_id);
