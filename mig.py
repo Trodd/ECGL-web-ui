@@ -593,43 +593,32 @@ def resolve_team_from_player(player_name):
             return r[0]  # team_id
 
 def migrate_match_rosters():
-    print("📦 Migrating roster snapshots for completed matches...")
+    print("📦 Migrating roster snapshots for legacy + completed matches...")
 
-    # 1. Get all completed matches
+    # Get ALL completed matches (legacy + modern)
     cur.execute("""
-        SELECT id, team_a_id, team_b_id, season
+        SELECT id, team_a_id, team_b_id
         FROM matches
-        WHERE status = 'Completed'
+        WHERE status IN ('Completed', 'Finished')
     """)
-    completed_matches = cur.fetchall()
+    matches = cur.fetchall()
 
-    total = 0
     created = 0
     skipped = 0
 
-    for match_id, team_a_id, team_b_id, season in completed_matches:
-        total += 1
+    for match_id, team_a_id, team_b_id in matches:
 
-        # 2. Check if snapshot already exists
-        cur.execute("SELECT COUNT(*) FROM match_rosters WHERE match_id = %s", (match_id,))
-        exists = cur.fetchone()[0]
-
-        if exists > 0:
+        # Skip if snapshot already exists
+        cur.execute(
+            "SELECT 1 FROM match_rosters WHERE match_id=%s LIMIT 1",
+            (match_id,)
+        )
+        if cur.fetchone():
             skipped += 1
             continue
 
-        # Helper to load roster from player_history
-        def load_history(team_id):
-            cur.execute("""
-                SELECT p.id, p.display_name, p.username, ph.role
-                FROM player_history ph
-                JOIN players p ON p.id = ph.player_id
-                WHERE ph.team_id = %s AND ph.season = %s
-            """, (team_id, season))
-            return cur.fetchall()
-
-        # Fallback: load from team_members
-        def load_live(team_id):
+        def load_team(team_id):
+            # 🔑 LEGACY-SAFE SOURCE
             cur.execute("""
                 SELECT p.id, p.display_name, p.username, tm.role
                 FROM team_members tm
@@ -638,31 +627,25 @@ def migrate_match_rosters():
             """, (team_id,))
             return cur.fetchall()
 
-        # 3. Load roster A
-        roster_a = load_history(team_a_id)
-        if not roster_a:
-            roster_a = load_live(team_a_id)
+        roster_a = load_team(team_a_id)
+        roster_b = load_team(team_b_id)
 
-        # 4. Load roster B
-        roster_b = load_history(team_b_id)
-        if not roster_b:
-            roster_b = load_live(team_b_id)
+        if not roster_a or not roster_b:
+            print(f"⚠️ Match {match_id}: missing roster data, skipping")
+            continue
 
-        # 5. Insert rows
-        def insert_roster(team_id, roster):
-            for player_id, display, user, role in roster:
+        for team_id, roster in [(team_a_id, roster_a), (team_b_id, roster_b)]:
+            for pid, display, user, role in roster:
                 cur.execute("""
-                    INSERT INTO match_rosters (match_id, team_id, player_id, display_name, username, role)
+                    INSERT INTO match_rosters
+                        (match_id, team_id, player_id, display_name, username, role)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                """, (match_id, team_id, player_id, display, user, role))
-
-        insert_roster(team_a_id, roster_a)
-        insert_roster(team_b_id, roster_b)
+                """, (match_id, team_id, pid, display, user, role))
 
         created += 1
 
     conn.commit()
-    print(f"✅ Roster snapshots complete: total={total}, created={created}, skipped={skipped}")
+    print(f"✅ Roster snapshots complete: created={created}, skipped={skipped}")
 
     return None
 

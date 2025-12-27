@@ -232,5 +232,16 @@ CREATE TABLE finals_archive (
     UNIQUE (season)
 );
 
+CREATE TABLE player_stats_archive (
+  id SERIAL PRIMARY KEY,
+  player_id BIGINT NOT NULL,
+  season TEXT NOT NULL,
+  archive_rating INT NOT NULL,
+  archive_wins INT NOT NULL,
+  archive_losses INT NOT NULL,
+  archive_matches INT NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_matches_winner_to_match_id ON matches (winner_to_match_id);
 CREATE INDEX IF NOT EXISTS idx_matches_loser_to_match_id  ON matches (loser_to_match_id);

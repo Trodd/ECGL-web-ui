@@ -22,7 +22,6 @@ import (
 	"github.com/gorilla/sessions"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 var discordSession *discordgo.Session
@@ -2228,122 +2227,90 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Attempt to read JSONB field ---
-	var jsonMaps []map[string]any
+	// ------------------------------------------------------------
+	// Map scores (JSONB → legacy fallback)
+	// ------------------------------------------------------------
+	var mapScores []map[string]any
 	var rawJSON sql.NullString
-	if err := DB.Raw("SELECT map_scores FROM matches WHERE id = ?", match.ID).Scan(&rawJSON).Error; err == nil {
-		if rawJSON.Valid && strings.TrimSpace(rawJSON.String) != "" {
-			if err := json.Unmarshal([]byte(rawJSON.String), &jsonMaps); err != nil {
-				log.Printf("⚠️ Failed to parse JSONB map_scores for match %d: %v", match.ID, err)
-			}
-		}
+
+	if err := DB.Raw(`SELECT map_scores FROM matches WHERE id = ?`, match.ID).
+		Scan(&rawJSON).Error; err == nil && rawJSON.Valid && strings.TrimSpace(rawJSON.String) != "" {
+		_ = json.Unmarshal([]byte(rawJSON.String), &mapScores)
 	}
 
-	// --- Fallback: legacy table rows ---
-	if len(jsonMaps) == 0 {
+	if len(mapScores) == 0 {
 		var legacyMaps []MatchScore
-		if err := DB.Where("match_id = ?", match.ID).Find(&legacyMaps).Error; err == nil {
-			for _, m := range legacyMaps {
-				jsonMaps = append(jsonMaps, map[string]any{
-					"map":          m.MapNumber,
-					"mode":         m.Gamemode,
-					"team_a_score": m.TeamAScore,
-					"team_b_score": m.TeamBScore,
-				})
+		DB.Where("match_id = ?", match.ID).Find(&legacyMaps)
+		for _, m := range legacyMaps {
+			if m.TeamAScore == 0 && m.TeamBScore == 0 {
+				continue
 			}
+			mapScores = append(mapScores, map[string]any{
+				"map":          m.MapNumber,
+				"mode":         m.Gamemode,
+				"team_a_score": m.TeamAScore,
+				"team_b_score": m.TeamBScore,
+			})
 		}
 	}
 
-	// --- Filter out 0–0 maps ---
-	filtered := make([]map[string]any, 0)
-	for _, m := range jsonMaps {
-		a := int(toFloat(m["team_a_score"]))
-		b := int(toFloat(m["team_b_score"]))
-		if a == 0 && b == 0 {
-			continue
-		}
-		filtered = append(filtered, m)
-	}
-
-	// --- Load teams ---
+	// ------------------------------------------------------------
+	// Teams
+	// ------------------------------------------------------------
 	var teamA, teamB Team
 	DB.First(&teamA, match.TeamAID)
 	DB.First(&teamB, match.TeamBID)
 
+	// ------------------------------------------------------------
+	// Rosters (THIS IS THE FIX)
+	// ------------------------------------------------------------
 	var rosterA, rosterB []MatchRosterPlayer
+	frozen := isRosterFrozen(match)
 
-	// ============================================================
-	// 🧊 1) Try frozen snapshot from match_rosters
-	// ============================================================
-	DB.Raw(`
-		SELECT player_id, display_name, username, role
-		FROM match_rosters
-		WHERE match_id = ? AND team_id = ?
-		ORDER BY role ASC, display_name ASC
-	`, match.ID, match.TeamAID).Scan(&rosterA)
-
-	DB.Raw(`
-		SELECT player_id, display_name, username, role
-		FROM match_rosters
-		WHERE match_id = ? AND team_id = ?
-		ORDER BY role ASC, display_name ASC
-	`, match.ID, match.TeamBID).Scan(&rosterB)
-
-	// ============================================================
-	// 2) Fallback: player_history (same-season)
-	// ============================================================
-	if len(rosterA) == 0 {
+	if frozen {
+		// 🧊 Snapshot roster
 		DB.Raw(`
-			SELECT p.id AS player_id, p.display_name, p.username, ph.role
-			FROM player_history ph
-			JOIN players p ON p.id = ph.player_id
-			WHERE ph.team_id = ? AND ph.season = ?
-		`, match.TeamAID, currentSeason).Scan(&rosterA)
-	}
+			SELECT player_id, display_name, username, role
+			FROM match_rosters
+			WHERE match_id = ? AND team_id = ?
+			ORDER BY role ASC, display_name ASC
+		`, match.ID, match.TeamAID).Scan(&rosterA)
 
-	if len(rosterB) == 0 {
 		DB.Raw(`
-			SELECT p.id AS player_id, p.display_name, p.username, ph.role
-			FROM player_history ph
-			JOIN players p ON p.id = ph.player_id
-			WHERE ph.team_id = ? AND ph.season = ?
-		`, match.TeamBID, currentSeason).Scan(&rosterB)
-	}
+			SELECT player_id, display_name, username, role
+			FROM match_rosters
+			WHERE match_id = ? AND team_id = ?
+			ORDER BY role ASC, display_name ASC
+		`, match.ID, match.TeamBID).Scan(&rosterB)
 
-	// ============================================================
-	// 3) Last resort: live team_members
-	// ============================================================
-	if len(rosterA) == 0 {
+	} else {
+		// 🟢 LIVE roster (NO timestamps, NO DISTINCT ON)
 		DB.Raw(`
-			SELECT p.id AS player_id, p.display_name, p.username, tm.role
+			SELECT
+				p.id AS player_id,
+				p.display_name,
+				p.username,
+				tm.role
 			FROM team_members tm
 			JOIN players p ON p.id = tm.player_id
 			WHERE tm.team_id = ?
 		`, match.TeamAID).Scan(&rosterA)
-	}
 
-	if len(rosterB) == 0 {
 		DB.Raw(`
-			SELECT p.id AS player_id, p.display_name, p.username, tm.role
+			SELECT
+				p.id AS player_id,
+				p.display_name,
+				p.username,
+				tm.role
 			FROM team_members tm
 			JOIN players p ON p.id = tm.player_id
 			WHERE tm.team_id = ?
 		`, match.TeamBID).Scan(&rosterB)
 	}
 
-	// Safely stringify league subs
-	var leagueSubA string
-	var leagueSubB string
-
-	if match.LeagueSubA != nil {
-		leagueSubA = strconv.FormatInt(*match.LeagueSubA, 10)
-	}
-
-	if match.LeagueSubB != nil {
-		leagueSubB = strconv.FormatInt(*match.LeagueSubB, 10)
-	}
-
-	// --- Load Cast Info ---
+	// ------------------------------------------------------------
+	// Cast
+	// ------------------------------------------------------------
 	var cast CastLogMulti
 	castErr := DB.Where("match_id = ?", match.ID).First(&cast).Error
 
@@ -2352,49 +2319,45 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(cast.Casters, &casterIDs)
 	}
 
-	// Convert IDs to strings for JSON
-	casterStrs := make([]string, 0, len(casterIDs))
+	casters := make([]string, 0, len(casterIDs))
 	for _, id := range casterIDs {
-		casterStrs = append(casterStrs, strconv.FormatInt(id, 10))
+		casters = append(casters, strconv.FormatInt(id, 10))
 	}
 
-	cameraStr := ""
+	camera := ""
 	if castErr == nil && cast.CameraID != 0 {
-		cameraStr = strconv.FormatInt(cast.CameraID, 10)
+		camera = strconv.FormatInt(cast.CameraID, 10)
 	}
 
-	castData := map[string]any{
-		"active":     castErr == nil && len(casterStrs) > 0,
-		"casters":    casterStrs,
-		"camera":     cameraStr,
-		"stream_url": cast.StreamURL,
-	}
-
-	// Final Response
+	// ------------------------------------------------------------
+	// Response
+	// ------------------------------------------------------------
 	respondJSON(w, map[string]any{
-		"match": map[string]any{
-			"id":                     match.ID,
-			"match_code":             match.MatchCode,
-			"team_a_id":              match.TeamAID,
-			"team_b_id":              match.TeamBID,
-			"scheduled_date":         match.ScheduledDate,
-			"proposed_date":          match.ProposedDate,
-			"status":                 match.Status,
-			"winner_id":              match.WinnerID,
-			"loser_id":               match.LoserID,
-			"team_a_score_confirmed": match.TeamAScoreConfirmed,
-			"team_b_score_confirmed": match.TeamBScoreConfirmed,
-			"league_sub_a":           leagueSubA,
-			"league_sub_b":           leagueSubB,
-		},
+		"match":      match,
 		"teams":      map[string]any{"a": teamA, "b": teamB},
-		"map_scores": filtered,
+		"map_scores": mapScores,
 		"roster": map[string]any{
 			"a": stringifyRosterPlayers(rosterA),
 			"b": stringifyRosterPlayers(rosterB),
 		},
-		"cast": castData,
+		"cast": map[string]any{
+			"active":     castErr == nil && len(casters) > 0,
+			"casters":    casters,
+			"camera":     camera,
+			"stream_url": cast.StreamURL,
+		},
 	})
+}
+
+func isRosterFrozen(match Match) bool {
+	status := strings.TrimSpace(strings.ToLower(match.Status))
+
+	switch status {
+	case "completed", "finished", "forfeit", "double forfeit":
+		return true
+	default:
+		return false
+	}
 }
 
 // helper to safely coerce numbers
@@ -2412,6 +2375,43 @@ func toFloat(v any) float64 {
 	default:
 		return 0
 	}
+}
+
+func FreezeMatchRoster(matchID uint) error {
+	var match Match
+	if err := DB.First(&match, matchID).Error; err != nil {
+		return err
+	}
+
+	// Prevent double-freeze
+	var count int64
+	DB.Model(&MatchRoster{}).
+		Where("match_id = ?", matchID).
+		Count(&count)
+
+	if count > 0 {
+		return nil
+	}
+
+	// Snapshot Team A
+	DB.Exec(`
+		INSERT INTO match_rosters (match_id, team_id, player_id, display_name, username, role)
+		SELECT ?, tm.team_id, p.id, p.display_name, p.username, tm.role
+		FROM team_members tm
+		JOIN players p ON p.id = tm.player_id
+		WHERE tm.team_id = ?
+	`, matchID, match.TeamAID)
+
+	// Snapshot Team B
+	DB.Exec(`
+		INSERT INTO match_rosters (match_id, team_id, player_id, display_name, username, role)
+		SELECT ?, tm.team_id, p.id, p.display_name, p.username, tm.role
+		FROM team_members tm
+		JOIN players p ON p.id = tm.player_id
+		WHERE tm.team_id = ?
+	`, matchID, match.TeamBID)
+
+	return nil
 }
 
 // --- Get all matches for a team (with map scores) ---
@@ -2649,12 +2649,11 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 
 	var archived []ArchiveRow
 	DB.Raw(`
-        SELECT season, archive_rating, archive_wins, archive_losses, archive_matches, archive_team
-        FROM player_history
-        WHERE player_id = ?
-          AND is_team_join = FALSE
-        ORDER BY season ASC
-    `, playerID).Scan(&archived)
+		SELECT season, archive_rating, archive_wins, archive_losses, archive_matches, NULL AS archive_team
+		FROM player_stats_archive
+		WHERE player_id = ?
+		ORDER BY season ASC
+	`, playerID).Scan(&archived)
 
 	// --- Final Response
 	respondJSON(w, map[string]any{
@@ -7906,78 +7905,42 @@ func normalizeSeason(s string) string {
 }
 
 func archivePlayerStats(playerID int64, season string) {
-	// Load minimal player stats
+	// Load current player stats
 	type P struct {
 		Rating  int64
 		Wins    int64
 		Losses  int64
 		Matches int64
-		Role    string
 	}
 
 	var p P
-	DB.Raw(`
-        SELECT rating, wins, losses, matches, role
-        FROM players
-        WHERE id = ?
-    `, playerID).Scan(&p)
-
-	// Normalize Player Role
-	role := strings.TrimSpace(p.Role)
-	role = strings.Title(strings.ToLower(role)) // e.g. "player", "league sub"
-
-	if role != "Player" && role != "League Sub" {
-		role = "Player"
+	if err := DB.Raw(`
+		SELECT rating, wins, losses, matches
+		FROM players
+		WHERE id = ?
+	`, playerID).Scan(&p).Error; err != nil {
+		return
 	}
 
-	// Load team info
-	type TM struct {
-		TeamID   uint
-		TeamName string
-	}
-	var tm TM
-
-	DB.Raw(`
-		SELECT t.id AS team_id, t.name AS team_name
-		FROM team_members tm
-		LEFT JOIN teams t ON t.id = tm.team_id
-		WHERE tm.player_id = ?
-		LIMIT 1
-	`, playerID).Scan(&tm)
-
-	var archiveTeamID uint = 0
-
-	if tm.TeamID != 0 {
-		archiveTeamID = tm.TeamID
-	}
-
-	snapshot := PlayerHistory{
-		PlayerID:       playerID,
-		TeamID:         archiveTeamID,
-		TeamName:       tm.TeamName,
-		Role:           role,
-		Season:         season,
-		ArchiveRating:  int(p.Rating),
-		ArchiveWins:    int(p.Wins),
-		ArchiveLosses:  int(p.Losses),
-		ArchiveMatches: int(p.Matches),
-		ArchiveTeam:    tm.TeamName,
-		IsTeamJoin:     false,
-	}
-
-	DB.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "player_id"}, {Name: "season"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"team_id",
-			"team_name",
-			"role",
-			"archive_rating",
-			"archive_wins",
-			"archive_losses",
-			"archive_matches",
-			"archive_team",
-		}),
-	}).Create(&snapshot)
+	// Idempotent insert/update
+	DB.Exec(`
+		INSERT INTO player_stats_archive
+			(player_id, season, archive_rating, archive_wins, archive_losses, archive_matches)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (player_id, season)
+		DO UPDATE SET
+			archive_rating  = EXCLUDED.archive_rating,
+			archive_wins    = EXCLUDED.archive_wins,
+			archive_losses  = EXCLUDED.archive_losses,
+			archive_matches = EXCLUDED.archive_matches
+	`,
+		playerID,
+		season,
+		p.Rating,
+		p.Wins,
+		p.Losses,
+		p.Matches,
+	)
 }
 
 func GetPlayerComputedRating(playerID int64) int {
