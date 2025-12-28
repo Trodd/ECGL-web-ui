@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -595,6 +596,37 @@ func main() {
 
 	// ✅ DB
 	InitDB()
+
+	// =====================================================
+	// DISCORD BOT (PREFIX COMMANDS)
+	// =====================================================
+	botToken := os.Getenv("DISCORD_BOT_TOKEN")
+	if botToken == "" {
+		log.Fatal("❌ DISCORD_BOT_TOKEN not set")
+	}
+
+	dg, err := discordgo.New("Bot " + botToken)
+	if err != nil {
+		log.Fatalf("❌ Discord session error: %v", err)
+	}
+
+	// REQUIRED for !commands
+	dg.Identify.Intents =
+		discordgo.IntentsGuilds |
+			discordgo.IntentsGuildMessages |
+			discordgo.IntentsMessageContent
+
+	// 🔹 REGISTER PREFIX COMMAND HANDLERS HERE
+	RegisterPrefixCommands(dg)
+
+	// Open Discord gateway
+	if err := dg.Open(); err != nil {
+		log.Fatalf("❌ Failed to connect to Discord: %v", err)
+	}
+
+	defer dg.Close()
+
+	log.Println("🤖 Discord bot connected (prefix commands enabled)")
 
 	r := mux.NewRouter()
 
