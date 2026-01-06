@@ -23,6 +23,14 @@ export default function TeamDetail() {
   const [myTeamID, setMyTeamID] = useState(null);
   const [isCaptain, setIsCaptain] = useState(false);
   const [archive, setArchive] = useState([]);
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+
+  function buildLogoSrc(logoUrl) {
+    if (!logoUrl) return "";
+    const base = String(logoUrl);
+    const absolute = base.startsWith("http://") || base.startsWith("https://");
+    return absolute ? base : `${urlBase}${base}`;
+  }
 
   useEffect(() => {
     if (!id) return;
@@ -167,6 +175,8 @@ export default function TeamDetail() {
   if (error) return <p className="text-danger">{error}</p>;
   if (!team) return <p className="text-light">Loading team...</p>;
 
+  const effectiveLogoUrl = team?.logo_url || (team?.id ? `/api/team/logo/${team.id}` : "");
+
   // ───────────────────────────────────────────────
   // 🔥 CHALLENGE BUTTON VISIBILITY LOGIC
   // ───────────────────────────────────────────────
@@ -192,18 +202,30 @@ export default function TeamDetail() {
       {/* ================= TEAM HEADER ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
-          <div>
-            <h2 className="mb-1">{team.name}</h2>
-            <span
-              className={`badge px-3 py-2 ${team.status === "Active"
+          <div className="d-flex align-items-center gap-3">
+            {effectiveLogoUrl && !logoLoadFailed && (
+              <img
+                src={buildLogoSrc(effectiveLogoUrl)}
+                alt="Team logo"
+                className="rounded border border-secondary"
+                style={{ width: 80, height: 80, objectFit: "cover" }}
+                onError={() => setLogoLoadFailed(true)}
+              />
+            )}
+
+            <div>
+              <h2 className="mb-1">{team.name}</h2>
+              <span
+                className={`badge px-3 py-2 ${team.status === "Active"
                   ? "bg-success"
                   : team.status === "Disbanded"
                     ? "bg-danger"
                     : "bg-warning text-dark"
-                }`}
-            >
-              {team.status}
-            </span>
+                  }`}
+              >
+                {team.status}
+              </span>
+            </div>
           </div>
 
           {/* ⚔️ CHALLENGE CTA */}

@@ -11,6 +11,8 @@ export default function MatchDetail() {
     const [players, setPlayers] = useState([]);
     const [showCastModal, setShowCastModal] = useState(false);
     const [existingCast, setExistingCast] = useState(null);
+    const [logoLoadFailedA, setLogoLoadFailedA] = useState(false);
+    const [logoLoadFailedB, setLogoLoadFailedB] = useState(false);
 
     // -----------------------------------------------------
     // LOAD ALL PLAYERS
@@ -46,6 +48,15 @@ export default function MatchDetail() {
         if (p) return p.display_name || p.username;
 
         return "Unknown";
+    }
+
+    function buildLogoSrc(url) {
+        if (!url) return "";
+        if (/^https?:\/\//i.test(url)) return url;
+
+        const base = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+        const path = String(url).startsWith("/") ? url : `/${url}`;
+        return `${base}${path}`;
     }
 
     // -----------------------------------------------------
@@ -114,6 +125,9 @@ export default function MatchDetail() {
 
     const teamA = teams.a || {};
     const teamB = teams.b || {};
+
+    const effectiveLogoUrlA = teamA.logo_url || (teamA.id ? `/api/team/logo/${teamA.id}` : "");
+    const effectiveLogoUrlB = teamB.logo_url || (teamB.id ? `/api/team/logo/${teamB.id}` : "");
 
     const date = match.scheduled_date || match.proposed_date;
     const formattedDate = date ? new Date(date).toLocaleString() : "TBD";
@@ -234,14 +248,36 @@ export default function MatchDetail() {
                 <div className="card-body text-center">
 
                     <div className="d-flex justify-content-center align-items-center gap-3 mb-2">
-                        <Link to={`/teams/${teamA.id}`} className="text-info fw-bold fs-5 text-decoration-none">
-                            {teamA.name}
+                        <Link
+                            to={`/teams/${teamA.id}`}
+                            className="text-info fw-bold fs-5 text-decoration-none d-inline-flex align-items-center gap-2"
+                        >
+                            {effectiveLogoUrlA && !logoLoadFailedA && (
+                                <img
+                                    src={buildLogoSrc(effectiveLogoUrlA)}
+                                    alt={`${teamA.name || "Team A"} logo`}
+                                    style={{ width: 80, height: 80, objectFit: "contain" }}
+                                    onError={() => setLogoLoadFailedA(true)}
+                                />
+                            )}
+                            <span>{teamA.name}</span>
                         </Link>
 
                         <span className="text-secondary fw-semibold">vs</span>
 
-                        <Link to={`/teams/${teamB.id}`} className="text-info fw-bold fs-5 text-decoration-none">
-                            {teamB.name}
+                        <Link
+                            to={`/teams/${teamB.id}`}
+                            className="text-info fw-bold fs-5 text-decoration-none d-inline-flex align-items-center gap-2"
+                        >
+                            {effectiveLogoUrlB && !logoLoadFailedB && (
+                                <img
+                                    src={buildLogoSrc(effectiveLogoUrlB)}
+                                    alt={`${teamB.name || "Team B"} logo`}
+                                    style={{ width: 48, height: 48, objectFit: "contain" }}
+                                    onError={() => setLogoLoadFailedB(true)}
+                                />
+                            )}
+                            <span>{teamB.name}</span>
                         </Link>
                     </div>
 

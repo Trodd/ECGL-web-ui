@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 	"github.com/gorilla/sessions"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var discordSession *discordgo.Session
@@ -113,6 +115,10 @@ func (f *FlexibleID) Int64() int64 {
 
 func respondJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	// Avoid caching API responses; stale JSON can cause UI to show old logo URLs after refresh.
+	w.Header().Set("Cache-Control", "no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	json.NewEncoder(w).Encode(data)
 }
 
@@ -456,6 +462,7 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{
 		"id":                     team.ID,
 		"name":                   team.Name,
+		"logo_url":               team.LogoURL,
 		"status":                 team.Status,
 		"roster":                 roster,
 		"matches":                matches,
@@ -819,6 +826,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 		"team": map[string]any{
 			"id":                     team.ID,
 			"name":                   team.Name,
+			"logo_url":               team.LogoURL,
 			"status":                 team.Status,
 			"join_allowed":           team.JoinAllowed,
 			"allow_challenges":       team.AllowChallenges,
@@ -1518,6 +1526,180 @@ func getMemberRole(teamID uint, playerID int64) (string, error) {
 	}
 
 	return member.Role, nil
+}
+
+// --- Captain/Co-Captain: Upload or replace a team logo ---
+// Expects multipart/form-data with fields:
+// - team_id: uint
+// - logo: file
+// Responds: { success: true, logo_url: "/api/team/logo/<teamID>/<version>", logo_version: "<version>" }
+func HandleUploadTeamLogo(w http.ResponseWriter, r *http.Request) {
+	// --- Validate session ---
+	session, _ := store.Get(r, "session")
+	discordID, ok := session.Values["discord_id"].(string)
+	if !ok || discordID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	playerID, _ := strconv.ParseInt(discordID, 10, 64)
+
+	// Limit size (8MB)
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		http.Error(w, "Invalid multipart form", http.StatusBadRequest)
+		return
+	}
+
+	teamIDStr := strings.TrimSpace(r.FormValue("team_id"))
+	if teamIDStr == "" {
+		http.Error(w, "Missing team_id", http.StatusBadRequest)
+		return
+	}
+	teamID64, err := strconv.ParseUint(teamIDStr, 10, 64)
+	if err != nil || teamID64 == 0 {
+		http.Error(w, "Invalid team_id", http.StatusBadRequest)
+		return
+	}
+	teamID := uint(teamID64)
+
+	role, err := getMemberRole(teamID, playerID)
+	if err != nil || (role != "Captain" && role != "Co-Captain") {
+		http.Error(w, "Only captains can upload a team logo", http.StatusForbidden)
+		return
+	}
+
+	file, header, err := r.FormFile("logo")
+	if err != nil {
+		http.Error(w, "Missing logo file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Basic extension allowlist
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".webp", ".gif":
+		// ok
+	default:
+		http.Error(w, "Unsupported file type (use png/jpg/jpeg/webp/gif)", http.StatusBadRequest)
+		return
+	}
+	if ext == ".jpeg" {
+		ext = ".jpg"
+	}
+
+	contentType := strings.TrimSpace(header.Header.Get("Content-Type"))
+	if contentType == "" {
+		// fallback based on extension
+		switch ext {
+		case ".png":
+			contentType = "image/png"
+		case ".gif":
+			contentType = "image/gif"
+		case ".webp":
+			contentType = "image/webp"
+		default:
+			contentType = "image/jpeg"
+		}
+	}
+
+	// Ensure team exists
+	var team Team
+	if err := DB.First(&team, teamID).Error; err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	// Read bytes into memory (MaxBytesReader already caps this)
+	data, err := io.ReadAll(file)
+	if err != nil || len(data) == 0 {
+		http.Error(w, "Failed to read logo", http.StatusBadRequest)
+		return
+	}
+
+	// Store in DB (upsert)
+	logoRow := TeamLogo{
+		TeamID:      teamID,
+		ContentType: contentType,
+		Data:        data,
+		UpdatedAt:   time.Now(),
+	}
+	if err := DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "team_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"content_type", "data", "updated_at"}),
+	}).Create(&logoRow).Error; err != nil {
+		log.Printf("❌ Failed to store team logo in DB: %v", err)
+		http.Error(w, "Failed to save logo", http.StatusInternalServerError)
+		return
+	}
+
+	// Point team.logo_url to a versioned API endpoint to defeat aggressive caches.
+	version := fmt.Sprintf("%d", logoRow.UpdatedAt.UnixNano())
+	logoURL := fmt.Sprintf("/api/team/logo/%d/%s", teamID, version)
+	if err := DB.Model(&Team{}).Where("id = ?", teamID).Update("logo_url", logoURL).Error; err != nil {
+		log.Printf("❌ Failed to persist logo_url: %v", err)
+		http.Error(w, "Failed to save logo", http.StatusInternalServerError)
+		return
+	}
+
+	SendDiscordLog(
+		fmt.Sprintf(
+			"🖼️ **Team Logo Updated:** **%s** (Team #%d) by <@%d>",
+			team.Name,
+			team.ID,
+			playerID,
+		),
+	)
+
+	respondJSON(w, map[string]any{
+		"success":      true,
+		"logo_url":     logoURL,
+		"logo_version": version,
+	})
+}
+
+// --- Public: Serve a team logo from DB ---
+// GET /api/team/logo/{teamID} and /api/team/logo/{teamID}/{version}
+func HandleGetTeamLogo(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	teamIDStr := strings.TrimSpace(vars["teamID"])
+	_ = vars["version"] // optional; used only for cache busting
+	teamID64, err := strconv.ParseUint(teamIDStr, 10, 64)
+	if err != nil || teamID64 == 0 {
+		http.Error(w, "Invalid team id", http.StatusBadRequest)
+		return
+	}
+	teamID := uint(teamID64)
+
+	var logo TeamLogo
+	if err := DB.First(&logo, "team_id = ?", teamID).Error; err != nil {
+		http.Error(w, "logo not found", http.StatusNotFound)
+		return
+	}
+	if len(logo.Data) == 0 {
+		http.Error(w, "logo not found", http.StatusNotFound)
+		return
+	}
+
+	// Strong caching here causes "logo won't change" issues (browser/CDN).
+	// Use ETag + no-store so changes show immediately after upload.
+	etag := fmt.Sprintf("\"%d\"", logo.UpdatedAt.UnixNano())
+	if inm := strings.TrimSpace(r.Header.Get("If-None-Match")); inm != "" && inm == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	w.Header().Set("Content-Type", logo.ContentType)
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	// Extra hints for common CDNs/proxies
+	w.Header().Set("Surrogate-Control", "no-store")
+	w.Header().Set("CDN-Cache-Control", "no-store")
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(logo.Data)
 }
 
 // --- Kick a team member (Captain only) ---

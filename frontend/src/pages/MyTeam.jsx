@@ -21,6 +21,13 @@ export default function MyTeam() {
   const [allowChallenges, setAllowChallenges] = useState(true);
   const [globalChallengesEnabled, setGlobalChallengesEnabled] = useState(true);
 
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState("");
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoMsg, setLogoMsg] = useState("");
+  const [logoVersion, setLogoVersion] = useState("");
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+
   const urlBase = import.meta.env.VITE_API_URL;
   const sectionStyle = {
     backgroundColor: "#1a1a1a",
@@ -132,6 +139,22 @@ export default function MyTeam() {
   const isLockedByMods = Boolean(team?.locked);
   const joinDisabled = rosterLocked || isLockedByMods;
   const isCaptain = myRole === "Captain" || myRole === "Co-Captain";
+
+  const effectiveLogoUrl = team?.logo_url || teamSettings?.logo_url || (team?.id ? `/api/team/logo/${team.id}` : "");
+
+  function buildLogoSrc(logoUrl) {
+    if (!logoUrl) return "";
+    const base = String(logoUrl);
+    const absolute = base.startsWith("http://") || base.startsWith("https://");
+    const src = absolute ? base : `${urlBase}${base}`;
+    return logoVersion ? `${src}${src.includes("?") ? "&" : "?"}v=${encodeURIComponent(String(logoVersion))}` : src;
+  }
+
+  useEffect(() => {
+    return () => {
+      if (logoPreviewUrl) URL.revokeObjectURL(logoPreviewUrl);
+    };
+  }, [logoPreviewUrl]);
 
   // 🔄 Load current season label (from backend)
   useEffect(() => {
@@ -315,23 +338,80 @@ export default function MyTeam() {
     }
   }
 
+  async function uploadTeamLogo() {
+    if (!isCaptain) return;
+    if (!team?.id) return;
+    if (!logoFile) {
+      setLogoMsg("⚠️ Choose an image file first.");
+      return;
+    }
+
+    try {
+      setLogoUploading(true);
+      setLogoMsg("");
+      const form = new FormData();
+      form.append("team_id", String(team.id));
+      form.append("logo", logoFile);
+
+      const res = await axios.post(`${urlBase}/api/team/logo`, form, {
+        withCredentials: true,
+      });
+
+      const newLogoUrl = res?.data?.logo_url;
+      const newLogoVersion = res?.data?.logo_version;
+      setLogoMsg("✅ Team logo updated.");
+      setLogoVersion(newLogoVersion ? String(newLogoVersion) : String(Date.now()));
+      setLogoLoadFailed(false);
+
+      if (newLogoUrl) {
+        setData((prev) => ({
+          ...prev,
+          team: { ...(prev?.team || {}), logo_url: newLogoUrl },
+        }));
+        setTeamSettings((prev) => ({ ...(prev || {}), logo_url: newLogoUrl }));
+      }
+
+      setLogoFile(null);
+      if (logoPreviewUrl) URL.revokeObjectURL(logoPreviewUrl);
+      setLogoPreviewUrl("");
+      await loadTeam();
+    } catch (err) {
+      const msg = err?.response?.data || err?.message || "Upload failed";
+      setLogoMsg(`❌ ${msg}`);
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
   return (
     <div className="container text-light py-4" style={{ maxWidth: 1100 }}>
       {/* ================= TEAM HEADER ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
         <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
-          <div>
-            <h2 className="mb-1"> {team?.name}</h2>
-            <span
-              className={`fw-bold ${team?.status === "Active"
-                ? "text-success"
-                : team?.status === "Inactive"
-                  ? "text-warning"
-                  : "text-danger"
-                }`}
-            >
-              {team?.status || "Active"}
-            </span>
+          <div className="d-flex align-items-center gap-3">
+            {effectiveLogoUrl && !logoLoadFailed && (
+              <img
+                src={buildLogoSrc(effectiveLogoUrl)}
+                alt="Team logo"
+                className="rounded border border-secondary"
+                style={{ width: 56, height: 56, objectFit: "cover" }}
+                onError={() => setLogoLoadFailed(true)}
+              />
+            )}
+
+            <div>
+              <h2 className="mb-1"> {team?.name}</h2>
+              <span
+                className={`fw-bold ${team?.status === "Active"
+                  ? "text-success"
+                  : team?.status === "Inactive"
+                    ? "text-warning"
+                    : "text-danger"
+                  }`}
+              >
+                {team?.status || "Active"}
+              </span>
+            </div>
           </div>
 
           {team?.id && (
@@ -403,6 +483,91 @@ export default function MyTeam() {
 
             <div className={`accordion-collapse collapse ${accordionOpen ? "show" : ""}`}>
               <div className="accordion-body bg-black text-light">
+                {/* TEAM LOGO */}
+                <div className="mb-4 border-bottom border-secondary pb-3">
+                  <h6 className="text-info mb-2">🖼️ Team Logo</h6>
+
+                  <div className="d-flex flex-column flex-md-row gap-3 align-items-md-center">
+                    <div style={{ width: 96, height: 96 }}>
+                      {logoPreviewUrl ? (
+                        <img
+                          src={logoPreviewUrl}
+                          alt="Team logo preview"
+                          style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #333" }}
+                        />
+                      ) : effectiveLogoUrl && !logoLoadFailed ? (
+                        <img
+                          src={buildLogoSrc(effectiveLogoUrl)}
+                          alt="Team logo"
+                          style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #333" }}
+                          onError={() => setLogoLoadFailed(true)}
+                        />
+                      ) : (
+                        <div
+                          className="d-flex justify-content-center align-items-center text-secondary"
+                          style={{ width: 96, height: 96, borderRadius: 8, border: "1px dashed #444" }}
+                        >
+                          No logo
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-grow-1">
+                      <input
+                        className="form-control form-control-sm bg-dark text-light border-secondary"
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] || null;
+                          setLogoMsg("");
+                          setLogoFile(f);
+                          if (logoPreviewUrl) URL.revokeObjectURL(logoPreviewUrl);
+                          setLogoPreviewUrl(f ? URL.createObjectURL(f) : "");
+                        }}
+                        disabled={logoUploading}
+                      />
+                      <div className="d-flex gap-2 mt-2">
+                        <button
+                          className="btn btn-outline-info btn-sm"
+                          onClick={uploadTeamLogo}
+                          disabled={!logoFile || logoUploading}
+                        >
+                          {logoUploading ? "Uploading…" : "Upload Logo"}
+                        </button>
+                        {logoFile && (
+                          <button
+                            className="btn btn-outline-secondary btn-sm"
+                            onClick={() => {
+                              setLogoFile(null);
+                              if (logoPreviewUrl) URL.revokeObjectURL(logoPreviewUrl);
+                              setLogoPreviewUrl("");
+                              setLogoMsg("");
+                            }}
+                            disabled={logoUploading}
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      {logoMsg && (
+                        <div
+                          className={`small mt-2 ${logoMsg.startsWith("✅")
+                            ? "text-success"
+                            : logoMsg.startsWith("⚠️")
+                              ? "text-warning"
+                              : "text-danger"
+                            }`}
+                        >
+                          {logoMsg}
+                        </div>
+                      )}
+                      <div className="text-secondary small mt-2">
+                        Supported: PNG/JPG/WEBP/GIF (max ~8MB).
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* TEAM STATUS */}
                 <div className="mb-4 border-bottom border-secondary pb-3">
                   <h6 className="text-warning mb-2">🏁 Team Status</h6>

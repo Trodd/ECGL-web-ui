@@ -49,6 +49,7 @@ type TeamJoinRequest struct {
 type Team struct {
 	ID                   uint   `gorm:"primaryKey" json:"id"`
 	Name                 string `gorm:"unique" json:"name"`
+	LogoURL              string `json:"logo_url" gorm:"column:logo_url;default:''"`
 	Status               string `json:"status"`
 	JoinAllowed          bool   `json:"join_allowed" gorm:"default:true"`
 	Rating               int    `json:"rating"`
@@ -61,6 +62,14 @@ type Team struct {
 	FinalsPlacement      int    `json:"finals_placement"`
 	Division             string `json:"division"`
 	Tier                 string `json:"tier"`
+}
+
+// --- Team Logo (stored in DB for reliable serving) ---
+type TeamLogo struct {
+	TeamID      uint      `gorm:"primaryKey" json:"team_id"`
+	ContentType string    `json:"content_type"`
+	Data        []byte    `json:"-" gorm:"type:bytea"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // --- Team Member ---

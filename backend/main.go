@@ -673,6 +673,9 @@ func main() {
 	r.HandleFunc("/api/challenge/respond", HandleChallengeRespond).Methods("POST")
 	r.HandleFunc("/api/team/toggle-challenges", HandleToggleChallenges).Methods("POST")
 	r.HandleFunc("/api/team/rename", CaptainRenameTeam).Methods("POST")
+	r.HandleFunc("/api/team/logo", HandleUploadTeamLogo).Methods("POST")
+	r.HandleFunc("/api/team/logo/{teamID:[0-9]+}", HandleGetTeamLogo).Methods("GET")
+	r.HandleFunc("/api/team/logo/{teamID:[0-9]+}/{version}", HandleGetTeamLogo).Methods("GET")
 	r.HandleFunc("/api/season/calendar", HandleGetSeasonCalendar).Methods("GET")
 
 	// League Mod routes (all requireLeagueMod inside handlers)
@@ -792,6 +795,10 @@ func main() {
 
 	// Serve static assets (JS, CSS, PNG, manifest, etc)
 	r.PathPrefix("/assets/").Handler(http.StripPrefix("/", http.FileServer(http.Dir(distDir))))
+
+	// Serve uploaded assets (team logos, etc)
+	uploadsDir := mustGet("UPLOADS_DIR", "uploads")
+	r.PathPrefix("/uploads/").Handler(http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadsDir))))
 
 	// SPA fallback for all non-API routes
 	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
