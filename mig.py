@@ -1,22 +1,32 @@
-import gspread
-import re
-import psycopg2
+import argparse
 import difflib
+import re
+from datetime import UTC, datetime
+
+import gspread
+import psycopg2
 from oauth2client.service_account import ServiceAccountCredentials
 from pytz import timezone
-from datetime import datetime, UTC
 
-# === Google Sheets ===
+# === Google Sheets (lazy init) ===
 scope = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
+    "https://www.googleapis.com/auth/drive",
 ]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-client = gspread.authorize(creds)
 
 SHEET_NAME = "CombatLeaguePre"
-spreadsheet = client.open(SHEET_NAME)
+client = None
+spreadsheet = None
+
+
+def init_sheets():
+    global client, spreadsheet
+    if spreadsheet is not None:
+        return
+    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+    client = gspread.authorize(creds)
+    spreadsheet = client.open(SHEET_NAME)
 
 # === Postgres ===
 conn = psycopg2.connect(
@@ -59,7 +69,7 @@ def build_player_map():
 
     return player_map
 
-player_map = build_player_map()
+player_map = {}
 
 # === Helpers ===
 
@@ -87,6 +97,7 @@ def resolve_player(name, team_name=""):
 
 # === Migrate Teams ===
 def migrate_teams():
+    init_sheets()
     ws = spreadsheet.worksheet("Teams")
     rows = ws.get_all_values()[1:]
 
@@ -108,6 +119,7 @@ def migrate_teams():
 
 # === Migrate Players (stats only) ===
 def migrate_players_leaderboard():
+    init_sheets()
     ws = spreadsheet.worksheet("Player Leaderboard")
     rows = ws.get_all_values()[1:]  # skip header row
 
@@ -148,6 +160,7 @@ def migrate_players_leaderboard():
 
 # === Migrate Players sheet (authoritative for IDs) ===
 def migrate_players_sheet():
+    init_sheets()
     ws = spreadsheet.worksheet("Players")
     rows = ws.get_all_values(value_render_option="FORMATTED_VALUE")[1:]
 
@@ -194,6 +207,7 @@ def migrate_players_sheet():
 
 # === Migrate Team Leaderboard ===
 def migrate_team_leaderboard():
+    init_sheets()
     try:
         ws = spreadsheet.worksheet("Leaderboard")
     except gspread.WorksheetNotFound:
@@ -305,6 +319,8 @@ def parse_date(val):
 def migrate_matches(include_orphans=True):
     """Migrate all matches from the Google Sheet into DB (even if teams are missing)."""
     print("📦 Migrating matches (auto-creating placeholder teams for missing ones)...")
+
+    init_sheets()
 
     try:
         ws = spreadsheet.worksheet("Matches")
@@ -457,8 +473,43 @@ def migrate_matches(include_orphans=True):
     if created_placeholders:
         print(f"🆕 Created {created_placeholders} placeholder 'Legacy' teams for orphaned matches.")
 
+
+def fix_legacy_week_matches_to_preseason():
+        """Normalize legacy match rows like 'Week5-M006' to be Preseason.
+
+        This is idempotent and safe to run multiple times.
+        It also sets matches.week from the WeekN portion of match_code.
+        """
+        print("🧹 Fixing legacy Week*-M* matches to Preseason...")
+
+        # Set season
+        cur.execute(
+                """
+                UPDATE matches
+                     SET season = 'Preseason'
+                 WHERE match_code ~* '^Week[0-9]+-M'
+                     AND (season IS DISTINCT FROM 'Preseason');
+                """
+        )
+        season_fixed = cur.rowcount
+
+        # Set week extracted from match_code
+        cur.execute(
+                """
+                UPDATE matches
+                     SET week = regexp_replace(match_code, '^Week([0-9]+)-M.*$', '\\1')
+                 WHERE match_code ~* '^Week[0-9]+-M'
+                     AND (week IS DISTINCT FROM regexp_replace(match_code, '^Week([0-9]+)-M.*$', '\\1'));
+                """
+        )
+        week_fixed = cur.rowcount
+
+        conn.commit()
+        print(f"✅ Legacy match normalization complete: season_fixed={season_fixed}, week_fixed={week_fixed}")
+
 def migrate_scoring():
     """Migrate per-map scores from the Scoring sheet into match_scores (horizontal layout)."""
+    init_sheets()
     try:
         ws = spreadsheet.worksheet("Scoring")
     except gspread.WorksheetNotFound:
@@ -571,9 +622,6 @@ def migrate_player_history():
         SELECT tm.player_id, tm.team_id, t.name, tm.role, %s
         FROM team_members tm
         JOIN teams t ON t.id = tm.team_id
-        ON CONFLICT (player_id, team_id, season) DO UPDATE
-            SET team_name = EXCLUDED.team_name,
-                role = EXCLUDED.role;
     """, (current_season,))
 
     conn.commit()
@@ -649,16 +697,44 @@ def migrate_match_rosters():
 
     return None
 
-# === Run Migration (order matters!) ===
-migrate_teams()
-migrate_players_sheet()
-migrate_players_leaderboard()
-migrate_team_members()
-migrate_team_leaderboard()
-migrate_player_history()
-migrate_scoring()  
-migrate_matches()
-migrate_match_rosters()
+def run_full_migration():
+    global player_map
+    init_sheets()
+    player_map = build_player_map()
 
-cur.close()
-conn.close()
+    # order matters
+    migrate_teams()
+    migrate_players_sheet()
+    migrate_players_leaderboard()
+    migrate_team_members()
+    migrate_team_leaderboard()
+    migrate_player_history()
+    migrate_scoring()
+    migrate_matches()
+    fix_legacy_week_matches_to_preseason()
+    migrate_match_rosters()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--fix-week-preseason",
+        action="store_true",
+        help="Only normalize legacy Week*-M* matches to season=Preseason and set week from match_code.",
+    )
+    args = parser.parse_args()
+
+    try:
+        if args.fix_week_preseason:
+            fix_legacy_week_matches_to_preseason()
+        else:
+            run_full_migration()
+    finally:
+        try:
+            cur.close()
+        finally:
+            conn.close()
+
+
+if __name__ == "__main__":
+    main()

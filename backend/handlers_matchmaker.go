@@ -202,6 +202,11 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.TrimSpace(currentSeason) == "" {
+		http.Error(w, "CURRENT_SEASON not configured", http.StatusInternalServerError)
+		return
+	}
+
 	weekStr := r.URL.Query().Get("week")
 	week, err := strconv.Atoi(weekStr)
 	if err != nil || week <= 0 {
@@ -211,8 +216,17 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 
 	// Prevent duplicate generation
 	var existingCount int64
+	weekPatternAny := fmt.Sprintf("%%Week%d-%%", week)
+	weekPatternDashed := fmt.Sprintf("%%-Week%d-%%", week)
 	DB.Model(&Match{}).
-		Where("match_code LIKE ?", fmt.Sprintf("%%-Week%d-%%", week)).
+		Where("season = ?", currentSeason).
+		Where("COALESCE(is_finals, false) = false").
+		Where("match_code NOT ILIKE ?", "%-CHAL-%").
+		Where(`(
+			(NULLIF(week, '') IS NOT NULL AND CAST(NULLIF(week, '') AS INTEGER) = ?)
+			OR match_code ILIKE ?
+			OR match_code ILIKE ?
+		)`, week, weekPatternAny, weekPatternDashed).
 		Count(&existingCount)
 	if existingCount > 0 {
 		respondJSON(w, map[string]any{
@@ -260,90 +274,209 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		TeamBID uint
 	}
 	//--------------------------------------------------
-	// 1️⃣ Block last 3 weeks (based on match_code only)
+	// Build pairing constraints
+	// - Prefer: pairs that have NOT happened yet this season
+	// - When all pairs have happened: avoid repeating last week if possible
 	//--------------------------------------------------
-	var last3 []SimpleMatch
+	activeIDs := make(map[uint]bool, len(teams))
+	for _, t := range teams {
+		activeIDs[t.ID] = true
+	}
+
+	// Pairs already played (or at least already scheduled) this season
+	playedPairs := make(map[[2]uint]bool)
+	var seasonPairs []SimpleMatch
 	DB.Table("matches").
 		Select("team_a_id, team_b_id").
 		Where("season = ?", currentSeason).
-		Where(`
-			CAST(
-				SPLIT_PART(SPLIT_PART(match_code, 'Week', 2), '-', 1)
-				AS INTEGER
-			) >= ?
-		`, week-3).
-		Find(&last3)
+		Where("COALESCE(is_finals, false) = false").
+		Where("match_code NOT ILIKE ?", "%-CHAL-%").
+		Find(&seasonPairs)
+	for _, m := range seasonPairs {
+		if m.TeamAID == 0 || m.TeamBID == 0 {
+			continue
+		}
+		if !activeIDs[m.TeamAID] || !activeIDs[m.TeamBID] {
+			continue
+		}
+		key := [2]uint{min(m.TeamAID, m.TeamBID), max(m.TeamAID, m.TeamBID)}
+		playedPairs[key] = true
+	}
 
+	// Soft-block last week (to prevent back-to-back repeats when repeats are unavoidable)
 	recentPairs := make(map[[2]uint]bool)
-	for _, m := range last3 {
-		key := [2]uint{min(m.TeamAID, m.TeamBID), max(m.TeamAID, m.TeamBID)}
-		recentPairs[key] = true
+	if week > 1 {
+		var lastWeek []SimpleMatch
+		lastWeekPatternAny := fmt.Sprintf("%%Week%d-%%", week-1)
+		lastWeekPatternDashed := fmt.Sprintf("%%-Week%d-%%", week-1)
+		DB.Table("matches").
+			Select("team_a_id, team_b_id").
+			Where("season = ?", currentSeason).
+			Where("COALESCE(is_finals, false) = false").
+			Where("match_code NOT ILIKE ?", "%-CHAL-%").
+			Where(`(
+				(NULLIF(week, '') IS NOT NULL AND CAST(NULLIF(week, '') AS INTEGER) = ?)
+				OR match_code ILIKE ?
+				OR match_code ILIKE ?
+			)`, week-1, lastWeekPatternAny, lastWeekPatternDashed).
+			Find(&lastWeek)
+		for _, m := range lastWeek {
+			if m.TeamAID == 0 || m.TeamBID == 0 {
+				continue
+			}
+			key := [2]uint{min(m.TeamAID, m.TeamBID), max(m.TeamAID, m.TeamBID)}
+			recentPairs[key] = true
+		}
 	}
 
-	//--------------------------------------------------
-	// 2️⃣ Absolutely block previous week (week-1)
-	//--------------------------------------------------
-	var lastWeek []SimpleMatch
-	DB.Table("matches").
-		Select("team_a_id, team_b_id").
-		Where("season = ?", currentSeason).
-		Where(`
-			CAST(
-				SPLIT_PART(SPLIT_PART(match_code, 'Week', 2), '-', 1)
-				AS INTEGER
-			) = ?
-		`, week-1).
-		Find(&lastWeek)
-
-	for _, m := range lastWeek {
-		key := [2]uint{min(m.TeamAID, m.TeamBID), max(m.TeamAID, m.TeamBID)}
-		recentPairs[key] = true
-	}
-
-	// Build all possible pairs (only active teams)
+	// Build all possible pairs among active teams
 	var allPairs [][2]uint
 	for i := 0; i < len(teams); i++ {
 		for j := i + 1; j < len(teams); j++ {
-			key := [2]uint{teams[i].ID, teams[j].ID}
-			if !recentPairs[[2]uint{min(key[0], key[1]), max(key[0], key[1])}] {
-				allPairs = append(allPairs, key)
-			}
+			allPairs = append(allPairs, [2]uint{teams[i].ID, teams[j].ID})
 		}
 	}
 
-	// Deterministic shuffle
-	seed := int64(week)*12345 + int64(len(teams))*999
-	shuffle(allPairs, seed)
-
-	// Assign matches (each team max 2)
-	matchCount := make(map[uint]int)
-	var matchups [][2]uint
+	// Prefer unused pairs this season
+	var unusedPairs [][2]uint
 	for _, pair := range allPairs {
-		a, b := pair[0], pair[1]
-		if matchCount[a] < 2 && matchCount[b] < 2 {
-			matchups = append(matchups, [2]uint{a, b})
-			matchCount[a]++
-			matchCount[b]++
+		key := [2]uint{min(pair[0], pair[1]), max(pair[0], pair[1])}
+		if !playedPairs[key] {
+			unusedPairs = append(unusedPairs, key)
 		}
 	}
 
-	// Fill under-matched teams
-	for _, tA := range teams {
-		if matchCount[tA.ID] >= 2 {
-			continue
-		}
-		for _, tB := range teams {
-			if tA.ID == tB.ID || matchCount[tB.ID] >= 2 {
+	// Deterministic seed
+	seed := int64(week)*12345 + int64(len(teams))*999
+
+	// Build a schedule that targets exactly 2 matches per team.
+	// Preference order:
+	//  1) pairs not yet played this season
+	//  2) avoid repeating last week (if possible)
+	//  3) allow repeats only when needed to fill everyone to 2
+	buildSchedule := func(avoidRecent bool, disallowPlayed bool) ([][]uint, map[uint]int, bool) {
+		adj := make(map[uint][]uint, len(teams))
+		for _, p := range allPairs {
+			a, b := p[0], p[1]
+			key := [2]uint{min(a, b), max(a, b)}
+			if disallowPlayed && playedPairs[key] {
 				continue
 			}
-			key := [2]uint{min(tA.ID, tB.ID), max(tA.ID, tB.ID)}
-			if !pairExists(matchups, key) {
-				matchups = append(matchups, key)
-				matchCount[tA.ID]++
-				matchCount[tB.ID]++
+			if avoidRecent && recentPairs[key] {
+				continue
+			}
+			adj[a] = append(adj[a], b)
+			adj[b] = append(adj[b], a)
+		}
+
+		// Shuffle adjacency deterministically per team (stable but non-biased)
+		for _, t := range teams {
+			list := adj[t.ID]
+			if len(list) > 1 {
+				shuffle(list, seed+int64(t.ID)*777)
+				adj[t.ID] = list
+			}
+		}
+
+		matchCount := make(map[uint]int, len(teams))
+		used := make(map[[2]uint]bool)
+		matchups := make([][]uint, 0, len(teams))
+
+		progress := true
+		for progress {
+			progress = false
+
+			// Greedy by need: fill the teams with the fewest matches first
+			ordered := make([]uint, 0, len(teams))
+			for _, t := range teams {
+				ordered = append(ordered, t.ID)
+			}
+			shuffle(ordered, seed+int64(len(matchups))*13)
+			// bubble-ish pass to bring low counts forward (small N)
+			for i := 0; i < len(ordered); i++ {
+				for j := i + 1; j < len(ordered); j++ {
+					if matchCount[ordered[j]] < matchCount[ordered[i]] {
+						ordered[i], ordered[j] = ordered[j], ordered[i]
+					}
+				}
+			}
+
+			for _, a := range ordered {
+				if matchCount[a] >= 2 {
+					continue
+				}
+
+				bestB := uint(0)
+				bestScore := 1 << 30
+				for _, b := range adj[a] {
+					if a == b || matchCount[b] >= 2 {
+						continue
+					}
+					key := [2]uint{min(a, b), max(a, b)}
+					if used[key] {
+						continue
+					}
+
+					score := matchCount[b]
+					// Prefer unplayed pairs even when repeats are allowed
+					if playedPairs[key] {
+						score += 10
+					}
+
+					if score < bestScore {
+						bestScore = score
+						bestB = b
+						if score == 0 {
+							break
+						}
+					}
+				}
+
+				if bestB != 0 {
+					key := [2]uint{min(a, bestB), max(a, bestB)}
+					used[key] = true
+					matchups = append(matchups, []uint{a, bestB})
+					matchCount[a]++
+					matchCount[bestB]++
+					progress = true
+				}
+			}
+		}
+
+		complete := true
+		for _, t := range teams {
+			if matchCount[t.ID] != 2 {
+				complete = false
 				break
 			}
 		}
+		return matchups, matchCount, complete
+	}
+
+	// Phase 1: strict round-robin (no repeats at all)
+	phase1, _, ok := buildSchedule(true, true)
+	matchupsU := phase1
+
+	// Phase 2: allow repeats if needed, but avoid last-week repeats
+	if !ok {
+		phase2, _, ok2 := buildSchedule(true, false)
+		matchupsU = phase2
+		ok = ok2
+	}
+
+	// Phase 3: last resort, allow repeats including last week
+	if !ok {
+		phase3, _, _ := buildSchedule(false, false)
+		matchupsU = phase3
+	}
+
+	// Convert back to [2]uint format for existing code paths
+	matchups := make([][2]uint, 0, len(matchupsU))
+	for _, p := range matchupsU {
+		if len(p) != 2 {
+			continue
+		}
+		matchups = append(matchups, [2]uint{p[0], p[1]})
 	}
 
 	// Prepare preview output
