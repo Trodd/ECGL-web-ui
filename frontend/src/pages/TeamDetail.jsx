@@ -5,7 +5,7 @@ import axios from "axios";
 export default function TeamDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const urlBase = import.meta.env.VITE_API_URL;
+  const urlBase = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
   // ───────────────────────────────────────────────
   // 🔹 STATE
@@ -24,6 +24,8 @@ export default function TeamDetail() {
   const [isCaptain, setIsCaptain] = useState(false);
   const [archive, setArchive] = useState([]);
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+  const [me, setMe] = useState(null);
+  const [copiedLogo, setCopiedLogo] = useState(false);
 
   function buildLogoSrc(logoUrl) {
     if (!logoUrl) return "";
@@ -50,6 +52,12 @@ export default function TeamDetail() {
       .get(`${urlBase}/api/settings`, { withCredentials: true })
       .then((res) => setSettings(res.data))
       .catch(() => setSettings(null));
+
+    // Me (caster/mod/etc)
+    axios
+      .get(`${urlBase}/api/me`, { withCredentials: true })
+      .then((res) => setMe(res.data))
+      .catch(() => setMe(null));
 
     // My team + role
     axios
@@ -176,6 +184,25 @@ export default function TeamDetail() {
   if (!team) return <p className="text-light">Loading team...</p>;
 
   const effectiveLogoUrl = team?.logo_url || (team?.id ? `/api/team/logo/${team.id}` : "");
+  const canCopyLogoUrl = !!me?.is_caster || !!me?.is_mod;
+
+  async function handleCopyLogoUrl() {
+    const absolute = buildLogoSrc(effectiveLogoUrl);
+    if (!absolute) return;
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(absolute);
+      } else {
+        window.prompt("Copy team logo URL:", absolute);
+      }
+      setCopiedLogo(true);
+      window.setTimeout(() => setCopiedLogo(false), 1500);
+    } catch (e) {
+      console.error("Failed to copy logo URL", e);
+      window.prompt("Copy team logo URL:", absolute);
+    }
+  }
 
   // ───────────────────────────────────────────────
   // 🔥 CHALLENGE BUTTON VISIBILITY LOGIC
@@ -230,6 +257,17 @@ export default function TeamDetail() {
 
           {/* ⚔️ CHALLENGE CTA */}
           <div className="text-end">
+            {canCopyLogoUrl && effectiveLogoUrl ? (
+              <div className="mb-2">
+                <button
+                  className="btn btn-outline-light btn-sm"
+                  onClick={handleCopyLogoUrl}
+                  type="button"
+                >
+                  {copiedLogo ? "✅ Copied" : "Copy Logo URL"}
+                </button>
+              </div>
+            ) : null}
             {settings?.challenges_enabled ? (
               team.status !== "Active" ? (
                 <span className="text-warning small">
