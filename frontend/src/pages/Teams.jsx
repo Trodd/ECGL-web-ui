@@ -7,13 +7,21 @@ export default function Teams() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [settings, setSettings] = useState(null);
+  const urlBase = import.meta.env.VITE_API_URL || "http://localhost:8080";
+
+  function buildLogoSrc(logoUrl) {
+    if (!logoUrl) return "";
+    const base = String(logoUrl);
+    const absolute = base.startsWith("http://") || base.startsWith("https://");
+    return absolute ? base : `${urlBase}${base}`;
+  }
 
   useEffect(() => {
     axios
-      .get(`${import.meta.env.VITE_API_URL}/api/settings`)
+      .get(`${urlBase}/api/settings`)
       .then(res => setSettings(res.data))
       .catch(() => setSettings({ challenges_enabled: true }));
-  }, []);
+  }, [urlBase]);
 
   useEffect(() => {
     let canceled = false;
@@ -45,7 +53,7 @@ export default function Teams() {
     return () => {
       canceled = true;
     };
-  }, []);
+  }, [urlBase]);
 
   const safeLower = (v) => (typeof v === "string" ? v.toLowerCase() : "");
   const safeIncludes = (haystack, needle) =>
@@ -101,6 +109,16 @@ export default function Teams() {
                   >
                     {/* LEFT — Team Name */}
                     <div className="d-flex align-items-center gap-2 fw-semibold text-light">
+                      <img
+                        src={buildLogoSrc(t?.logo_url || (t?.id ? `/api/team/logo/${t.id}` : ""))}
+                        alt=""
+                        className="rounded border border-secondary"
+                        style={{ width: 40, height: 40, objectFit: "cover" }}
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
+                      />
                       <span>{t.name}</span>
 
                       {/* 🏆 Accepting Challenges */}
