@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import FinalsBracket from "../components/FinalsBracket";
 import FinalsSeedEditor from "../components/FinalsSeedEditor";
-import ConsolePanel from "../components/ConsolePanel";
 
 export default function LeagueMod() {
     const urlBase = import.meta.env.VITE_API_URL;
@@ -2634,13 +2633,15 @@ export default function LeagueMod() {
                             <TeamRenameHistory urlBase={urlBase} />
                         }
                     />
-                    {/*<AccordionItem
+                    <AccordionItem
                         id="console"
-                        title="🖥️ Server Console"
+                        title="🧰 Mod Actions"
                         children={
-                            <ConsolePanel urlBase={urlBase} />
+                            <>
+                                <ModAuditLogPanel urlBase={urlBase} />
+                            </>
                         }
-                    />*/}
+                    />
                 </div>
             </div>
         </div>
@@ -2751,6 +2752,142 @@ function TeamRenameHistory({ urlBase }) {
                                             dateStyle: "medium",
                                             timeStyle: "short",
                                         })}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ModAuditLogPanel({ urlBase }) {
+    const [entries, setEntries] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
+    const [search, setSearch] = useState("");
+    const [actionFilter, setActionFilter] = useState("");
+
+    async function load() {
+        if (!urlBase) return;
+        try {
+            setLoading(true);
+            setError("");
+            const res = await axios.get(`${urlBase}/api/mod/audit-logs?limit=500`, {
+                withCredentials: true,
+            });
+            setEntries(Array.isArray(res.data?.entries) ? res.data.entries : []);
+        } catch (err) {
+            console.error("❌ Failed to load mod audit logs:", err);
+            setError("Failed to load mod action logs.");
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    useEffect(() => {
+        load();
+    }, [urlBase]);
+
+    const actions = Array.from(new Set(entries.map((e) => e.action).filter(Boolean))).sort();
+
+    const filtered = entries.filter((e) => {
+        if (actionFilter && e.action !== actionFilter) return false;
+
+        const haystack = [
+            e.action,
+            e.method,
+            e.request_uri,
+            e.target,
+            e.actor_username,
+            e.actor_id,
+        ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+        const q = search.trim().toLowerCase();
+        if (!q) return true;
+        return haystack.includes(q);
+    });
+
+    return (
+        <div>
+            <h6 className="text-light mb-2">🧰 Mod Action Log (from server console)</h6>
+
+            <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+                <button className="btn btn-outline-secondary btn-sm" onClick={load} disabled={loading}>
+                    {loading ? "Refreshing..." : "Refresh"}
+                </button>
+
+                <select
+                    className="form-select bg-dark text-light"
+                    style={{ maxWidth: 260 }}
+                    value={actionFilter}
+                    onChange={(e) => setActionFilter(e.target.value)}
+                >
+                    <option value="">All actions</option>
+                    {actions.map((a) => (
+                        <option key={a} value={a}>
+                            {a}
+                        </option>
+                    ))}
+                </select>
+
+                <input
+                    type="text"
+                    className="form-control bg-dark text-light"
+                    placeholder="Search (player, team, match, mod, path...)"
+                    style={{ maxWidth: 360 }}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                />
+
+                <button
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={() => {
+                        setSearch("");
+                        setActionFilter("");
+                    }}
+                >
+                    Clear
+                </button>
+            </div>
+
+            {error ? (
+                <div className="alert alert-danger">{error}</div>
+            ) : filtered.length === 0 ? (
+                <p className="text-light">No matching mod actions.</p>
+            ) : (
+                <div className="table-responsive">
+                    <table className="table table-dark table-striped align-middle text-start">
+                        <thead>
+                            <tr>
+                                <th style={{ width: 170 }}>Time</th>
+                                <th style={{ width: 220 }}>Action</th>
+                                <th>Target</th>
+                                <th style={{ width: 220 }}>By</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filtered.map((e, idx) => (
+                                <tr key={idx}>
+                                    <td style={{ whiteSpace: "nowrap" }}>
+                                        {e.time ? new Date(e.time).toLocaleString() : ""}
+                                    </td>
+                                    <td>
+                                        <div>{e.action}</div>
+                                        <div style={{ opacity: 0.7, fontSize: 12 }}>
+                                            {e.method} {e.request_uri}
+                                        </div>
+                                    </td>
+                                    <td style={{ fontFamily: "monospace", fontSize: 13 }}>
+                                        {e.target || ""}
+                                    </td>
+                                    <td>
+                                        {e.actor_username ? `${e.actor_username} (${e.actor_id})` : e.actor_id}
                                     </td>
                                 </tr>
                             ))}

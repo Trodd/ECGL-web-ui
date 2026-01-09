@@ -1642,14 +1642,14 @@ func HandleUploadTeamLogo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	SendDiscordLog(
+	/*SendDiscordLog(
 		fmt.Sprintf(
 			"🖼️ **Team Logo Updated:** **%s** (Team #%d) by <@%d>",
 			team.Name,
 			team.ID,
 			playerID,
 		),
-	)
+	)*/
 
 	respondJSON(w, map[string]any{
 		"success":      true,
@@ -2856,6 +2856,311 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- Require League Mod via Discord Role ---
+func modActionLabel(r *http.Request) string {
+	path := r.URL.Path
+	method := r.Method
+
+	switch {
+	// Matches
+	case method == http.MethodPost && path == "/api/mod/match/reset":
+		return "Match Reset"
+	case method == http.MethodPost && path == "/api/mod/match/reset-schedule":
+		return "Reset Match Schedule"
+	case method == http.MethodPost && path == "/api/mod/match/forfeit":
+		return "Match Forfeit"
+	case method == http.MethodPost && path == "/api/mod/match/double-forfeit":
+		return "Match Double Forfeit"
+	case method == http.MethodDelete && path == "/api/mod/match":
+		return "Delete Match"
+	case method == http.MethodPost && path == "/api/mod/match/add":
+		return "Add Match"
+	case method == http.MethodPost && path == "/api/mod/match/set-maps":
+		return "Set Match Maps"
+	case method == http.MethodPost && path == "/api/mod/match/delete":
+		return "Delete Match (POST)"
+	case method == http.MethodPost && path == "/api/mod/match/schedule":
+		return "Force Schedule Match"
+	case method == http.MethodPost && path == "/api/mod/match/edit-score":
+		return "Edit Match Score"
+	case method == http.MethodPost && path == "/api/mod/matches/generate":
+		return "Generate Weekly Matches"
+	case method == http.MethodGet && path == "/api/mod/matches/preview":
+		return "Preview Weekly Matches"
+	case method == http.MethodPost && path == "/api/mod/matches/clear-week":
+		return "Clear Week Matches"
+
+	// Teams
+	case method == http.MethodPost && path == "/api/mod/team/set-active":
+		return "Set Team Active"
+	case method == http.MethodPost && path == "/api/mod/teams/set-all-active":
+		return "Set All Teams Active"
+	case method == http.MethodPost && path == "/api/mod/team/set-inactive":
+		return "Set Team Inactive"
+	case method == http.MethodPost && path == "/api/mod/teams/set-all-inactive":
+		return "Set All Teams Inactive"
+	case method == http.MethodPost && path == "/api/mod/team/rename":
+		return "Rename Team"
+	case method == http.MethodPost && path == "/api/mod/team/adjust-rating":
+		return "Adjust Team Rating"
+	case method == http.MethodPost && path == "/api/mod/team/disband":
+		return "Disband Team"
+	case method == http.MethodPost && path == "/api/mod/team/delete":
+		return "Delete Team"
+	case method == http.MethodGet && path == "/api/mod/team/history":
+		return "View Team Rename History"
+	case method == http.MethodPost && path == "/api/mod/team/add-player":
+		return "Add Player To Team"
+	case method == http.MethodPost && path == "/api/mod/team/adjust-stats":
+		return "Adjust Team Stats"
+	case method == http.MethodGet && path == "/api/mod/team/stats":
+		return "Get Team Stats"
+	case method == http.MethodGet && path == "/api/mod/team/members":
+		return "Get Team Members"
+	case method == http.MethodPost && path == "/api/mod/team/set-role":
+		return "Set Team Member Role"
+	case method == http.MethodPost && path == "/api/mod/team/promote-captain":
+		return "Promote To Captain"
+	case method == http.MethodPost && path == "/api/mod/team/lock":
+		return "Lock/Unlock Team"
+
+	// Players
+	case method == http.MethodPost && path == "/api/mod/player/kick":
+		return "Kick Player"
+	case method == http.MethodPost && path == "/api/mod/player/ban":
+		return "Ban Player"
+	case method == http.MethodPost && path == "/api/mod/player/unban":
+		return "Unban Player"
+	case method == http.MethodPost && path == "/api/mod/player/adjust-stats":
+		return "Adjust Player Stats"
+	case method == http.MethodGet && path == "/api/mod/player/stats":
+		return "Get Player Stats"
+	case method == http.MethodPost && path == "/api/mod/player/remove-cooldown":
+		return "Remove Player Cooldown"
+	case method == http.MethodPost && path == "/api/mod/player/archive-all":
+		return "Archive All Players"
+
+	// League settings / tools
+	case method == http.MethodPost && path == "/api/mod/leaderboard/reset":
+		return "Reset Team Leaderboard"
+	case method == http.MethodPost && path == "/api/mod/reset_player_leaderboard":
+		return "Reset Player Leaderboard"
+	case method == http.MethodPost && path == "/api/mod/season/archive":
+		return "Archive Season"
+	case method == http.MethodPost && path == "/api/mod/roster/lock-all":
+		return "Lock All Rosters"
+	case method == http.MethodPost && path == "/api/mod/roster/unlock-all":
+		return "Unlock All Rosters"
+	case method == http.MethodGet && path == "/api/mod/roster/status":
+		return "Get Roster Lock Status"
+	case method == http.MethodPost && path == "/api/mod/sync-roles":
+		return "Sync Discord Roles"
+	case method == http.MethodPost && path == "/api/mod/challenges/enable":
+		return "Enable Global Challenges"
+	case method == http.MethodPost && path == "/api/mod/challenges/disable":
+		return "Disable Global Challenges"
+
+	// Finals
+	case method == http.MethodPost && path == "/api/mod/finals/archive":
+		return "Archive Finals"
+	case method == http.MethodPost && path == "/api/mod/finals/add-team":
+		return "Finals: Add Team"
+	case method == http.MethodPost && path == "/api/mod/finals/remove-team":
+		return "Finals: Remove Team"
+	case method == http.MethodPost && path == "/api/mod/finals/generate":
+		return "Finals: Generate Bracket"
+	case method == http.MethodPost && path == "/api/mod/finals/reset":
+		return "Finals: Reset"
+	case method == http.MethodPost && path == "/api/mod/finals/update-match":
+		return "Finals: Update Match"
+	case method == http.MethodPost && path == "/api/mod/finals/clear-bracket-view":
+		return "Finals: Clear Bracket View"
+	case method == http.MethodPost && path == "/api/mod/finals/set-seeds":
+		return "Finals: Update Seeds"
+	}
+
+	if strings.HasPrefix(path, "/api/mod/") {
+		return "Mod Action: " + strings.TrimPrefix(path, "/api/mod/")
+	}
+	return "Mod Action"
+}
+
+func modTargetSummary(r *http.Request) string {
+	add := func(parts []string, s string) []string {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return parts
+		}
+		return append(parts, s)
+	}
+
+	// Collect common targets from query string first (GET endpoints)
+	parts := []string{}
+	q := r.URL.Query()
+	path := strings.TrimSpace(r.URL.Path)
+
+	// Some older endpoints use ?id= for team/player.
+	idParam := strings.TrimSpace(q.Get("id"))
+
+	teamIDStr := strings.TrimSpace(q.Get("team_id"))
+	playerIDStr := strings.TrimSpace(q.Get("player_id"))
+	matchIDStr := strings.TrimSpace(q.Get("match_id"))
+	seasonStr := strings.TrimSpace(q.Get("season"))
+	weekStr := strings.TrimSpace(q.Get("week"))
+
+	if idParam != "" {
+		// Heuristic mapping of ?id=
+		if teamIDStr == "" && (strings.Contains(path, "/team/") || strings.Contains(path, "/teams/")) {
+			teamIDStr = idParam
+		} else if playerIDStr == "" && strings.Contains(path, "/player/") {
+			playerIDStr = idParam
+		} else {
+			parts = add(parts, "id="+idParam)
+		}
+	}
+
+	// season/week are appended later after body/query normalization
+
+	// For JSON-body endpoints, peek body and restore it for the handler.
+	if r.Body == nil {
+		return strings.Join(parts, " ")
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		// Best effort: restore empty body and return what we have.
+		r.Body = io.NopCloser(bytes.NewReader(nil))
+		return strings.Join(parts, " ")
+	}
+	// Restore body for downstream handler.
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	if len(bytes.TrimSpace(bodyBytes)) == 0 {
+		return strings.Join(parts, " ")
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(bodyBytes, &m); err != nil {
+		return strings.Join(parts, " ")
+	}
+
+	getString := func(key string) string {
+		v, ok := m[key]
+		if !ok || v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case string:
+			return strings.TrimSpace(t)
+		case float64:
+			if t == 0 {
+				return ""
+			}
+			return fmt.Sprintf("%.0f", t)
+		case json.Number:
+			return strings.TrimSpace(t.String())
+		default:
+			return ""
+		}
+	}
+
+	// Common body targets
+	if playerIDStr == "" {
+		playerIDStr = getString("player_id")
+	}
+	if teamIDStr == "" {
+		teamIDStr = getString("team_id")
+	}
+	if matchIDStr == "" {
+		matchIDStr = getString("match_id")
+	}
+	if v := getString("challenge_id"); v != "" {
+		parts = add(parts, "challenge_id="+v)
+	}
+	if seasonStr == "" {
+		seasonStr = getString("season")
+	}
+	if weekStr == "" {
+		weekStr = getString("week")
+	}
+	if seasonStr != "" {
+		parts = add(parts, "season="+seasonStr)
+	}
+	if weekStr != "" {
+		parts = add(parts, "week="+weekStr)
+	}
+
+	// Useful “what changed” hints
+	if v := getString("new_name"); v != "" {
+		parts = add(parts, "new_name=\""+v+"\"")
+	}
+	if v := getString("reason"); v != "" {
+		parts = add(parts, "reason=\""+v+"\"")
+	}
+	if v := getString("enabled"); v != "" {
+		parts = add(parts, "enabled="+v)
+	}
+	if v := getString("scope"); v != "" {
+		parts = add(parts, "scope="+v)
+	}
+
+	// Enrich common IDs with names (best-effort)
+	if playerIDStr != "" {
+		pid, err := strconv.ParseInt(playerIDStr, 10, 64)
+		if err == nil && pid != 0 {
+			var p Player
+			if err := DB.Select("display_name, username").First(&p, "id = ?", pid).Error; err == nil {
+				display := strings.TrimSpace(p.DisplayName)
+				if display == "" {
+					display = strings.TrimSpace(p.Username)
+				}
+				if display != "" {
+					parts = add(parts, fmt.Sprintf("player=<@%d> (%s)", pid, display))
+				} else {
+					parts = add(parts, fmt.Sprintf("player=<@%d>", pid))
+				}
+			} else {
+				parts = add(parts, fmt.Sprintf("player=<@%d>", pid))
+			}
+		}
+	}
+
+	if teamIDStr != "" {
+		tid, err := strconv.ParseUint(teamIDStr, 10, 64)
+		if err == nil && tid != 0 {
+			var t Team
+			if err := DB.Select("name").First(&t, "id = ?", uint(tid)).Error; err == nil {
+				name := strings.TrimSpace(t.Name)
+				if name != "" {
+					parts = add(parts, fmt.Sprintf("team=\"%s\"(#%d)", name, tid))
+				} else {
+					parts = add(parts, fmt.Sprintf("team_id=%d", tid))
+				}
+			} else {
+				parts = add(parts, fmt.Sprintf("team_id=%d", tid))
+			}
+		}
+	}
+
+	if matchIDStr != "" {
+		mid, err := strconv.ParseUint(matchIDStr, 10, 64)
+		if err == nil && mid != 0 {
+			var mMatch Match
+			if err := DB.Select("match_code, team_a_id, team_b_id").First(&mMatch, "id = ?", uint(mid)).Error; err == nil {
+				mc := strings.TrimSpace(mMatch.MatchCode)
+				if mc != "" {
+					parts = add(parts, fmt.Sprintf("match=%s(#%d)", mc, mid))
+				} else {
+					parts = add(parts, fmt.Sprintf("match_id=%d", mid))
+				}
+			} else {
+				parts = add(parts, fmt.Sprintf("match_id=%d", mid))
+			}
+		}
+	}
+
+	return strings.Join(parts, " ")
+}
+
 func requireLeagueMod(w http.ResponseWriter, r *http.Request) (string, bool) {
 	session, _ := store.Get(r, "session")
 	discordID, ok := session.Values["discord_id"].(string)
@@ -2913,7 +3218,38 @@ func requireLeagueMod(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 	for _, role := range member.Roles {
 		if role == modRoleID {
-			//log.Printf("✅ League Mod verified for %s", discordID)
+			// Don't record audit entries for viewing the audit log itself.
+			if r.Method == http.MethodGet && r.URL.Path == "/api/mod/audit-logs" {
+				return discordID, true
+			}
+			// Console audit log for *all* mod actions (even those without Discord logs)
+			// Use RequestURI to include query string when present.
+			username := strings.TrimSpace(member.User.Username)
+			action := modActionLabel(r)
+			target := modTargetSummary(r)
+			RecordModAudit(ModAuditEntry{
+				Time:          time.Now(),
+				Action:        action,
+				Method:        r.Method,
+				Path:          r.URL.Path,
+				RequestURI:    r.URL.RequestURI(),
+				Target:        target,
+				ActorID:       discordID,
+				ActorUsername: username,
+			})
+			if username != "" {
+				if target != "" {
+					log.Printf("🧰 [MOD] %s — %s %s — %s (by %s / %s)", action, r.Method, r.URL.RequestURI(), target, username, discordID)
+				} else {
+					log.Printf("🧰 [MOD] %s — %s %s (by %s / %s)", action, r.Method, r.URL.RequestURI(), username, discordID)
+				}
+			} else {
+				if target != "" {
+					log.Printf("🧰 [MOD] %s — %s %s — %s (by %s)", action, r.Method, r.URL.RequestURI(), target, discordID)
+				} else {
+					log.Printf("🧰 [MOD] %s — %s %s (by %s)", action, r.Method, r.URL.RequestURI(), discordID)
+				}
+			}
 			return discordID, true
 		}
 	}
@@ -3313,7 +3649,7 @@ func ModPlayerBan(w http.ResponseWriter, r *http.Request) {
 	DB.Where("player_id = ?", p.ID).Delete(&TeamMember{})
 
 	// ⭐ MOD LOG — Ban
-	LogGeneral(
+	/*LogGeneral(
 		fmt.Sprintf(
 			"⛔ **Player Banned:** <@%d>%s",
 			p.ID,
@@ -3324,7 +3660,7 @@ func ModPlayerBan(w http.ResponseWriter, r *http.Request) {
 				return ""
 			}(),
 		),
-	)
+	)*/
 
 	respondJSON(w, map[string]any{
 		"success":   true,
@@ -6108,6 +6444,10 @@ func HandleDeleteCast(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/mod/team/adjust-stats
 func HandleModAdjustTeamStats(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
 	var req struct {
 		TeamID  uint `json:"team_id"`
 		Rating  int  `json:"rating"`
@@ -6145,6 +6485,10 @@ func HandleModAdjustTeamStats(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/mod/player/adjust-stats
 func HandleModAdjustPlayerStats(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
 	var req struct {
 		PlayerID string `json:"player_id"`
 		Rating   int    `json:"rating"`
@@ -6193,6 +6537,10 @@ func HandleModAdjustPlayerStats(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/mod/player/stats?id=123
 func HandleModGetPlayerStats(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
 	idStr := r.URL.Query().Get("id")
 	if idStr == "" {
 		http.Error(w, "Missing player ID", http.StatusBadRequest)
@@ -6222,6 +6570,10 @@ func HandleModGetPlayerStats(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/mod/team/stats?id=123
 func HandleModGetTeamStats(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
 	idStr := r.URL.Query().Get("id")
 	if idStr == "" {
 		http.Error(w, "Missing team ID", http.StatusBadRequest)
@@ -6251,6 +6603,10 @@ func HandleModGetTeamStats(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/mod/team/members?id=123
 func HandleModGetTeamMembers(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
 	idStr := r.URL.Query().Get("id")
 	if idStr == "" {
 		http.Error(w, "Missing team ID", http.StatusBadRequest)
@@ -6298,6 +6654,10 @@ func HandleModGetTeamMembers(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/mod/team/set-role
 func HandleModSetTeamRole(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
 	type Body struct {
 		TeamID   uint   `json:"team_id"`
 		PlayerID string `json:"player_id"`
@@ -6358,6 +6718,10 @@ func HandleModSetTeamRole(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/mod/team/promote-captain
 func HandleModPromoteToCaptain(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
 	type Body struct {
 		TeamID   uint   `json:"team_id"`
 		PlayerID string `json:"player_id"`
@@ -6442,6 +6806,10 @@ func HandleModPromoteToCaptain(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/mod/match/reset-schedule
 func ModResetMatchSchedule(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
 	type Body struct {
 		MatchID uint `json:"match_id"`
 	}
@@ -6507,6 +6875,10 @@ func ModResetMatchSchedule(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/mod/team/lock
 func HandleModToggleTeamLock(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
 	var req struct {
 		TeamID uint `json:"team_id"`
 	}

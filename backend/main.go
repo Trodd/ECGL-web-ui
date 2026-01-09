@@ -679,6 +679,7 @@ func main() {
 	r.HandleFunc("/api/season/calendar", HandleGetSeasonCalendar).Methods("GET")
 
 	// League Mod routes (all requireLeagueMod inside handlers)
+	r.HandleFunc("/api/mod/audit-logs", HandleModAuditLogs).Methods("GET")
 	r.HandleFunc("/api/mod/match/reset", ModMatchReset).Methods("POST")
 	r.HandleFunc("/api/mod/match/reset-schedule", ModResetMatchSchedule).Methods("POST")
 	r.HandleFunc("/api/mod/match/forfeit", ModMatchForfeit).Methods("POST")

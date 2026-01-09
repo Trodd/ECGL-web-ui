@@ -21,6 +21,14 @@ import (
 func SendDiscordChannelLog(channelID, msg string) {
 	botToken := os.Getenv("DISCORD_BOT_TOKEN")
 
+	// Always log to local console as well, so Discord-logged actions are visible
+	// even when Discord logging is disabled/misconfigured.
+	if channelID == "" {
+		log.Printf("📣 [DISCORD] (no channel) %s", msg)
+	} else {
+		log.Printf("📣 [DISCORD][channel:%s] %s", channelID, msg)
+	}
+
 	if channelID == "" || botToken == "" {
 		log.Println("⚠️ Discord logging disabled (missing channel ID or bot token)")
 		return
