@@ -404,66 +404,13 @@ body {
 }
 
 /* ============================================================
-   📱 FINAL FIX — FORCE .nav-tabs TO BE A BOTTOM SCROLL NAV
+   📱 Mobile: main nav is now offcanvas
+   (Keep any remaining .ecgl-tabs tweaks scoped only)
    ============================================================ */
 @media (max-width: 768px) {
 
-  /* Completely override ALL earlier nav-tabs settings */
-  .nav-tabs {
-    position: fixed !important;
-    top: auto !important;
-    bottom: 0 !important;
-
-    left: 0 !important;
-    right: 0 !important;
-    width: 100% !important;
-    height: auto !important;
-    max-height: none !important;
-    flex: 0 0 auto !important;
-
-    display: flex !important;
-    flex-wrap: nowrap !important;
-
-    overflow-x: auto !important;
-    overflow-y: hidden !important;
-    white-space: nowrap !important;
-
-    padding: 12px 15px calc(env(safe-area-inset-bottom) + 12px) !important;
-    margin: 0 !important;
-
-    background-color: #000 !important;
-    border-top: 2px solid #3b6ea5 !important;
-    border-bottom: none !important;
-
-    z-index: 9999 !important;
-  }
-
-  .nav-tabs::-webkit-scrollbar {
-    display: none !important;
-  }
-
-  /* Each tab behaves like a pill */
-  .nav-tabs .nav-item {
-    flex: 0 0 auto !important;
-    margin: 0 6px !important;
-    text-align: center !important;
-  }
-
-  /* Bigger clickable area */
-  .nav-tabs .nav-link {
-    border-radius: 12px !important;
-    padding: 14px 18px !important;
-    font-size: 1rem !important;
-  }
-
-  .nav-tabs .nav-link.active {
-    border-radius: 14px !important;
-    box-shadow: 0 0 12px #7a2bc2aa !important;
-  }
-
-  /* Push content above bottom nav */
-  body {
-    padding-bottom: calc(90px + env(safe-area-inset-bottom)) !important;
+  .ecgl-tabs {
+    position: static !important;
   }
 }
 

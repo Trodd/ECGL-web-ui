@@ -310,7 +310,7 @@ export default function TeamDetail() {
         <h4 className="mb-3">👥 Roster</h4>
 
         {roster.some(p => p.on_cooldown) && (
-          <div className="alert alert-warning small py-2">
+          <div className="alert alert-warning text-dark small py-2">
             ⏳ Players on cooldown cannot participate in matches yet.
           </div>
         )}

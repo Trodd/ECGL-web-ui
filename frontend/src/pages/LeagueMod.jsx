@@ -83,6 +83,7 @@ export default function LeagueMod() {
     const [teamLosses, setTeamLosses] = useState("");
     const [teamGames, setTeamGames] = useState("");
     const [activeTab, setActiveTab] = useState("info");
+    const [modTab, setModTab] = useState("weeklyMatches");
     const isRole = (m, role) =>
         m.role?.toLowerCase() === role.toLowerCase();
 
@@ -706,12 +707,35 @@ export default function LeagueMod() {
                     </div>
                 )}
 
-                <div className="accordion" id="modAccordion">
-                    {/* 🗓️ WEEKLY MATCH MANAGEMENT */}
-                    <AccordionItem
-                        id="weeklyMatches"
-                        title="🗓️ Weekly Match Management"
-                        children={
+                <div className="card bg-dark border-secondary shadow-sm">
+                    <div className="card-header bg-dark border-secondary pb-0">
+                        <ul className="nav nav-tabs card-header-tabs flex-wrap">
+                            {[
+                                { key: "weeklyMatches", label: "🗓️ Weekly" },
+                                { key: "matchTools", label: "🏁 Matches" },
+                                { key: "scoreTools", label: "🧾 Scores" },
+                                { key: "teamTools", label: "👥 Teams" },
+                                { key: "playerTools", label: "🚫 Players" },
+                                { key: "dataTools", label: "📦 Data" },
+                                { key: "finalsManagement", label: "🏆 Finals" },
+                                { key: "teamHistory", label: "📜 Rename Logs" },
+                                { key: "console", label: "🧰 Actions" },
+                            ].map((t) => (
+                                <li className="nav-item" key={t.key}>
+                                    <button
+                                        type="button"
+                                        className={`nav-link ${modTab === t.key ? "active" : ""}`}
+                                        onClick={() => setModTab(t.key)}
+                                        style={{ whiteSpace: "nowrap" }}
+                                    >
+                                        {t.label}
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                    <div className="card-body">
+                        {modTab === "weeklyMatches" && (
                             <>
                                 <h6 className="mb-3">📅 Generate or Clear Weekly Matchups</h6>
 
@@ -1049,13 +1073,8 @@ export default function LeagueMod() {
                                     </div>
                                 </div>
                             </>
-                        }
-                    />
-                    {/* 🏁 MATCH TOOLS */}
-                    <AccordionItem
-                        id="matchTools"
-                        title="🏁 Match Tools"
-                        children={
+                        )}
+                        {modTab === "matchTools" && (
                             <>
                                 <div
                                     className="p-3 rounded mb-3"
@@ -1208,14 +1227,9 @@ export default function LeagueMod() {
                                     </div>
                                 </div>
                             </>
-                        }
-                    />
+                        )}
 
-                    {/* 🧾 SCORE TOOLS */}
-                    <AccordionItem
-                        id="scoreTools"
-                        title="🧾 Score Tools"
-                        children={
+                        {modTab === "scoreTools" && (
                             <>
                                 <input
                                     type="text"
@@ -1372,14 +1386,9 @@ export default function LeagueMod() {
                                     );
                                 })()}
                             </>
-                        }
-                    />
+                        )}
 
-                    {/* 👥 TEAM TOOLS */}
-                    <AccordionItem
-                        id="teamTools"
-                        title="👥 Team Tools"
-                        children={
+                        {modTab === "teamTools" && (
                             <div className="bg-black text-light p-3 rounded-3 border border-secondary">
                                 {/* 🔧 TEAM TOOLS — TABBED SYSTEM */}
                                 <div className="bg-black text-light p-3 rounded border border-secondary">
@@ -1975,14 +1984,9 @@ export default function LeagueMod() {
                                     </div>
                                 </div>
                             </div>
-                        }
-                    />
+                        )}
 
-                    {/* 🚫 PLAYER TOOLS */}
-                    <AccordionItem
-                        id="playerTools"
-                        title="🚫 Player Tools"
-                        children={
+                        {modTab === "playerTools" && (
                             <div className="bg-black text-light p-3 rounded-3 border border-secondary">
                                 {/* === Player Search & Lookup === */}
                                 <div
@@ -2283,14 +2287,9 @@ export default function LeagueMod() {
                                     )}
                                 </div>
                             </div>
-                        }
-                    />
+                        )}
 
-                    {/* 📦 DATA TOOLS */}
-                    <AccordionItem
-                        id="dataTools"
-                        title="📦 Data Tools"
-                        children={
+                        {modTab === "dataTools" && (
                             <div className="d-flex flex-wrap gap-2">
 
                                 <button
@@ -2373,13 +2372,8 @@ export default function LeagueMod() {
                                 </button>
 
                             </div>
-                        }
-                    />
-                    {/* 🏆 FINALS MANAGEMENT */}
-                    <AccordionItem
-                        id="finalsManagement"
-                        title="🏆 Finals Setup & Bracket Tools"
-                        children={
+                        )}
+                        {modTab === "finalsManagement" && (
                             <div className="text-light">
 
                                 {/* STATUS MESSAGE */}
@@ -2623,47 +2617,11 @@ export default function LeagueMod() {
                                 </div>
 
                             </div>
-                        }
-                    />
-                    {/* 📜 TEAM HISTORY */}
-                    <AccordionItem
-                        id="teamHistory"
-                        title="📜 Team Rename Logs"
-                        children={
-                            <TeamRenameHistory urlBase={urlBase} />
-                        }
-                    />
-                    <AccordionItem
-                        id="console"
-                        title="🧰 Mod Actions"
-                        children={
-                            <>
-                                <ModAuditLogPanel urlBase={urlBase} />
-                            </>
-                        }
-                    />
+                        )}
+                        {modTab === "teamHistory" && <TeamRenameHistory urlBase={urlBase} />}
+                        {modTab === "console" && <ModAuditLogPanel urlBase={urlBase} />}
+                    </div>
                 </div>
-            </div>
-        </div>
-    );
-}
-
-// --- Accordion Helper ---
-function AccordionItem({ id, title, children }) {
-    return (
-        <div className="accordion-item bg-dark text-light border-secondary">
-            <h2 className="accordion-header" id={`${id}-header`}>
-                <button
-                    className="accordion-button collapsed bg-dark text-light"
-                    type="button"
-                    data-bs-toggle="collapse"
-                    data-bs-target={`#${id}`}
-                >
-                    {title}
-                </button>
-            </h2>
-            <div id={id} className="accordion-collapse collapse" data-bs-parent="#modAccordion">
-                <div className="accordion-body">{children}</div>
             </div>
         </div>
     );
