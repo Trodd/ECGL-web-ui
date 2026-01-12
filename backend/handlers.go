@@ -5095,14 +5095,14 @@ func ModGetTeamHistory(w http.ResponseWriter, r *http.Request) {
 		TeamID    uint      `json:"team_id"`
 		OldName   string    `json:"old_name"`
 		NewName   string    `json:"new_name"`
-		ChangedBy int64     `json:"changed_by"`
+		ChangedBy string    `json:"changed_by"`
 		ChangedAt time.Time `json:"changed_at"`
 		Changer   string    `json:"changer"` // username if available
 	}
 
 	query := `
 		SELECT 
-			th.id, th.team_id, th.old_name, th.new_name, th.changed_by, th.changed_at,
+			th.id, th.team_id, th.old_name, th.new_name, CAST(th.changed_by AS TEXT) AS changed_by, th.changed_at,
 			COALESCE(p.display_name, p.username, 'Unknown') AS changer
 		FROM team_history th
 		LEFT JOIN players p ON p.id = th.changed_by

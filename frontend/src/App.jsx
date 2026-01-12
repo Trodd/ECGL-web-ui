@@ -26,6 +26,22 @@ function App() {
   const [showFinals, setShowFinals] = useState(false);
   const [loadingUser, setLoadingUser] = useState(true);
 
+  useEffect(() => {
+    function updateHeaderHeightVar() {
+      const headerEl = document.querySelector(".ecgl-header");
+      if (!headerEl) return;
+      const h = Math.ceil(headerEl.getBoundingClientRect().height);
+      document.documentElement.style.setProperty("--ecgl-header-height", `${h}px`);
+    }
+
+    const raf = window.requestAnimationFrame(updateHeaderHeightVar);
+    window.addEventListener("resize", updateHeaderHeightVar);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", updateHeaderHeightVar);
+    };
+  }, [season]);
+
   function getMobileNavElement() {
     return document.getElementById("mobileMainNav");
   }
@@ -108,7 +124,7 @@ function App() {
       const dy = t.clientY - startY;
 
       // Decide direction after a small movement threshold.
-      if (Math.abs(dx) < 18 && Math.abs(dy) < 18) return;
+      if (Math.abs(dx) < 14 && Math.abs(dy) < 14) return;
       decided = true;
       horizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
     }
@@ -127,7 +143,8 @@ function App() {
       // Only treat as a nav gesture when strongly horizontal.
       const isHorizontalGesture = horizontal || Math.abs(dx) > Math.abs(dy) * 1.2;
       if (!isHorizontalGesture) return;
-      if (Math.abs(dx) < 80) return;
+      // Shorter swipe distance for mobile comfort.
+      if (Math.abs(dx) < 55) return;
 
       if (!isMobileNavOpen() && dx > 0) {
         openMobileNav();
@@ -190,19 +207,19 @@ function App() {
       {/* === Header === */}
       <header className="ecgl-header text-center">
         <div className="d-flex align-items-center justify-content-between">
-          <div style={{ width: 44 }} className="d-md-none" />
-          <div className="flex-grow-1">
-            <h1 className="m-0">⚡ Echo Combat George League</h1>
-          </div>
           <button
             type="button"
-            className="btn btn-outline-light btn-sm d-md-none"
+            className="btn btn-outline-light btn-sm d-md-none ecgl-mobile-nav-trigger"
             aria-controls="mobileMainNav"
             aria-label="Open navigation"
             onClick={openMobileNav}
           >
             ☰
           </button>
+          <div className="flex-grow-1">
+            <h1 className="m-0">⚡ Echo Combat George League</h1>
+          </div>
+          <div style={{ width: 44 }} className="d-md-none" />
         </div>
         <p className="season-text">
           📅 {season !== "" ? `Season ${season}` : "Loading..."}
@@ -306,17 +323,17 @@ function App() {
               </button>
             )}
 
-            <div className="mt-3" />
+            <div className="mt-2" />
             {user ? (
               <a
-                className="btn btn-outline-light w-100"
+                className="list-group-item list-group-item-action bg-dark text-light"
                 href={`${import.meta.env.VITE_API_URL}/logout`}
               >
                 🚪 Logout {user.display_name || user.username}
               </a>
             ) : (
               <a
-                className="btn btn-outline-light w-100"
+                className="list-group-item list-group-item-action bg-dark text-light"
                 href={`${import.meta.env.VITE_API_URL}/login`}
               >
                 🔑 Login
@@ -326,116 +343,154 @@ function App() {
         </div>
       </div>
 
-      {/* === Desktop navbar tabs === */}
-      <ul className="ecgl-tabs nav nav-tabs d-none d-md-flex">
-        <li className="nav-item">
-          <NavLink to="/" end className="nav-link">
-            🏠 Home
-          </NavLink>
-        </li>
-
-        {user && (
-          <>
-            <li className="nav-item">
-              <NavLink to="/register" className="nav-link">
-                📝 Register
-              </NavLink>
-            </li>
-            <li className="nav-item">
-              <NavLink to="/myteam" className="nav-link">
-                🧑 My Team
-              </NavLink>
-            </li>
-          </>
-        )}
-
-        <li className="nav-item">
-          <NavLink to="/players" className="nav-link">
-            📋 Players
-          </NavLink>
-        </li>
-
-        <li className="nav-item">
-          <NavLink to="/teams" className="nav-link">
-            👥 Teams
-          </NavLink>
-        </li>
-
-        {showFinals && (
-          <li className="nav-item">
-            <NavLink to="/finals" className="nav-link">
-              🏆 Finals
-            </NavLink>
-          </li>
-        )}
-
-        <li className="nav-item">
-          <NavLink to="/matchups" className="nav-link">
-            📅 Matchups
-          </NavLink>
-        </li>
-
-        <li className="nav-item">
-          <NavLink to="/leaderboard" className="nav-link">
-            🏆 Leaderboard
-          </NavLink>
-        </li>
-
-        {/*<li className="nav-item">
-          <NavLink to="/finals" className="nav-link">
-            🏁 Finals
-          </NavLink>
-        </li>*/}
-
-        {/* 🔒 League Mod tab only visible to League Mods */}
-        {!loadingUser && user?.is_mod && (
-          <li className="nav-item">
-            <NavLink to="/modpanel" className="nav-link">
-              🛠️ League Mod
-            </NavLink>
-          </li>
-        )}
-
-        {/* 🚪 Login/Logout (always far right) */}
-        <li className="nav-item ms-auto">
-          {user ? (
-            <a
-              className="nav-link"
-              href={`${import.meta.env.VITE_API_URL}/logout`}
+      <div className="ecgl-shell">
+        {/* === Desktop sidebar nav === */}
+        <aside className="ecgl-side-nav d-none d-md-flex flex-column">
+          <div className="list-group list-group-flush">
+            <NavLink
+              to="/"
+              end
+              className={({ isActive }) =>
+                `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                }`
+              }
             >
-              🚪 Logout {user.display_name || user.username}
-            </a>
-          ) : (
-            <a
-              className="nav-link"
-              href={`${import.meta.env.VITE_API_URL}/login`}
+              🏠 Home
+            </NavLink>
+
+            {user && (
+              <>
+                <NavLink
+                  to="/register"
+                  className={({ isActive }) =>
+                    `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                    }`
+                  }
+                >
+                  📝 Register
+                </NavLink>
+                <NavLink
+                  to="/myteam"
+                  className={({ isActive }) =>
+                    `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                    }`
+                  }
+                >
+                  🧑 My Team
+                </NavLink>
+              </>
+            )}
+
+            <NavLink
+              to="/players"
+              className={({ isActive }) =>
+                `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                }`
+              }
             >
-              🔑 Login
-            </a>
-          )}
-        </li>
-      </ul>
+              📋 Players
+            </NavLink>
 
-      {/* === Page Content === */}
-      <div className="page-content">
-        <ErrorBoundary>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/teams" element={<Teams />} />
-            <Route path="/teams/:id" element={<TeamDetail />} />
-            <Route path="/matchups" element={<Matchups />} />
-            <Route path="/match/:id" element={<MatchDetail />} />
-            <Route path="/leaderboard" element={<Leaderboard />} />
-            <Route path="/myteam" element={<MyTeam />} />
-            <Route path="/players" element={<Players />} />
-            <Route path="/players/:id" element={<PlayerDetail />} />
-            <Route path="/finals" element={<Finals />} />
+            <NavLink
+              to="/teams"
+              className={({ isActive }) =>
+                `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                }`
+              }
+            >
+              👥 Teams
+            </NavLink>
 
-            {/* 🛠️ League Mod Route (extra protected inside component) */}
-            <Route path="/modpanel" element={<LeagueMod />} />
-          </Routes>
-        </ErrorBoundary>
+            {showFinals && (
+              <NavLink
+                to="/finals"
+                className={({ isActive }) =>
+                  `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                  }`
+                }
+              >
+                🏆 Finals
+              </NavLink>
+            )}
+
+            <NavLink
+              to="/matchups"
+              className={({ isActive }) =>
+                `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                }`
+              }
+            >
+              📅 Matchups
+            </NavLink>
+
+            <NavLink
+              to="/leaderboard"
+              className={({ isActive }) =>
+                `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                }`
+              }
+            >
+              🏆 Leaderboard
+            </NavLink>
+
+            {!loadingUser && user?.is_mod && (
+              <NavLink
+                to="/modpanel"
+                className={({ isActive }) =>
+                  `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                  }`
+                }
+              >
+                🛠️ League Mod
+              </NavLink>
+            )}
+          </div>
+
+          <div className="mt-auto pt-2">
+            {user && (
+              <div className="ecgl-side-user small text-light px-2 pb-2">
+                Signed in as {user.display_name || user.username}
+              </div>
+            )}
+            {user ? (
+              <a
+                className="list-group-item list-group-item-action ecgl-side-link ecgl-side-auth"
+                href={`${import.meta.env.VITE_API_URL}/logout`}
+              >
+                🚪 Logout
+              </a>
+            ) : (
+              <a
+                className="list-group-item list-group-item-action ecgl-side-link ecgl-side-auth"
+                href={`${import.meta.env.VITE_API_URL}/login`}
+              >
+                🔑 Login
+              </a>
+            )}
+          </div>
+        </aside>
+
+        {/* === Page Content === */}
+        <div className="page-content ecgl-content">
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/teams" element={<Teams />} />
+              <Route path="/teams/:id" element={<TeamDetail />} />
+              <Route path="/matchups" element={<Matchups />} />
+              <Route path="/match/:id" element={<MatchDetail />} />
+              <Route path="/leaderboard" element={<Leaderboard />} />
+              <Route path="/myteam" element={<MyTeam />} />
+              <Route path="/players" element={<Players />} />
+              <Route path="/players/:id" element={<PlayerDetail />} />
+              <Route path="/finals" element={<Finals />} />
+
+              {/* 🛠️ League Mod Route (extra protected inside component) */}
+              <Route path="/modpanel" element={<LeagueMod />} />
+            </Routes>
+          </ErrorBoundary>
+        </div>
       </div>
     </div>
   );

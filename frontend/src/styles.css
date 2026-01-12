@@ -88,6 +88,87 @@ body {
   padding: 15px;
 }
 
+/* === Desktop Sidebar Shell === */
+.ecgl-shell {
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .ecgl-header {
+    position: sticky;
+    top: 0;
+    z-index: 1100;
+  }
+
+  .ecgl-shell {
+    display: block;
+    min-height: calc(100vh - 0px);
+  }
+
+  .ecgl-side-nav {
+    width: 260px;
+    flex: 0 0 260px;
+    background: #000;
+    border-right: 1px solid #333;
+    padding: 8px;
+
+    position: fixed;
+    left: 0;
+    top: var(--ecgl-header-height, 96px);
+    height: calc(100vh - var(--ecgl-header-height, 96px));
+    overflow-y: auto;
+    z-index: 1050;
+  }
+
+  .ecgl-content {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: 260px;
+  }
+}
+
+.ecgl-side-link {
+  background: transparent !important;
+  color: #ddd !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px;
+  margin-bottom: 4px;
+  padding: 7px 10px !important;
+  font-size: 0.95rem;
+  line-height: 1.1;
+}
+
+.ecgl-side-link:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #fff !important;
+}
+
+.ecgl-side-link.active {
+  background: linear-gradient(90deg, #3b6ea5, #7a2bc2) !important;
+  color: #fff !important;
+  box-shadow: 0 0 10px #7a2bc2aa;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.ecgl-side-user {
+  color: #9aa0a6 !important;
+}
+
+.ecgl-side-auth {
+  margin-bottom: 0 !important;
+}
+
+/* === Mobile offcanvas nav: compact list items === */
+#mobileMainNav .offcanvas-body {
+  padding: 10px;
+}
+
+#mobileMainNav .list-group-item {
+  padding: 8px 10px !important;
+  font-size: 0.95rem;
+  line-height: 1.15;
+}
+
 /* Force readable body text */
 p,
 span,
@@ -1092,6 +1173,29 @@ body.has-bottom-nav {
   padding-bottom: calc(var(--nav-height, 64px) + env(safe-area-inset-bottom));
 }
 
+/* Mobile main drawer: keep it narrower than full screen */
+#mobileMainNav.offcanvas {
+  width: min(78vw, 320px);
+}
+
+/* Ensure the drawer overlays everything (including sticky header) */
+#mobileMainNav.offcanvas {
+  z-index: 2000;
+}
+
+.offcanvas-backdrop.show {
+  z-index: 1999;
+}
+
+/* iOS safe-area padding for the mobile sidebar */
+#mobileMainNav .offcanvas-header {
+  padding-top: calc(1rem + env(safe-area-inset-top));
+}
+
+#mobileMainNav .offcanvas-body {
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+}
+
 /* =========================================================
    iOS SAFARI RUBBER-BAND FIX
 ========================================================= */
@@ -1212,4 +1316,18 @@ body.has-bottom-nav {
 .finals-header.grand h3 {
   color: #d8b4fe;
   text-shadow: 0 0 14px rgba(122, 43, 194, 0.65);
+}
+
+/* Mobile: keep league header locked at the top */
+@media (max-width: 768px) {
+  .ecgl-header {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+  }
+
+  .ecgl-mobile-nav-trigger {
+    position: relative;
+    top: 4px;
+  }
 }

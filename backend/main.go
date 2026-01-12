@@ -811,11 +811,21 @@ func main() {
 
 		staticPath := filepath.Join(distDir, r.URL.Path)
 		if info, err := os.Stat(staticPath); err == nil && !info.IsDir() {
+			// Avoid aggressive caching for the service worker.
+			if r.URL.Path == "/sw.js" {
+				w.Header().Set("Cache-Control", "no-store, must-revalidate")
+				w.Header().Set("Service-Worker-Allowed", "/")
+			}
+			// Avoid stale HTML (iOS Safari can cache index.html hard).
+			if strings.HasSuffix(strings.ToLower(r.URL.Path), ".html") {
+				w.Header().Set("Cache-Control", "no-store, must-revalidate")
+			}
 			http.ServeFile(w, r, staticPath)
 			return
 		}
 
 		// Fallback → serve React index.html
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
 		http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
 	})
 
