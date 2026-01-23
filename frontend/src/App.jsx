@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Routes, Route, NavLink, Link, useNavigate } from "react-router-dom";
+import { useEffect, useState, useRef } from "react";
+import { Routes, Route, NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import { Offcanvas } from "bootstrap";
 import ErrorBoundary from "./ErrorBoundary";
 import Home from "./pages/Home";
@@ -21,10 +21,40 @@ import "./styles.css";
 
 function App() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState(null);
   const [season, setSeason] = useState("");
   const [showFinals, setShowFinals] = useState(false);
   const [loadingUser, setLoadingUser] = useState(true);
+
+  // Pull-to-refresh
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const pullStartY = useRef(0);
+  const isPulling = useRef(false);
+
+  // Account dropdown
+  const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
+  const mobileDropdownRef = useRef(null);
+  const desktopDropdownRef = useRef(null);
+
+  // Close account dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e) {
+      // Don't close if clicking inside either dropdown wrapper
+      if (mobileDropdownRef.current && mobileDropdownRef.current.contains(e.target)) {
+        return;
+      }
+      if (desktopDropdownRef.current && desktopDropdownRef.current.contains(e.target)) {
+        return;
+      }
+      setAccountDropdownOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   useEffect(() => {
     function updateHeaderHeightVar() {
@@ -163,6 +193,63 @@ function App() {
     };
   }, []);
 
+  // Pull-to-refresh gesture handling
+  useEffect(() => {
+    const PULL_THRESHOLD = 80;
+
+    function onPullStart(e) {
+      // Only start pull if at top of page and not in mobile nav
+      if (window.scrollY > 5 || isMobileNavOpen() || isRefreshing) return;
+      if (e.touches?.length !== 1) return;
+
+      pullStartY.current = e.touches[0].clientY;
+      isPulling.current = true;
+    }
+
+    function onPullMove(e) {
+      if (!isPulling.current || isRefreshing) return;
+      if (window.scrollY > 5) {
+        isPulling.current = false;
+        setPullDistance(0);
+        return;
+      }
+
+      const currentY = e.touches[0].clientY;
+      const distance = Math.max(0, currentY - pullStartY.current);
+
+      // Apply resistance for a more natural feel
+      const resistedDistance = Math.min(distance * 0.5, 120);
+      setPullDistance(resistedDistance);
+    }
+
+    function onPullEnd() {
+      if (!isPulling.current) return;
+      isPulling.current = false;
+
+      if (pullDistance >= PULL_THRESHOLD && !isRefreshing) {
+        setIsRefreshing(true);
+        setPullDistance(50); // Keep indicator visible during refresh
+
+        // Reload the page
+        setTimeout(() => {
+          window.location.reload();
+        }, 300);
+      } else {
+        setPullDistance(0);
+      }
+    }
+
+    document.addEventListener("touchstart", onPullStart, { passive: true });
+    document.addEventListener("touchmove", onPullMove, { passive: true });
+    document.addEventListener("touchend", onPullEnd, { passive: true });
+
+    return () => {
+      document.removeEventListener("touchstart", onPullStart);
+      document.removeEventListener("touchmove", onPullMove);
+      document.removeEventListener("touchend", onPullEnd);
+    };
+  }, [pullDistance, isRefreshing]);
+
   useEffect(() => {
     // Fetch user (session-based)
     fetch(`${import.meta.env.VITE_API_URL}/api/me`, {
@@ -204,314 +291,380 @@ function App() {
 
   return (
     <div className="app-wrapper">
-      {/* === Header === */}
-      <header className="ecgl-header text-center">
-        <div className="d-flex align-items-center justify-content-between">
-          <button
-            type="button"
-            className="btn btn-outline-light btn-sm d-md-none ecgl-mobile-nav-trigger"
-            aria-controls="mobileMainNav"
-            aria-label="Open navigation"
-            onClick={openMobileNav}
-          >
-            ☰
-          </button>
-          <div className="flex-grow-1">
-            <h1 className="m-0">⚡ Echo Combat George League</h1>
-          </div>
-          <div style={{ width: 44 }} className="d-md-none" />
+      {/* Pull-to-refresh indicator - sits behind content */}
+      <div className="pull-to-refresh-zone">
+        <div className={`ptr-spinner ${isRefreshing ? 'spinning' : ''}`}>
+          {isRefreshing ? '↻' : '↓'}
         </div>
-        <p className="season-text">
-          📅 {season !== "" ? `Season ${season}` : "Loading..."}
-        </p>
-      </header>
-
-      {/* === Mobile slide-out nav === */}
-      <div
-        className="offcanvas offcanvas-start text-bg-dark d-md-none"
-        tabIndex={-1}
-        id="mobileMainNav"
-        aria-labelledby="mobileMainNavLabel"
-      >
-        <div className="offcanvas-header">
-          <h5 className="offcanvas-title" id="mobileMainNavLabel">
-            Navigation
-          </h5>
-          <button
-            type="button"
-            className="btn-close btn-close-white"
-            aria-label="Close"
-            onClick={closeMobileNav}
-          />
-        </div>
-        <div className="offcanvas-body">
-          <div className="list-group list-group-flush">
-            <button
-              type="button"
-              className="list-group-item list-group-item-action bg-dark text-light"
-              onClick={() => navigateFromMobile("/")}
-            >
-              🏠 Home
-            </button>
-
-            {user && (
-              <>
-                <button
-                  type="button"
-                  className="list-group-item list-group-item-action bg-dark text-light"
-                  onClick={() => navigateFromMobile("/register")}
-                >
-                  📝 Register
-                </button>
-                <button
-                  type="button"
-                  className="list-group-item list-group-item-action bg-dark text-light"
-                  onClick={() => navigateFromMobile("/myteam")}
-                >
-                  🧑 My Team
-                </button>
-              </>
-            )}
-
-            <button
-              type="button"
-              className="list-group-item list-group-item-action bg-dark text-light"
-              onClick={() => navigateFromMobile("/players")}
-            >
-              📋 Players
-            </button>
-            <button
-              type="button"
-              className="list-group-item list-group-item-action bg-dark text-light"
-              onClick={() => navigateFromMobile("/teams")}
-            >
-              👥 Teams
-            </button>
-
-            {showFinals && (
-              <button
-                type="button"
-                className="list-group-item list-group-item-action bg-dark text-light"
-                onClick={() => navigateFromMobile("/finals")}
-              >
-                🏆 Finals
-              </button>
-            )}
-
-            <button
-              type="button"
-              className="list-group-item list-group-item-action bg-dark text-light"
-              onClick={() => navigateFromMobile("/matchups")}
-            >
-              📅 Matchups
-            </button>
-            <button
-              type="button"
-              className="list-group-item list-group-item-action bg-dark text-light"
-              onClick={() => navigateFromMobile("/leaderboard")}
-            >
-              🏆 Leaderboard
-            </button>
-
-            {!loadingUser && user?.is_mod && (
-              <button
-                type="button"
-                className="list-group-item list-group-item-action bg-dark text-light"
-                onClick={() => navigateFromMobile("/modpanel")}
-              >
-                🛠️ League Mod
-              </button>
-            )}
-
-            <div className="mt-2" />
-            {user ? (
-              <a
-                className="list-group-item list-group-item-action bg-dark text-light"
-                href={`${import.meta.env.VITE_API_URL}/logout`}
-              >
-                🚪 Logout {user.display_name || user.username}
-              </a>
-            ) : (
-              <a
-                className="list-group-item list-group-item-action bg-dark text-light"
-                href={`${import.meta.env.VITE_API_URL}/login`}
-              >
-                🔑 Login
-              </a>
-            )}
-          </div>
-        </div>
+        <span className="ptr-text">
+          {isRefreshing ? 'Refreshing...' : pullDistance >= 80 ? 'Release to refresh' : 'Pull to refresh'}
+        </span>
       </div>
 
-      <div className="ecgl-shell">
-        {/* === Desktop sidebar nav === */}
-        <aside className="ecgl-side-nav d-none d-md-flex flex-column">
-          <div className="list-group list-group-flush">
-            <NavLink
-              to="/"
-              end
-              className={({ isActive }) =>
-                `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
-                }`
-              }
+      {/* Main content that slides down */}
+      <div
+        className="app-content"
+        style={{
+          transform: pullDistance > 0 ? `translateY(${pullDistance}px)` : 'none',
+          transition: pullDistance === 0 && !isRefreshing ? 'transform 0.3s ease' : 'none'
+        }}
+      >
+        {/* === Header === */}
+        <header className="ecgl-header text-center">
+          <div className="d-flex align-items-center justify-content-between">
+            <button
+              type="button"
+              className="btn btn-outline-light btn-sm d-md-none ecgl-mobile-nav-trigger"
+              aria-controls="mobileMainNav"
+              aria-label="Open navigation"
+              onClick={openMobileNav}
             >
-              🏠 Home
-            </NavLink>
-
-            {user && (
-              <>
-                <NavLink
-                  to="/register"
-                  className={({ isActive }) =>
-                    `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
-                    }`
-                  }
-                >
-                  📝 Register
-                </NavLink>
-                <NavLink
-                  to="/myteam"
-                  className={({ isActive }) =>
-                    `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
-                    }`
-                  }
-                >
-                  🧑 My Team
-                </NavLink>
-              </>
-            )}
-
-            <NavLink
-              to="/players"
-              className={({ isActive }) =>
-                `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
-                }`
-              }
-            >
-              📋 Players
-            </NavLink>
-
-            <NavLink
-              to="/teams"
-              className={({ isActive }) =>
-                `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
-                }`
-              }
-            >
-              👥 Teams
-            </NavLink>
-
-            {showFinals && (
-              <NavLink
-                to="/finals"
-                className={({ isActive }) =>
-                  `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
-                  }`
-                }
-              >
-                🏆 Finals
-              </NavLink>
-            )}
-
-            <NavLink
-              to="/matchups"
-              className={({ isActive }) =>
-                `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
-                }`
-              }
-            >
-              📅 Matchups
-            </NavLink>
-
-            <NavLink
-              to="/leaderboard"
-              className={({ isActive }) =>
-                `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
-                }`
-              }
-            >
-              🏆 Leaderboard
-            </NavLink>
-
-            {!loadingUser && user?.is_mod && (
-              <NavLink
-                to="/modpanel"
-                className={({ isActive }) =>
-                  `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
-                  }`
-                }
-              >
-                🛠️ League Mod
-              </NavLink>
-            )}
+              ☰
+            </button>
+            <div className="flex-grow-1">
+              <h1 className="m-0">⚡ Echo Combat George League</h1>
+            </div>
+            <div style={{ width: 44 }} className="d-md-none" />
           </div>
+          <p className="season-text">
+            📅 {season !== "" ? `Season ${season}` : "Loading..."}
+          </p>
+        </header>
 
-          {/* Auth section - right under nav tabs */}
-          <div className="ecgl-side-auth-section mt-3 pt-3 border-top border-secondary">
-            {user ? (
-              <>
-                {/* Discord Account Card */}
-                <div className="discord-account-card d-flex align-items-center px-2 pb-3">
-                  <img
-                    src={
-                      user.avatar
-                        ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64`
-                        : `https://cdn.discordapp.com/embed/avatars/${(BigInt(user.id) >> 22n) % 6n}.png`
-                    }
-                    alt="Avatar"
-                    className="discord-avatar rounded-circle me-2"
-                    width="40"
-                    height="40"
-                  />
-                  <div className="discord-user-info overflow-hidden">
-                    <div className="discord-display-name text-light fw-semibold text-truncate">
-                      {user.display_name || user.username}
+        {/* === Mobile slide-out nav === */}
+        <div
+          className="offcanvas offcanvas-start text-bg-dark d-md-none"
+          tabIndex={-1}
+          id="mobileMainNav"
+          aria-labelledby="mobileMainNavLabel"
+        >
+          <div className="offcanvas-header">
+            <h5 className="offcanvas-title" id="mobileMainNavLabel">
+              Navigation
+            </h5>
+            <button
+              type="button"
+              className="btn-close btn-close-white"
+              aria-label="Close"
+              onClick={closeMobileNav}
+            />
+          </div>
+          <div className="offcanvas-body">
+            <div className="list-group list-group-flush">
+              <button
+                type="button"
+                className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/" ? "mobile-nav-active" : ""}`}
+                onClick={() => navigateFromMobile("/")}
+              >
+                🏠 Home
+              </button>
+
+              {user && (
+                <>
+                  <button
+                    type="button"
+                    className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/register" ? "mobile-nav-active" : ""}`}
+                    onClick={() => navigateFromMobile("/register")}
+                  >
+                    📝 Register
+                  </button>
+                  <button
+                    type="button"
+                    className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/myteam" ? "mobile-nav-active" : ""}`}
+                    onClick={() => navigateFromMobile("/myteam")}
+                  >
+                    🧑 My Team
+                  </button>
+                </>
+              )}
+
+              <button
+                type="button"
+                className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/players" ? "mobile-nav-active" : ""}`}
+                onClick={() => navigateFromMobile("/players")}
+              >
+                📋 Players
+              </button>
+              <button
+                type="button"
+                className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/teams" ? "mobile-nav-active" : ""}`}
+                onClick={() => navigateFromMobile("/teams")}
+              >
+                👥 Teams
+              </button>
+
+              {showFinals && (
+                <button
+                  type="button"
+                  className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/finals" ? "mobile-nav-active" : ""}`}
+                  onClick={() => navigateFromMobile("/finals")}
+                >
+                  🏆 Finals
+                </button>
+              )}
+
+              <button
+                type="button"
+                className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/matchups" ? "mobile-nav-active" : ""}`}
+                onClick={() => navigateFromMobile("/matchups")}
+              >
+                📅 Matchups
+              </button>
+              <button
+                type="button"
+                className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/leaderboard" ? "mobile-nav-active" : ""}`}
+                onClick={() => navigateFromMobile("/leaderboard")}
+              >
+                🏆 Leaderboard
+              </button>
+
+              {!loadingUser && user?.is_mod && (
+                <button
+                  type="button"
+                  className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/modpanel" ? "mobile-nav-active" : ""}`}
+                  onClick={() => navigateFromMobile("/modpanel")}
+                >
+                  🛠️ League Mod
+                </button>
+              )}
+            </div>
+
+            {/* Auth section with divider */}
+            <div className="mobile-auth-section mt-3 pt-3 border-top border-secondary">
+              {user ? (
+                <div className={`account-dropdown-wrapper ${accountDropdownOpen ? 'open' : ''}`} ref={mobileDropdownRef}>
+                  {/* Discord Account Card - Clickable */}
+                  <div
+                    className="discord-account-card d-flex align-items-center clickable"
+                    onClick={() => setAccountDropdownOpen(!accountDropdownOpen)}
+                  >
+                    <img
+                      src={
+                        user.avatar
+                          ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64`
+                          : `https://cdn.discordapp.com/embed/avatars/${(BigInt(user.id) >> 22n) % 6n}.png`
+                      }
+                      alt="Avatar"
+                      className="discord-avatar rounded-circle me-3"
+                      width="48"
+                      height="48"
+                    />
+                    <div className="discord-user-info overflow-hidden flex-grow-1">
+                      <div className="discord-display-name text-light fw-semibold text-truncate">
+                        {user.display_name || user.username}
+                      </div>
+                      <div className="discord-username text-secondary small text-truncate">
+                        @{user.username}
+                      </div>
                     </div>
-                    <div className="discord-username text-secondary small text-truncate">
-                      @{user.username}
-                    </div>
+                    <span className={`dropdown-chevron ${accountDropdownOpen ? 'open' : ''}`}>▼</span>
                   </div>
+                  {/* Dropdown menu */}
+                  {accountDropdownOpen && (
+                    <div className="account-dropdown-menu">
+                      <button
+                        type="button"
+                        className="account-dropdown-item"
+                        onClick={() => { window.location.href = `${import.meta.env.VITE_API_URL}/logout`; }}
+                      >
+                        🚪 Logout
+                      </button>
+                    </div>
+                  )}
                 </div>
+              ) : (
+                <a
+                  className="list-group-item list-group-item-action bg-dark text-light"
+                  style={{ borderRadius: '8px' }}
+                  href={`${import.meta.env.VITE_API_URL}/login`}
+                >
+                  🔑 Login with Discord
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="ecgl-shell">
+          {/* === Desktop sidebar nav === */}
+          <aside className="ecgl-side-nav d-none d-md-flex flex-column">
+            <div className="list-group list-group-flush">
+              <NavLink
+                to="/"
+                end
+                className={({ isActive }) =>
+                  `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                  }`
+                }
+              >
+                🏠 Home
+              </NavLink>
+
+              {user && (
+                <>
+                  <NavLink
+                    to="/register"
+                    className={({ isActive }) =>
+                      `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                      }`
+                    }
+                  >
+                    📝 Register
+                  </NavLink>
+                  <NavLink
+                    to="/myteam"
+                    className={({ isActive }) =>
+                      `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                      }`
+                    }
+                  >
+                    🧑 My Team
+                  </NavLink>
+                </>
+              )}
+
+              <NavLink
+                to="/players"
+                className={({ isActive }) =>
+                  `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                  }`
+                }
+              >
+                📋 Players
+              </NavLink>
+
+              <NavLink
+                to="/teams"
+                className={({ isActive }) =>
+                  `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                  }`
+                }
+              >
+                👥 Teams
+              </NavLink>
+
+              {showFinals && (
+                <NavLink
+                  to="/finals"
+                  className={({ isActive }) =>
+                    `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                    }`
+                  }
+                >
+                  🏆 Finals
+                </NavLink>
+              )}
+
+              <NavLink
+                to="/matchups"
+                className={({ isActive }) =>
+                  `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                  }`
+                }
+              >
+                📅 Matchups
+              </NavLink>
+
+              <NavLink
+                to="/leaderboard"
+                className={({ isActive }) =>
+                  `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                  }`
+                }
+              >
+                🏆 Leaderboard
+              </NavLink>
+
+              {!loadingUser && user?.is_mod && (
+                <NavLink
+                  to="/modpanel"
+                  className={({ isActive }) =>
+                    `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                    }`
+                  }
+                >
+                  🛠️ League Mod
+                </NavLink>
+              )}
+            </div>
+
+            {/* Auth section - right under nav tabs */}
+            <div className="ecgl-side-auth-section mt-3 pt-3 border-top border-secondary">
+              {user ? (
+                <div className={`account-dropdown-wrapper ${accountDropdownOpen ? 'open' : ''}`} ref={desktopDropdownRef}>
+                  {/* Discord Account Card - Clickable */}
+                  <div
+                    className="discord-account-card d-flex align-items-center px-2 clickable"
+                    onClick={() => setAccountDropdownOpen(!accountDropdownOpen)}
+                  >
+                    <img
+                      src={
+                        user.avatar
+                          ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64`
+                          : `https://cdn.discordapp.com/embed/avatars/${(BigInt(user.id) >> 22n) % 6n}.png`
+                      }
+                      alt="Avatar"
+                      className="discord-avatar rounded-circle me-2"
+                      width="40"
+                      height="40"
+                    />
+                    <div className="discord-user-info overflow-hidden flex-grow-1">
+                      <div className="discord-display-name text-light fw-semibold text-truncate">
+                        {user.display_name || user.username}
+                      </div>
+                      <div className="discord-username text-secondary small text-truncate">
+                        @{user.username}
+                      </div>
+                    </div>
+                    <span className={`dropdown-chevron ${accountDropdownOpen ? 'open' : ''}`}>▼</span>
+                  </div>
+                  {/* Dropdown menu */}
+                  {accountDropdownOpen && (
+                    <div className="account-dropdown-menu">
+                      <button
+                        type="button"
+                        className="account-dropdown-item"
+                        onClick={() => { window.location.href = `${import.meta.env.VITE_API_URL}/logout`; }}
+                      >
+                        🚪 Logout
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
                 <a
                   className="list-group-item list-group-item-action ecgl-side-link ecgl-side-auth"
-                  href={`${import.meta.env.VITE_API_URL}/logout`}
+                  href={`${import.meta.env.VITE_API_URL}/login`}
                 >
-                  🚪 Logout
+                  🔑 Login with Discord
                 </a>
-              </>
-            ) : (
-              <a
-                className="list-group-item list-group-item-action ecgl-side-link ecgl-side-auth"
-                href={`${import.meta.env.VITE_API_URL}/login`}
-              >
-                🔑 Login with Discord
-              </a>
-            )}
+              )}
+            </div>
+          </aside>
+
+          {/* === Page Content === */}
+          <div className="page-content ecgl-content">
+            <ErrorBoundary>
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="/teams" element={<Teams />} />
+                <Route path="/teams/:id" element={<TeamDetail />} />
+                <Route path="/matchups" element={<Matchups />} />
+                <Route path="/match/:id" element={<MatchDetail />} />
+                <Route path="/leaderboard" element={<Leaderboard />} />
+                <Route path="/myteam" element={<MyTeam />} />
+                <Route path="/players" element={<Players />} />
+                <Route path="/players/:id" element={<PlayerDetail />} />
+                <Route path="/finals" element={<Finals />} />
+
+                {/* 🛠️ League Mod Route (extra protected inside component) */}
+                <Route path="/modpanel" element={<LeagueMod />} />
+              </Routes>
+            </ErrorBoundary>
           </div>
-        </aside>
-
-        {/* === Page Content === */}
-        <div className="page-content ecgl-content">
-          <ErrorBoundary>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/register" element={<Register />} />
-              <Route path="/teams" element={<Teams />} />
-              <Route path="/teams/:id" element={<TeamDetail />} />
-              <Route path="/matchups" element={<Matchups />} />
-              <Route path="/match/:id" element={<MatchDetail />} />
-              <Route path="/leaderboard" element={<Leaderboard />} />
-              <Route path="/myteam" element={<MyTeam />} />
-              <Route path="/players" element={<Players />} />
-              <Route path="/players/:id" element={<PlayerDetail />} />
-              <Route path="/finals" element={<Finals />} />
-
-              {/* 🛠️ League Mod Route (extra protected inside component) */}
-              <Route path="/modpanel" element={<LeagueMod />} />
-            </Routes>
-          </ErrorBoundary>
         </div>
-      </div>
+      </div>{/* end app-content */}
     </div>
   );
 }

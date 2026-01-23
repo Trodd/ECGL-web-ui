@@ -2,20 +2,25 @@
   "name": "Echo Combat George League",
   "short_name": "ECGL",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#3b6ea5",
   "description": "Competitive Echo Combat League with teams, matchups, schedules, and leaderboards.",
+  "orientation": "portrait",
+  "id": "/",
   "icons": [
     {
       "src": "/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
       "src": "/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }
