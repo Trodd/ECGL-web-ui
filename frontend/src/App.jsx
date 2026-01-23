@@ -446,25 +446,45 @@ function App() {
             )}
           </div>
 
-          <div className="mt-auto pt-2">
-            {user && (
-              <div className="ecgl-side-user small text-light px-2 pb-2">
-                Signed in as {user.display_name || user.username}
-              </div>
-            )}
+          {/* Auth section - right under nav tabs */}
+          <div className="ecgl-side-auth-section mt-3 pt-3 border-top border-secondary">
             {user ? (
-              <a
-                className="list-group-item list-group-item-action ecgl-side-link ecgl-side-auth"
-                href={`${import.meta.env.VITE_API_URL}/logout`}
-              >
-                🚪 Logout
-              </a>
+              <>
+                {/* Discord Account Card */}
+                <div className="discord-account-card d-flex align-items-center px-2 pb-3">
+                  <img
+                    src={
+                      user.avatar
+                        ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64`
+                        : `https://cdn.discordapp.com/embed/avatars/${(BigInt(user.id) >> 22n) % 6n}.png`
+                    }
+                    alt="Avatar"
+                    className="discord-avatar rounded-circle me-2"
+                    width="40"
+                    height="40"
+                  />
+                  <div className="discord-user-info overflow-hidden">
+                    <div className="discord-display-name text-light fw-semibold text-truncate">
+                      {user.display_name || user.username}
+                    </div>
+                    <div className="discord-username text-secondary small text-truncate">
+                      @{user.username}
+                    </div>
+                  </div>
+                </div>
+                <a
+                  className="list-group-item list-group-item-action ecgl-side-link ecgl-side-auth"
+                  href={`${import.meta.env.VITE_API_URL}/logout`}
+                >
+                  🚪 Logout
+                </a>
+              </>
             ) : (
               <a
                 className="list-group-item list-group-item-action ecgl-side-link ecgl-side-auth"
                 href={`${import.meta.env.VITE_API_URL}/login`}
               >
-                🔑 Login
+                🔑 Login with Discord
               </a>
             )}
           </div>

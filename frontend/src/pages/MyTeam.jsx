@@ -20,6 +20,7 @@ export default function MyTeam() {
   const [challengeRequests, setChallengeRequests] = useState([]);
   const [allowChallenges, setAllowChallenges] = useState(true);
   const [globalChallengesEnabled, setGlobalChallengesEnabled] = useState(true);
+  const [arenaModeEnabled, setArenaModeEnabled] = useState(false);
 
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState("");
@@ -72,9 +73,13 @@ export default function MyTeam() {
         if (res.data?.challenges_enabled !== undefined) {
           setGlobalChallengesEnabled(res.data.challenges_enabled);
         }
+        if (res.data?.arena_mode_enabled !== undefined) {
+          setArenaModeEnabled(res.data.arena_mode_enabled);
+        }
       })
       .catch(() => {
         setGlobalChallengesEnabled(true);
+        setArenaModeEnabled(false);
       });
   }, []);
 
@@ -874,6 +879,7 @@ export default function MyTeam() {
                   urlBase={urlBase}
                   loadTeam={loadTeam}
                   myRole={myRole}
+                  arenaModeEnabled={arenaModeEnabled}
                 />
               ) : (
                 <p className="text-secondary small mb-0">Waiting for captains…</p>

@@ -158,6 +158,33 @@ body {
   margin-bottom: 0 !important;
 }
 
+/* Discord Account Card in Sidebar */
+.discord-account-card {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 10px;
+  margin: 0 8px 8px 8px;
+}
+
+.discord-avatar {
+  flex-shrink: 0;
+  border: 2px solid rgba(88, 101, 242, 0.5);
+}
+
+.discord-user-info {
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.discord-display-name {
+  font-size: 0.9rem;
+}
+
+.discord-username {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
 /* === Mobile offcanvas nav: compact list items === */
 #mobileMainNav .offcanvas-body {
   padding: 10px;

@@ -9,10 +9,10 @@ export default function Leaderboard() {
   useEffect(() => {
     if (view === "teams") {
       axios.get(`${import.meta.env.VITE_API_URL}/api/leaderboard/teams`)
-        .then(res => setTeams(res.data));
+        .then(res => setTeams(res.data || []));
     } else {
       axios.get(`${import.meta.env.VITE_API_URL}/api/leaderboard/players`)
-        .then(res => setPlayers(res.data));
+        .then(res => setPlayers(res.data || []));
     }
   }, [view]);
 
@@ -141,5 +141,4 @@ export default function Leaderboard() {
       )}
     </div>
   );
-
 }

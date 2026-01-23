@@ -270,15 +270,16 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 
 	// ✅ active registered player + mod info
 	respondJSON(w, map[string]any{
-		"registered": true,
-		"id":         discordIDStr,
-		"username":   player.Username,
-		"role":       player.Role,
-		"device":     player.Device,
-		"timezone":   player.Timezone,
-		"avatar":     session.Values["avatar"],
-		"is_mod":     isMod,
-		"is_caster":  isCaster,
+		"registered":   true,
+		"id":           discordIDStr,
+		"username":     player.Username,
+		"display_name": session.Values["display_name"],
+		"role":         player.Role,
+		"device":       player.Device,
+		"timezone":     player.Timezone,
+		"avatar":       session.Values["avatar"],
+		"is_mod":       isMod,
+		"is_caster":    isCaster,
 	})
 }
 
@@ -729,6 +730,7 @@ func main() {
 	r.HandleFunc("/api/mod/player/remove-cooldown", ModRemoveCooldown).Methods("POST")
 	r.HandleFunc("/api/mod/player/archive-all", HandleArchiveAllPlayers).Methods("POST")
 	r.HandleFunc("/api/tools/archive-team-stats", HandleArchiveTeamStats).Methods("POST")
+	r.HandleFunc("/api/mod/import-preseason-archive", HandleImportPreseasonArchive).Methods("POST")
 	r.HandleFunc("/api/team/archive", HandleGetTeamArchive).Methods("GET")
 	r.HandleFunc("/api/check-discord", HandleCheckDiscordMembership).Methods("GET")
 	r.HandleFunc("/api/discord/info", HandleGetDiscordServerInfo).Methods("GET")
@@ -773,6 +775,9 @@ func main() {
 	// Leaderboards
 	api.HandleFunc("/leaderboard/players", GetPlayerLeaderboard).Methods("GET")
 	api.HandleFunc("/leaderboard/teams", GetTeamLeaderboard).Methods("GET")
+	api.HandleFunc("/leaderboard/seasons", GetLeaderboardSeasons).Methods("GET")
+	api.HandleFunc("/leaderboard/teams/history", GetTeamLeaderboardBySeason).Methods("GET")
+	api.HandleFunc("/leaderboard/players/history", GetPlayerLeaderboardBySeason).Methods("GET")
 
 	// --- Finals Visibility ---
 	api.HandleFunc("/finals/visible", HandleGetFinalsVisible).Methods("GET")

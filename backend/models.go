@@ -240,3 +240,16 @@ type FinalsArchive struct {
 	Snapshot  datatypes.JSON
 	CreatedAt time.Time
 }
+
+// --- Mod Audit Log (persisted to database) ---
+type ModAuditLog struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	Time          time.Time `json:"time" gorm:"index"`
+	Action        string    `json:"action"`
+	Method        string    `json:"method"`
+	Path          string    `json:"path"`
+	RequestURI    string    `json:"request_uri"`
+	Target        string    `json:"target,omitempty"`
+	ActorID       string    `json:"actor_id" gorm:"index"`
+	ActorUsername string    `json:"actor_username,omitempty"`
+}

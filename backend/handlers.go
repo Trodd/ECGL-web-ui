@@ -144,6 +144,7 @@ func GetSettings(w http.ResponseWriter, r *http.Request) {
 
 	minPlayers := getEnvInt("MIN_TEAM_PLAYERS", 3)
 	maxPlayers := getEnvInt("MAX_TEAM_PLAYERS", 6)
+	arenaModeEnabled := os.Getenv("ARENA_MODE_ENABLED") == "true"
 
 	respondJSON(w, map[string]any{
 		"roster_locked":          rosterLocked,
@@ -152,6 +153,7 @@ func GetSettings(w http.ResponseWriter, r *http.Request) {
 		"current_week":           s.CurrentWeek,
 		"weekly_challenge_limit": s.WeeklyChallengeLimit,
 		"challenges_enabled":     s.ChallengesEnabled,
+		"arena_mode_enabled":     arenaModeEnabled,
 	})
 }
 
@@ -508,6 +510,7 @@ func GetTeamLeaderboard(w http.ResponseWriter, r *http.Request) {
 
 	var rows []TeamRow
 
+	// Show all teams including disbanded
 	if err := DB.Table("teams").
 		Select("id, name, status, rating, wins, losses, matches").
 		Order("rating DESC").
@@ -524,6 +527,182 @@ func GetTeamLeaderboard(w http.ResponseWriter, r *http.Request) {
 		div, tier := GetDivisionTier(rows[i].Rating)
 		rows[i].Division = div
 		rows[i].Tier = tier
+	}
+
+	respondJSON(w, rows)
+}
+
+// --- Get Available Seasons ---
+func GetLeaderboardSeasons(w http.ResponseWriter, r *http.Request) {
+	currentSeason := os.Getenv("CURRENT_SEASON")
+	if currentSeason == "" {
+		currentSeason = "1"
+	}
+
+	// Get distinct seasons from team_archives
+	var teamSeasons []string
+	DB.Table("team_archives").Distinct().Pluck("season", &teamSeasons)
+
+	// Also get seasons from player_stats_archive
+	var playerSeasons []string
+	DB.Table("player_stats_archive").Distinct().Pluck("season", &playerSeasons)
+
+	// Combine with current season and deduplicate
+	seasonMap := make(map[string]bool)
+	seasonMap[currentSeason] = true
+	for _, s := range teamSeasons {
+		seasonMap[s] = true
+	}
+	for _, s := range playerSeasons {
+		seasonMap[s] = true
+	}
+
+	// Convert to slice and sort descending (newest first)
+	seasons := make([]string, 0, len(seasonMap))
+	for s := range seasonMap {
+		seasons = append(seasons, s)
+	}
+	// Sort in reverse order (higher numbers first)
+	for i := 0; i < len(seasons)-1; i++ {
+		for j := i + 1; j < len(seasons); j++ {
+			if seasons[j] > seasons[i] {
+				seasons[i], seasons[j] = seasons[j], seasons[i]
+			}
+		}
+	}
+
+	respondJSON(w, map[string]any{
+		"current_season": currentSeason,
+		"seasons":        seasons,
+	})
+}
+
+// --- Historical Team Leaderboard by Season ---
+func GetTeamLeaderboardBySeason(w http.ResponseWriter, r *http.Request) {
+	season := r.URL.Query().Get("season")
+	currentSeason := os.Getenv("CURRENT_SEASON")
+	if currentSeason == "" {
+		currentSeason = "1"
+	}
+
+	// If requesting current season or no season specified, return live data
+	if season == "" || season == currentSeason {
+		GetTeamLeaderboard(w, r)
+		return
+	}
+
+	// Get archived data for the requested season
+	type TeamRow struct {
+		ID       uint   `json:"id"`
+		Name     string `json:"name"`
+		Status   string `json:"status"`
+		Rating   int    `json:"rating"`
+		Wins     int    `json:"wins"`
+		Losses   int    `json:"losses"`
+		Matches  int    `json:"matches"`
+		Division string `json:"division"`
+		Tier     string `json:"tier"`
+	}
+
+	var archives []TeamArchive
+	if err := DB.Where("season = ?", season).
+		Order("rating DESC").
+		Order("wins DESC").
+		Order("losses ASC").
+		Find(&archives).Error; err != nil {
+		http.Error(w, "failed to load archived team leaderboard", http.StatusInternalServerError)
+		return
+	}
+
+	rows := make([]TeamRow, 0, len(archives))
+	for _, a := range archives {
+		// Get current team status
+		var team Team
+		DB.First(&team, "id = ?", a.TeamID)
+
+		div, tier := GetDivisionTier(a.Rating)
+		rows = append(rows, TeamRow{
+			ID:       a.TeamID,
+			Name:     a.Name,
+			Status:   team.Status,
+			Rating:   a.Rating,
+			Wins:     a.Wins,
+			Losses:   a.Losses,
+			Matches:  a.Matches,
+			Division: div,
+			Tier:     tier,
+		})
+	}
+
+	respondJSON(w, rows)
+}
+
+// --- Historical Player Leaderboard by Season ---
+func GetPlayerLeaderboardBySeason(w http.ResponseWriter, r *http.Request) {
+	season := r.URL.Query().Get("season")
+	currentSeason := os.Getenv("CURRENT_SEASON")
+	if currentSeason == "" {
+		currentSeason = "1"
+	}
+
+	// If requesting current season or no season specified, return live data
+	if season == "" || season == currentSeason {
+		GetPlayerLeaderboard(w, r)
+		return
+	}
+
+	// Get archived player data from player_stats_archive table
+	type PlayerRow struct {
+		ID          string `json:"id"`
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		Rating      int    `json:"rating"`
+		Wins        int    `json:"wins"`
+		Losses      int    `json:"losses"`
+		Matches     int    `json:"matches"`
+		Division    string `json:"division"`
+		Tier        string `json:"tier"`
+	}
+
+	// Query archived player stats joined with player info
+	type ArchivedPlayer struct {
+		PlayerID       int64
+		ArchiveRating  int
+		ArchiveWins    int
+		ArchiveLosses  int
+		ArchiveMatches int
+	}
+
+	var archives []ArchivedPlayer
+	if err := DB.Table("player_stats_archive").
+		Select("player_id, archive_rating, archive_wins, archive_losses, archive_matches").
+		Where("season = ?", season).
+		Order("archive_rating DESC").
+		Order("archive_wins DESC").
+		Order("archive_losses ASC").
+		Find(&archives).Error; err != nil {
+		http.Error(w, "failed to load archived player leaderboard", http.StatusInternalServerError)
+		return
+	}
+
+	// Look up player usernames
+	rows := make([]PlayerRow, 0, len(archives))
+	for _, a := range archives {
+		var player Player
+		DB.First(&player, "id = ?", a.PlayerID)
+
+		div, tier := GetDivisionTier(a.ArchiveRating)
+		rows = append(rows, PlayerRow{
+			ID:          strconv.FormatInt(a.PlayerID, 10),
+			Username:    player.Username,
+			DisplayName: player.DisplayName,
+			Rating:      a.ArchiveRating,
+			Wins:        a.ArchiveWins,
+			Losses:      a.ArchiveLosses,
+			Matches:     a.ArchiveMatches,
+			Division:    div,
+			Tier:        tier,
+		})
 	}
 
 	respondJSON(w, rows)
@@ -8618,6 +8797,73 @@ func HandleGetTeamArchive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, rows)
+}
+
+// POST /api/mod/import-preseason-archive - Import teams from Preseason.json into team_archives
+func HandleImportPreseasonArchive(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	// Read the Preseason.json file
+	data, err := os.ReadFile("archives/Preseason.json")
+	if err != nil {
+		modJSONErr(w, 500, "Failed to read Preseason.json: "+err.Error())
+		return
+	}
+
+	var archive struct {
+		Teams []struct {
+			ID      uint   `json:"id"`
+			Name    string `json:"name"`
+			Status  string `json:"status"`
+			Rating  int    `json:"rating"`
+			Wins    int    `json:"wins"`
+			Losses  int    `json:"losses"`
+			Matches int    `json:"matches"`
+		} `json:"teams"`
+	}
+
+	if err := json.Unmarshal(data, &archive); err != nil {
+		modJSONErr(w, 500, "Failed to parse Preseason.json: "+err.Error())
+		return
+	}
+
+	count := 0
+	skipped := 0
+	for _, t := range archive.Teams {
+		// Check if already exists in team_archives for Preseason
+		var existing TeamArchive
+		if err := DB.Where("team_id = ? AND season = ?", t.ID, "Preseason").First(&existing).Error; err == nil {
+			skipped++
+			continue // Already exists
+		}
+
+		ta := TeamArchive{
+			TeamID:  t.ID,
+			Name:    t.Name,
+			Season:  "Preseason",
+			Rating:  t.Rating,
+			Wins:    t.Wins,
+			Losses:  t.Losses,
+			Matches: t.Matches,
+		}
+
+		if err := DB.Create(&ta).Error; err != nil {
+			log.Printf("⚠️ Failed importing team %d (%s): %v", t.ID, t.Name, err)
+			continue
+		}
+		count++
+	}
+
+	LogGeneral(fmt.Sprintf("📦 Imported %d teams from Preseason.json (skipped %d existing)", count, skipped))
+
+	respondJSON(w, map[string]any{
+		"success":  true,
+		"imported": count,
+		"skipped":  skipped,
+		"total":    len(archive.Teams),
+	})
 }
 
 func GetDivisionTier(rating int) (string, string) {

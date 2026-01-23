@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 
-export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
+export default function MatchCard({ match, team, urlBase, loadTeam, myRole, arenaModeEnabled = false }) {
     const isCaptain = myRole === "Captain" || myRole === "Co-Captain";
     const [localDate, setLocalDate] = useState(
         match.date ? new Date(match.date).toISOString().slice(0, 16) : ""
@@ -240,58 +240,62 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                 {match.date && isCaptain && (
                     <div className="match-section">
 
-                        <h6 className="section-title">🎯 Match Setup & Scoring</h6>
+                        <h6 className="section-title">
+                            {arenaModeEnabled ? "🏟️ Arena Match (Best of 3)" : "🎯 Match Setup & Scoring"}
+                        </h6>
 
-                        {/* ================= COIN FLIP ================= */}
-                        <div className="sub-card">
-                            <label className="fw-bold mb-1 d-block">🎲 Coin Flip</label>
+                        {/* ================= COIN FLIP (hidden in Arena mode) ================= */}
+                        {!arenaModeEnabled && (
+                            <div className="sub-card">
+                                <label className="fw-bold mb-1 d-block">🎲 Coin Flip</label>
 
-                            <div className="d-flex align-items-center gap-2 flex-wrap">
-                                <select
-                                    className="form-select bg-dark text-light"
-                                    value={coinFlipCall}
-                                    disabled={coinFlipConfirmed}
-                                    onChange={(e) => {
-                                        setCoinFlipCall(e.target.value);
-                                        setCoinFlipConfirmed(false);
-                                    }}
-                                    style={{ maxWidth: 200 }}
-                                >
-                                    <option value="">Select…</option>
-                                    <option value="HEADS">Heads</option>
-                                    <option value="TAILS">Tails</option>
-                                </select>
-
-                                {!coinFlipConfirmed ? (
-                                    <button
-                                        className="btn btn-sm btn-primary"
-                                        disabled={!coinFlipCall}
-                                        onClick={async () => {
-                                            try {
-                                                const res = await axios.post(
-                                                    `${urlBase}/api/match/confirm-coinflip`,
-                                                    {
-                                                        match_id: match.id,
-                                                        team_id: team.id,
-                                                        coin_flip_call: coinFlipCall,
-                                                    },
-                                                    { withCredentials: true }
-                                                );
-                                                setCoinFlipConfirmed(true);
-                                                setCoinFlipResult(res.data?.winner || null);
-                                                alert("🎲 Coin flip confirmed!");
-                                            } catch {
-                                                alert("Failed to confirm coin flip.");
-                                            }
+                                <div className="d-flex align-items-center gap-2 flex-wrap">
+                                    <select
+                                        className="form-select bg-dark text-light"
+                                        value={coinFlipCall}
+                                        disabled={coinFlipConfirmed}
+                                        onChange={(e) => {
+                                            setCoinFlipCall(e.target.value);
+                                            setCoinFlipConfirmed(false);
                                         }}
+                                        style={{ maxWidth: 200 }}
                                     >
-                                        Confirm Flip
-                                    </button>
-                                ) : (
-                                    <span className="text-success fw-semibold">✔ Confirmed</span>
-                                )}
+                                        <option value="">Select…</option>
+                                        <option value="HEADS">Heads</option>
+                                        <option value="TAILS">Tails</option>
+                                    </select>
+
+                                    {!coinFlipConfirmed ? (
+                                        <button
+                                            className="btn btn-sm btn-primary"
+                                            disabled={!coinFlipCall}
+                                            onClick={async () => {
+                                                try {
+                                                    const res = await axios.post(
+                                                        `${urlBase}/api/match/confirm-coinflip`,
+                                                        {
+                                                            match_id: match.id,
+                                                            team_id: team.id,
+                                                            coin_flip_call: coinFlipCall,
+                                                        },
+                                                        { withCredentials: true }
+                                                    );
+                                                    setCoinFlipConfirmed(true);
+                                                    setCoinFlipResult(res.data?.winner || null);
+                                                    alert("🎲 Coin flip confirmed!");
+                                                } catch {
+                                                    alert("Failed to confirm coin flip.");
+                                                }
+                                            }}
+                                        >
+                                            Confirm Flip
+                                        </button>
+                                    ) : (
+                                        <span className="text-success fw-semibold">✔ Confirmed</span>
+                                    )}
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         {/* ================= SUBS ================= */}
                         <div className="sub-card">
@@ -337,25 +341,27 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                             </div>
                         </div>
 
-                        {/* ================= MAPS ================= */}
+                        {/* ================= MAPS / ROUNDS ================= */}
                         <div className="row g-3 mt-2">
                             {[1, 2, 3].map((n) => (
                                 <div className="col-md-4" key={n}>
                                     <div className="map-card">
-                                        <h6 className="mb-2">Map {n}</h6>
+                                        <h6 className="mb-2">{arenaModeEnabled ? `Round ${n}` : `Map ${n}`}</h6>
 
-                                        <select
-                                            className="form-select form-select-sm bg-dark text-light mb-2"
-                                            value={scores[`map${n}`]?.mode || ""}
-                                            onChange={(e) =>
-                                                updateScore(`map${n}`, "mode", e.target.value)
-                                            }
-                                            disabled={myScoresConfirmed}
-                                        >
-                                            <option value="">Gamemode…</option>
-                                            <option value="Capture Point">Capture Point</option>
-                                            <option value="Payload">Payload</option>
-                                        </select>
+                                        {!arenaModeEnabled && (
+                                            <select
+                                                className="form-select form-select-sm bg-dark text-light mb-2"
+                                                value={scores[`map${n}`]?.mode || ""}
+                                                onChange={(e) =>
+                                                    updateScore(`map${n}`, "mode", e.target.value)
+                                                }
+                                                disabled={myScoresConfirmed}
+                                            >
+                                                <option value="">Gamemode…</option>
+                                                <option value="Capture Point">Capture Point</option>
+                                                <option value="Payload">Payload</option>
+                                            </select>
+                                        )}
 
                                         <input
                                             type="number"
@@ -414,10 +420,10 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole }) {
                 {msg && (
                     <div
                         className={`small mt-2 ${msg.startsWith("✅")
-                                ? "text-success"
-                                : msg.startsWith("⚠️")
-                                    ? "text-warning"
-                                    : "text-danger"
+                            ? "text-success"
+                            : msg.startsWith("⚠️")
+                                ? "text-warning"
+                                : "text-danger"
                             }`}
                     >
                         {msg}

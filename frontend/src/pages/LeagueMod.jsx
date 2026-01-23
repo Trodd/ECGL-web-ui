@@ -92,10 +92,24 @@ export default function LeagueMod() {
     const [finalsBracket, setFinalsBracket] = useState(null);
     const [finalsVisible, setFinalsVisible] = useState(false);
 
+    // Arena mode
+    const [arenaModeEnabled, setArenaModeEnabled] = useState(false);
+
     // Load on mount
     useEffect(() => {
         axios.get(`${urlBase}/api/finals/visible`)
             .then(res => setFinalsVisible(res.data.visible))
+            .catch(() => { });
+    }, []);
+
+    // Load arena mode setting
+    useEffect(() => {
+        axios.get(`${urlBase}/api/settings`, { withCredentials: true })
+            .then(res => {
+                if (res.data?.arena_mode_enabled !== undefined) {
+                    setArenaModeEnabled(res.data.arena_mode_enabled);
+                }
+            })
             .catch(() => { });
     }, []);
 
@@ -1267,11 +1281,11 @@ export default function LeagueMod() {
                                         >
                                             <h6 className="text-info mb-3">🧾 Enter Map Scores</h6>
 
-                                            <table className="table table-dark table-striped align-middle text-center mb-3" style={{ maxWidth: 500 }}>
+                                            <table className="table table-dark table-striped align-middle text-center mb-3" style={{ maxWidth: arenaModeEnabled ? 400 : 500 }}>
                                                 <thead>
                                                     <tr>
-                                                        <th>Map</th>
-                                                        <th>Gamemode</th>
+                                                        <th>{arenaModeEnabled ? "Round" : "Map"}</th>
+                                                        {!arenaModeEnabled && <th>Gamemode</th>}
                                                         <th>{match.team_a}</th>
                                                         <th>{match.team_b}</th>
                                                     </tr>
@@ -1279,20 +1293,22 @@ export default function LeagueMod() {
                                                 <tbody>
                                                     {[1, 2, 3].map((mapNum) => (
                                                         <tr key={mapNum}>
-                                                            <td className="text-secondary">Map {mapNum}</td>
-                                                            <td>
-                                                                <select
-                                                                    className="form-select bg-dark text-light"
-                                                                    value={mapScores[`mode${mapNum}`] || ""}
-                                                                    onChange={(e) =>
-                                                                        setMapScores((prev) => ({ ...prev, [`mode${mapNum}`]: e.target.value }))
-                                                                    }
-                                                                >
-                                                                    <option value="">Gamemode...</option>
-                                                                    <option value="Payload">Payload</option>
-                                                                    <option value="Capture Point">Capture Point</option>
-                                                                </select>
-                                                            </td>
+                                                            <td className="text-secondary">{arenaModeEnabled ? `Round ${mapNum}` : `Map ${mapNum}`}</td>
+                                                            {!arenaModeEnabled && (
+                                                                <td>
+                                                                    <select
+                                                                        className="form-select bg-dark text-light"
+                                                                        value={mapScores[`mode${mapNum}`] || ""}
+                                                                        onChange={(e) =>
+                                                                            setMapScores((prev) => ({ ...prev, [`mode${mapNum}`]: e.target.value }))
+                                                                        }
+                                                                    >
+                                                                        <option value="">Gamemode...</option>
+                                                                        <option value="Payload">Payload</option>
+                                                                        <option value="Capture Point">Capture Point</option>
+                                                                    </select>
+                                                                </td>
+                                                            )}
                                                             <td>
                                                                 <input
                                                                     type="number"

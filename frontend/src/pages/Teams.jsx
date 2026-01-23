@@ -6,6 +6,7 @@ export default function Teams() {
   const [teams, setTeams] = useState([]);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [showDisbanded, setShowDisbanded] = useState(false);
   const [settings, setSettings] = useState(null);
   const urlBase = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
@@ -61,10 +62,10 @@ export default function Teams() {
 
   const filteredTeams = useMemo(() => {
     const query = safeLower(search);
-    return (Array.isArray(teams) ? teams : []).filter(
-      (t) => !query || safeIncludes(t.name, query)
-    );
-  }, [teams, search]);
+    return (Array.isArray(teams) ? teams : [])
+      .filter((t) => showDisbanded || t.status !== "Disbanded") // Hide disbanded unless toggled
+      .filter((t) => !query || safeIncludes(t.name, query));
+  }, [teams, search, showDisbanded]);
 
   return (
     <div className="d-flex justify-content-center">
@@ -79,14 +80,27 @@ export default function Teams() {
           )}
 
           {/* ================= SEARCH ================= */}
-          <div className="mb-4" style={{ maxWidth: 320 }}>
+          <div className="mb-4 d-flex flex-wrap align-items-center gap-3">
             <input
               type="text"
               className="form-control bg-dark text-light"
               placeholder="🔍 Search team name…"
               value={search}
               onChange={(e) => setSearch(e.target.value || "")}
+              style={{ maxWidth: 320 }}
             />
+            <div className="form-check">
+              <input
+                type="checkbox"
+                className="form-check-input"
+                id="showDisbanded"
+                checked={showDisbanded}
+                onChange={(e) => setShowDisbanded(e.target.checked)}
+              />
+              <label className="form-check-label text-light" htmlFor="showDisbanded">
+                Show disbanded teams
+              </label>
+            </div>
           </div>
 
           {/* ================= TEAM LIST ================= */}
