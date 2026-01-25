@@ -67,7 +67,6 @@ html {
 .app-wrapper {
   position: relative;
   min-height: 100vh;
-  overflow: hidden;
 }
 
 .pull-to-refresh-zone {
@@ -75,7 +74,7 @@ html {
   top: 0;
   left: 0;
   right: 0;
-  height: 80px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -83,15 +82,13 @@ html {
   background: linear-gradient(180deg, #3b6ea5, #7a2bc2);
   color: #fff;
   font-weight: 500;
-  z-index: 1;
+  z-index: 9999;
+  transform: translateY(-100%);
+  transition: transform 0.2s ease;
 }
 
-.app-content {
-  position: relative;
-  z-index: 10;
-  background: #0a0a0a;
-  min-height: 100vh;
-  will-change: transform;
+.pull-to-refresh-zone.visible {
+  transform: translateY(0);
 }
 
 .ptr-spinner {
@@ -133,6 +130,23 @@ body {
   border-bottom: 2px solid #3b6ea5;
   margin: 0;
   text-align: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1100;
+}
+
+/* Add padding to body to account for fixed header */
+.app-content {
+  padding-top: 100px;
+  /* Mobile header height */
+}
+
+@media (min-width: 768px) {
+  .app-content {
+    padding-top: 80px;
+  }
 }
 
 .ecgl-header h1 {
@@ -189,6 +203,15 @@ body {
 .page-content {
   margin: 0;
   padding: 15px;
+  padding-top: 75px;
+  /* Account for fixed header on mobile */
+}
+
+@media (min-width: 768px) {
+  .page-content {
+    padding-top: 15px;
+    /* Desktop doesn't need extra padding */
+  }
 }
 
 /* === Desktop Sidebar Shell === */
@@ -197,12 +220,6 @@ body {
 }
 
 @media (min-width: 768px) {
-  .ecgl-header {
-    position: sticky;
-    top: 0;
-    z-index: 1100;
-  }
-
   .ecgl-shell {
     display: block;
     min-height: calc(100vh - 0px);
@@ -1572,9 +1589,11 @@ body.has-bottom-nav {
 /* Mobile: keep league header locked at the top */
 @media (max-width: 768px) {
   .ecgl-header {
-    position: sticky;
+    position: fixed;
     top: 0;
-    z-index: 1000;
+    left: 0;
+    right: 0;
+    z-index: 1100;
   }
 
   .ecgl-mobile-nav-trigger {

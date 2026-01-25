@@ -291,8 +291,8 @@ function App() {
 
   return (
     <div className="app-wrapper">
-      {/* Pull-to-refresh indicator - sits behind content */}
-      <div className="pull-to-refresh-zone">
+      {/* Pull-to-refresh indicator - slides down from top */}
+      <div className={`pull-to-refresh-zone ${pullDistance > 20 || isRefreshing ? 'visible' : ''}`}>
         <div className={`ptr-spinner ${isRefreshing ? 'spinning' : ''}`}>
           {isRefreshing ? '↻' : '↓'}
         </div>
@@ -301,14 +301,8 @@ function App() {
         </span>
       </div>
 
-      {/* Main content that slides down */}
-      <div
-        className="app-content"
-        style={{
-          transform: pullDistance > 0 ? `translateY(${pullDistance}px)` : 'none',
-          transition: pullDistance === 0 && !isRefreshing ? 'transform 0.3s ease' : 'none'
-        }}
-      >
+      {/* Main content */}
+      <div className="app-content">
         {/* === Header === */}
         <header className="ecgl-header text-center">
           <div className="d-flex align-items-center justify-content-between">
