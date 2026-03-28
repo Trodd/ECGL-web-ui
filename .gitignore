@@ -1,6 +1,5 @@
 # Data files
 data.sql
-*.sql
 *.db
 *.sqlite
 
@@ -11,3 +10,10 @@ data.sql
 .venv/
 __pycache__/
 *.pyc
+
+# User data - archives and uploads
+backend/archives/
+backend/uploads/
+
+# Certificates (sensitive)
+backend/certs/
