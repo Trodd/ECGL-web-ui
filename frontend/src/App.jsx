@@ -640,7 +640,7 @@ function App() {
           <div className="page-content ecgl-content">
             <ErrorBoundary>
               <Routes>
-                <Route path="/" element={<Home />} />
+                <Route path="/" element={<Home user={user} />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="/teams" element={<Teams />} />
                 <Route path="/teams/:id" element={<TeamDetail />} />

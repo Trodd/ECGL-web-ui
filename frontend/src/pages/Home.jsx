@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import FullSeasonCalendar from "../components/SeasonCalendar";
 import Rules from "../components/Rules";
 
-export default function Home() {
+export default function Home({ user }) {
   const urlBase = import.meta.env.VITE_API_URL;
   const [upcoming, setUpcoming] = useState([]);
 
@@ -125,30 +125,54 @@ export default function Home() {
         </p>
 
         <div className="d-flex flex-wrap justify-content-center gap-3">
-          {/* 🔑 Discord Login */}
-          <a
-            href={`/login`}
-            className="btn d-flex align-items-center gap-2"
-            style={{
-              backgroundColor: "#5865F2",
-              color: "white",
-              fontWeight: 600,
-              border: "none",
-              padding: "10px 16px",
-            }}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              fill="currentColor"
-              viewBox="0 0 24 24"
+          {/* 🔑 Discord Login or Welcome */}
+          {user ? (
+            <div
+              className="btn d-flex align-items-center gap-2"
+              style={{
+                backgroundColor: "#5865F2",
+                color: "white",
+                fontWeight: 600,
+                border: "none",
+                padding: "10px 16px",
+                cursor: "default",
+              }}
             >
-              <path d="M20.317 4.369a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.078.037c-.211.375-.444.864-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.249.077.077 0 0 0-.078-.037 19.736 19.736 0 0 0-4.885 1.515.07.07 0 0 0-.032.027C.533 9.045-.319 13.58.099 18.057a.082.082 0 0 0 .031.056 19.9 19.9 0 0 0 5.993 3.03.077.077 0 0 0 .084-.027c.461-.63.873-1.295 1.226-1.994a.076.076 0 0 0-.041-.105 13.201 13.201 0 0 1-1.872-.9.077.077 0 0 1-.008-.128c.126-.095.252-.192.371-.291a.074.074 0 0 1 .077-.01c3.927 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.099.245.196.372.291a.077.077 0 0 1-.006.128 12.299 12.299 0 0 1-1.873.899.076.076 0 0 0-.04.106c.36.698.772 1.363 1.225 1.993a.076.076 0 0 0 .084.028 19.876 19.876 0 0 0 6.002-3.03.077.077 0 0 0 .031-.055c.5-5.177-.838-9.673-3.548-13.66a.061.061 0 0 0-.031-.03ZM8.02 15.331c-1.183 0-2.156-1.085-2.156-2.419 0-1.333.955-2.418 2.156-2.418 1.21 0 2.175 1.095 2.156 2.418 0 1.334-.955 2.419-2.156 2.419Zm7.974 0c-1.183 0-2.156-1.085-2.156-2.419 0-1.333.955-2.418 2.156-2.418 1.21 0 2.175 1.095 2.156 2.418 0 1.334-.946 2.419-2.156 2.419Z" />
-            </svg>
-
-            Login with Discord
-          </a>
+              <img
+                src={
+                  user.avatar
+                    ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=32`
+                    : `https://cdn.discordapp.com/embed/avatars/${(BigInt(user.id) >> 22n) % 6n}.png`
+                }
+                alt="avatar"
+                style={{ width: 24, height: 24, borderRadius: "50%" }}
+              />
+              Welcome, {user.display_name || user.username}!
+            </div>
+          ) : (
+            <a
+              href={`/login`}
+              className="btn d-flex align-items-center gap-2"
+              style={{
+                backgroundColor: "#5865F2",
+                color: "white",
+                fontWeight: 600,
+                border: "none",
+                padding: "10px 16px",
+              }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                fill="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path d="M20.317 4.369a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.078.037c-.211.375-.444.864-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.249.077.077 0 0 0-.078-.037 19.736 19.736 0 0 0-4.885 1.515.07.07 0 0 0-.032.027C.533 9.045-.319 13.58.099 18.057a.082.082 0 0 0 .031.056 19.9 19.9 0 0 0 5.993 3.03.077.077 0 0 0 .084-.027c.461-.63.873-1.295 1.226-1.994a.076.076 0 0 0-.041-.105 13.201 13.201 0 0 1-1.872-.9.077.077 0 0 1-.008-.128c.126-.095.252-.192.371-.291a.074.074 0 0 1 .077-.01c3.927 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.099.245.196.372.291a.077.077 0 0 1-.006.128 12.299 12.299 0 0 1-1.873.899.076.076 0 0 0-.04.106c.36.698.772 1.363 1.225 1.993a.076.076 0 0 0 .084.028 19.876 19.876 0 0 0 6.002-3.03.077.077 0 0 0 .031-.055c.5-5.177-.838-9.673-3.548-13.66a.061.061 0 0 0-.031-.03ZM8.02 15.331c-1.183 0-2.156-1.085-2.156-2.419 0-1.333.955-2.418 2.156-2.418 1.21 0 2.175 1.095 2.156 2.418 0 1.334-.955 2.419-2.156 2.419Zm7.974 0c-1.183 0-2.156-1.085-2.156-2.419 0-1.333.955-2.418 2.156-2.418 1.21 0 2.175 1.095 2.156 2.418 0 1.334-.946 2.419-2.156 2.419Z" />
+              </svg>
+              Login with Discord
+            </a>
+          )}
 
           {/* 📝 Sign Up */}
           <a href="/register" className="btn ecgl-btn btn-primary">
