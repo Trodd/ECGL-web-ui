@@ -188,32 +188,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 	discordID, _ := strconv.ParseInt(discordIDStr, 10, 64)
 
-	var player Player
-	err := DB.First(&player, "id = ?", discordID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		respondJSON(w, map[string]any{
-			"registered": false,
-			"id":         discordIDStr,
-			"username":   session.Values["username"],
-			"avatar":     session.Values["avatar"],
-			"is_mod":     false,
-		})
-		return
-	}
-
-	// ❌ row exists but registration cleared
-	if player.Role == "" || player.Device == "" || player.Timezone == "" {
-		respondJSON(w, map[string]any{
-			"registered": false,
-			"id":         discordIDStr,
-			"username":   session.Values["username"],
-			"avatar":     session.Values["avatar"],
-			"is_mod":     false,
-		})
-		return
-	}
-
-	// --- ✅ Discord Role Check for League Mod ---
+	// --- ✅ Discord Role Check for League Mod (check early, before registration check) ---
 	isMod := false
 	guildID := getEnv("DISCORD_GUILD_ID", "")
 	modRoleID := getEnv("DISCORD_LEAGUE_MOD_ROLE_ID", "")
@@ -240,6 +215,31 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 			}
 			resp.Body.Close()
 		}
+	}
+
+	var player Player
+	err := DB.First(&player, "id = ?", discordID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		respondJSON(w, map[string]any{
+			"registered": false,
+			"id":         discordIDStr,
+			"username":   session.Values["username"],
+			"avatar":     session.Values["avatar"],
+			"is_mod":     isMod,
+		})
+		return
+	}
+
+	// ❌ row exists but registration cleared
+	if player.Role == "" || player.Device == "" || player.Timezone == "" {
+		respondJSON(w, map[string]any{
+			"registered": false,
+			"id":         discordIDStr,
+			"username":   session.Values["username"],
+			"avatar":     session.Values["avatar"],
+			"is_mod":     isMod,
+		})
+		return
 	}
 
 	casterRoleID := getEnv("DISCORD_CASTER_ROLE_ID", "")
