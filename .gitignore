@@ -1,0 +1,13 @@
+# Data files
+data.sql
+*.sql
+*.db
+*.sqlite
+
+# Environment
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
