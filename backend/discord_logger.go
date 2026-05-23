@@ -61,6 +61,79 @@ func SendDiscordLog(msg string) {
 	SendDiscordChannelLog(channelID, msg)
 }
 
+func SendDiscordEmbed(channelID, title, description, buttonLabel, buttonURL string, mentionUserIDs []string) {
+	botToken := os.Getenv("DISCORD_BOT_TOKEN")
+
+	if channelID == "" || botToken == "" {
+		log.Println("❌ Missing Discord env vars (Embed not sent)")
+		return
+	}
+
+	allowedMentions := map[string]any{}
+	body := map[string]any{
+		"embeds": []any{
+			map[string]any{
+				"title":       title,
+				"description": description,
+				"color":       0x3498DB,
+			},
+		},
+	}
+
+	if len(mentionUserIDs) > 0 {
+		mentionContent := ""
+		for _, id := range mentionUserIDs {
+			mentionContent += fmt.Sprintf("<@%s> ", id)
+		}
+		mentionContent = strings.TrimSpace(mentionContent)
+		body["content"] = mentionContent
+		allowedMentions["users"] = mentionUserIDs
+		body["allowed_mentions"] = allowedMentions
+	}
+
+	if buttonLabel != "" && buttonURL != "" {
+		body["components"] = []any{
+			map[string]any{
+				"type": 1,
+				"components": []any{
+					map[string]any{
+						"type":  2,
+						"style": 5,
+						"label": buttonLabel,
+						"url":   buttonURL,
+					},
+				},
+			},
+		}
+	}
+
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest(
+		"POST",
+		"https://discord.com/api/v10/channels/"+channelID+"/messages",
+		bytes.NewBuffer(b),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bot "+botToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Println("❌ Failed sending Discord embed:", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("❌ Failed sending Discord embed: %s %s", resp.Status, strings.TrimSpace(string(body)))
+		return
+	}
+}
+
+func SendDiscordEmbedToGeneral(title, description, buttonLabel, buttonURL string, mentionUserIDs []string) {
+	SendDiscordEmbed(os.Getenv("DISCORD_LOG_CHANNEL_GENERAL"), title, description, buttonLabel, buttonURL, mentionUserIDs)
+}
+
 // -------------------------------------------------------------------
 // 🎮 General Logs (players, teams, join requests, etc.)
 // -------------------------------------------------------------------
@@ -73,8 +146,7 @@ func LogGeneral(msg string) {
 // 📅 Match Scheduling Logs
 // -------------------------------------------------------------------
 func LogMatch(msg string) {
-	channelID := os.Getenv("DISCORD_LOG_CHANNEL_MATCHES")
-	SendDiscordChannelLog(channelID, msg)
+	SendDiscordEmbedWithPings("Match Notification", msg, "", "", nil)
 }
 
 // -------------------------------------------------------------------

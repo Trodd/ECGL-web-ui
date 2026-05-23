@@ -47,8 +47,10 @@ func requireLogin(w http.ResponseWriter, r *http.Request) (*sessions.Session, bo
 
 	// Validate that user info exists
 	if _, ok := session.Values["user"].(string); !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return nil, false
+		if _, ok2 := session.Values["discord_id"].(string); !ok2 {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return nil, false
+		}
 	}
 
 	return session, true
@@ -813,18 +815,20 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 
 	// --- Load matches ---
 	type MatchWithMaps struct {
-		ID         uint         `json:"id"`
-		MatchCode  string       `json:"match_code"`
-		Opponent   string       `json:"opponent"`
-		Date       *time.Time   `json:"date"`
-		Result     string       `json:"result"`
-		Status     string       `json:"status"`
-		Season     string       `json:"season"`
-		TeamAID    uint         `json:"team_a_id"`
-		TeamBID    uint         `json:"team_b_id"`
-		LeagueSubA *string      `json:"league_sub_a"`
-		LeagueSubB *string      `json:"league_sub_b"`
-		Maps       []MatchScore `json:"maps"`
+		ID                     uint         `json:"id"`
+		MatchCode              string       `json:"match_code"`
+		Opponent               string       `json:"opponent"`
+		Date                   *time.Time   `json:"date"`
+		Result                 string       `json:"result"`
+		Status                 string       `json:"status"`
+		Season                 string       `json:"season"`
+		TeamAID                uint         `json:"team_a_id"`
+		TeamBID                uint         `json:"team_b_id"`
+		TeamAScheduleConfirmed bool         `json:"team_a_schedule_confirmed"`
+		TeamBScheduleConfirmed bool         `json:"team_b_schedule_confirmed"`
+		LeagueSubA             *string      `json:"league_sub_a"`
+		LeagueSubB             *string      `json:"league_sub_b"`
+		Maps                   []MatchScore `json:"maps"`
 	}
 
 	var matches []MatchWithMaps
@@ -840,7 +844,9 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
                 ELSE 'Pending'
             END AS result,
             m.status,
-            m.team_a_id, m.team_b_id
+            m.team_a_id, m.team_b_id,
+            m.team_a_schedule_confirmed,
+            m.team_b_schedule_confirmed
         FROM matches m
         JOIN teams t1 ON m.team_a_id = t1.id
         JOIN teams t2 ON m.team_b_id = t2.id
@@ -855,6 +861,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 			if err := rows.Scan(
 				&m.ID, &m.MatchCode, &m.Opponent, &m.Date,
 				&m.Result, &m.Status, &m.TeamAID, &m.TeamBID,
+				&m.TeamAScheduleConfirmed, &m.TeamBScheduleConfirmed,
 			); err != nil {
 				continue
 			}
@@ -2213,7 +2220,7 @@ func HandleToggleTeamJoinAllowed(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func SendDiscordEmbedWithPings(content, title, description string) {
+func SendDiscordEmbedWithPings(title, description, buttonLabel, buttonURL string, mentionUserIDs []string) {
 	botToken := getEnv("DISCORD_BOT_TOKEN", "")
 	channelID := getEnv("DISCORD_LOG_CHANNEL_MATCHES", "")
 
@@ -2222,8 +2229,8 @@ func SendDiscordEmbedWithPings(content, title, description string) {
 		return
 	}
 
+	allowedMentions := map[string]any{}
 	body := map[string]any{
-		"content": content, // <-- THIS IS WHERE REAL PINGS GO
 		"embeds": []any{
 			map[string]any{
 				"title":       title,
@@ -2231,6 +2238,33 @@ func SendDiscordEmbedWithPings(content, title, description string) {
 				"color":       0x3498DB,
 			},
 		},
+	}
+
+	if len(mentionUserIDs) > 0 {
+		mentionContent := ""
+		for _, id := range mentionUserIDs {
+			mentionContent += fmt.Sprintf("<@%s> ", id)
+		}
+		mentionContent = strings.TrimSpace(mentionContent)
+		body["content"] = mentionContent
+		allowedMentions["users"] = mentionUserIDs
+		body["allowed_mentions"] = allowedMentions
+	}
+
+	if buttonLabel != "" && buttonURL != "" {
+		body["components"] = []any{
+			map[string]any{
+				"type": 1,
+				"components": []any{
+					map[string]any{
+						"type":  2,
+						"style": 5,
+						"label": buttonLabel,
+						"url":   buttonURL,
+					},
+				},
+			},
+		}
 	}
 
 	b, _ := json.Marshal(body)
@@ -2247,7 +2281,13 @@ func SendDiscordEmbedWithPings(content, title, description string) {
 		log.Println("❌ SendDiscordEmbed error:", err)
 		return
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("❌ SendDiscordEmbed failed: %s %s", resp.Status, strings.TrimSpace(string(body)))
+		return
+	}
 }
 
 // --- POST /api/match/schedule ---
@@ -2283,28 +2323,35 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- Update & confirm ---
+	oldScheduled := match.ScheduledDate
 	match.ScheduledDate = &date
-	match.Status = "Scheduled"
-	match.TeamAScheduleConfirmed = true
-	match.TeamBScheduleConfirmed = true
+
+	isTeamA := req.TeamID == match.TeamAID
+	dateChanged := oldScheduled == nil || !oldScheduled.Equal(date)
+
+	if isTeamA {
+		match.TeamAScheduleConfirmed = true
+		if dateChanged {
+			match.TeamBScheduleConfirmed = false
+		}
+	} else {
+		match.TeamBScheduleConfirmed = true
+		if dateChanged {
+			match.TeamAScheduleConfirmed = false
+		}
+	}
+
+	if match.TeamAScheduleConfirmed && match.TeamBScheduleConfirmed {
+		now2 := time.Now()
+		match.ScheduleConfirmedAt = &now2
+		match.Status = "Scheduled"
+	} else {
+		match.Status = "Pending Schedule Confirmation"
+	}
 
 	if err := DB.Save(&match).Error; err != nil {
 		http.Error(w, "Failed to update match", http.StatusInternalServerError)
 		return
-	}
-
-	// 🚀 Schedule Discord match channel lifecycle
-	if match.ScheduledDate != nil {
-		// Initialize Discord session for channel management
-		botToken := getEnv("DISCORD_BOT_TOKEN", "")
-		if botToken != "" {
-			dg, err := discordgo.New("Bot " + botToken)
-			if err == nil {
-				go scheduleMatchChannel(dg, &match)
-			} else {
-				log.Printf("⚠️ Failed to create Discord session for match channel: %v", err)
-			}
-		}
 	}
 
 	// --- Logging (console only) ---
@@ -2314,74 +2361,61 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 		log.Printf("✏️ Match #%d rescheduled by Team %d: %s → %s", match.ID, req.TeamID, oldDate, date.Format(time.RFC1123))
 	}
 
-	// =====================================================
-	//         🔥 Build Embed for Discord Log
-	// =====================================================
-
 	// Fetch teams
 	var teamA, teamB Team
 	DB.First(&teamA, match.TeamAID)
 	DB.First(&teamB, match.TeamBID)
 
-	// Actor
-	session, _ := store.Get(r, "session")
-	discordIDStr, _ := session.Values["discord_id"].(string)
+	requestingTeam := teamA.Name
+	if req.TeamID == match.TeamBID {
+		requestingTeam = teamB.Name
+	}
 
-	// --- Fetch rosters ---
-	var rosterA, rosterB []TeamMember
-	DB.Where("team_id = ?", match.TeamAID).Find(&rosterA)
-	DB.Where("team_id = ?", match.TeamBID).Find(&rosterB)
-
-	// --- Format pings safely ---
-	formatPings := func(list []TeamMember) string {
-		if len(list) == 0 {
-			return "*No players found*"
+	getCaptainPings := func(teamID uint) string {
+		var captains []TeamMember
+		DB.Where("team_id = ? AND role IN ?", teamID, []string{"Captain", "Co-Captain"}).Find(&captains)
+		if len(captains) == 0 {
+			return "(no captains found)"
 		}
 		p := ""
-		for _, m := range list {
+		for _, m := range captains {
 			p += fmt.Sprintf("<@%d> ", m.PlayerID)
 		}
-		return p
+		return strings.TrimSpace(p)
 	}
 
-	pingA := formatPings(rosterA)
-	pingB := formatPings(rosterB)
+	captainA := getCaptainPings(match.TeamAID)
+	captainB := getCaptainPings(match.TeamBID)
 
-	// Discord timestamp
-	timestamp := "<t:%d:f>"
-	if match.ScheduledDate != nil {
-		timestamp = fmt.Sprintf("<t:%d:f>", match.ScheduledDate.Unix())
-	} else {
-		timestamp = "Not Set"
+	frontendURL := getEnv("FRONTEND_URL", "https://gigglesquad.mooo.com")
+	var mentionUserIDs []string
+	addIDs := func(teamID uint) {
+		var captains []TeamMember
+		DB.Where("team_id = ? AND role IN ?", teamID, []string{"Captain", "Co-Captain"}).Find(&captains)
+		for _, m := range captains {
+			mentionUserIDs = append(mentionUserIDs, fmt.Sprintf("%d", m.PlayerID))
+		}
 	}
+	addIDs(match.TeamAID)
+	addIDs(match.TeamBID)
 
-	// --- Build embed description ---
-	desc := fmt.Sprintf(
-		"📌 **%s vs %s**\n"+
-			"📅 **Match Time:** %s\n"+
-			"🧑‍✈️ **Scheduled by:** <@%s>\n\n"+
-			"🔵 **%s Roster:**\n%s\n\n"+
-			"🔴 **%s Roster:**\n%s",
-		teamA.Name, teamB.Name,
-		timestamp,
-		discordIDStr,
-		teamA.Name, pingA,
-		teamB.Name, pingB,
+	SendDiscordEmbedToGeneral(
+		fmt.Sprintf("📌 Match Time Request — %s", match.MatchCode),
+		fmt.Sprintf(
+			"Requested by: **%s**\nTeams: **%s** vs **%s**\nRequested Date: <t:%d:f>\nStatus: Waiting on opponent confirmation.\n\n"+
+				"🔵 Team A Captains:\n%s\n\n🔴 Team B Captains:\n%s",
+			requestingTeam,
+			teamA.Name,
+			teamB.Name,
+			date.Unix(),
+			captainA,
+			captainB,
+		),
+		"View Match",
+		fmt.Sprintf("%s/match/%d", frontendURL, match.ID),
+		mentionUserIDs,
 	)
 
-	/// Combine both rosters into a ping message
-	pingContent := fmt.Sprintf(
-		"%s %s",
-		pingA, pingB,
-	)
-
-	SendDiscordEmbedWithPings(
-		pingContent,
-		fmt.Sprintf("📅 Match Scheduled — %s", match.MatchCode),
-		desc,
-	)
-
-	// Response
 	respondJSON(w, map[string]any{
 		"success": true,
 		"message": fmt.Sprintf("Match scheduled for %s", date.Format(time.RFC1123)),
@@ -2424,6 +2458,11 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	var match Match
 	if err := DB.First(&match, req.MatchID).Error; err != nil {
 		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
+	if !match.TeamAScheduleConfirmed || !match.TeamBScheduleConfirmed {
+		http.Error(w, "Match schedule must be confirmed by both teams before submitting scores", http.StatusBadRequest)
 		return
 	}
 
@@ -4333,6 +4372,14 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := DB.Save(&match).Error; err != nil {
+		log.Printf("❌ Failed to save schedule confirmation for match %d: %v", match.ID, err)
+		http.Error(w, "failed to save confirmation", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("ℹ️ Confirm schedule %d by team %d: A=%t B=%t", match.ID, req.TeamID, match.TeamAScheduleConfirmed, match.TeamBScheduleConfirmed)
+
 	// Load teams
 	var teamA, teamB Team
 	DB.First(&teamA, match.TeamAID)
@@ -4355,6 +4402,17 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 		match.ScheduleConfirmedAt = &now
 		DB.Save(&match)
 
+		// 🚀 Create Discord match channel once schedule is fully confirmed
+		botToken := getEnv("DISCORD_BOT_TOKEN", "")
+		if botToken != "" {
+			dg, err := discordgo.New("Bot " + botToken)
+			if err == nil {
+				go scheduleMatchChannel(dg, &match)
+			} else {
+				log.Printf("⚠️ Failed to create Discord session for match channel: %v", err)
+			}
+		}
+
 		// ================================
 		// 🔍 Load team rosters
 		// ================================
@@ -4365,19 +4423,18 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 		// ================================
 		// 🧠 Format roster pings (clean)
 		// ================================
-		formatPings := func(list []TeamMember) string {
+		formatEmbedPings := func(list []TeamMember) string {
 			if len(list) == 0 {
 				return "*No players found*"
 			}
 			if len(list) > 15 {
-				// Show first 10, hide the rest
+				// Show first 10, hide the rest inside embed for readability
 				p := ""
 				for i := 0; i < 10; i++ {
 					p += fmt.Sprintf("<@%d> ", list[i].PlayerID)
 				}
 				return fmt.Sprintf("%s\n…and **%d more**", p, len(list)-10)
 			}
-			// Normal ping list
 			p := ""
 			for _, m := range list {
 				p += fmt.Sprintf("<@%d> ", m.PlayerID)
@@ -4385,8 +4442,8 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 			return p
 		}
 
-		pingA := formatPings(teamAMembers)
-		pingB := formatPings(teamBMembers)
+		pingA := formatEmbedPings(teamAMembers)
+		pingB := formatEmbedPings(teamBMembers)
 
 		// ================================
 		// 📅 Include scheduled date/time
@@ -4439,7 +4496,31 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 		// ================================
 		// 📤 Send schedule log to MATCHES channel
 		// ================================
-		LogMatch(logMsg)
+		mentionSet := make(map[string]bool)
+		for _, m := range teamAMembers {
+			mentionSet[fmt.Sprintf("%d", m.PlayerID)] = true
+		}
+		for _, m := range teamBMembers {
+			mentionSet[fmt.Sprintf("%d", m.PlayerID)] = true
+		}
+		if actorDiscordID != "" {
+			mentionSet[actorDiscordID] = true
+		}
+
+		var mentionUserIDs []string
+		for id := range mentionSet {
+			mentionUserIDs = append(mentionUserIDs, id)
+		}
+
+		frontendURL := getEnv("FRONTEND_URL", "https://gigglesquad.mooo.com")
+		log.Printf("✅ Match %d fully confirmed; sending scheduled match log to Discord", match.ID)
+		SendDiscordEmbedWithPings(
+			fmt.Sprintf("📅 Match Scheduled — %s", match.MatchCode),
+			logMsg,
+			"View Match",
+			fmt.Sprintf("%s/match/%d", frontendURL, match.ID),
+			mentionUserIDs,
+		)
 	}
 
 	respondJSON(w, map[string]any{

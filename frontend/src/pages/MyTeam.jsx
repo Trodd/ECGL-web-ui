@@ -850,7 +850,8 @@ export default function MyTeam() {
         {(() => {
           const activeMatches = (matches ?? []).filter((m) => {
             if (!m) return false;
-            return String(m.status ?? "").trim().toLowerCase() === "scheduled";
+            const status = String(m.status ?? "").trim().toLowerCase();
+            return status === "scheduled" || status === "pending schedule confirmation";
           });
 
           if (activeMatches.length === 0) {

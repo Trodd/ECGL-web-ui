@@ -23,6 +23,32 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
         (isTeamA && match.team_a_score_confirmed) ||
         (isTeamB && match.team_b_score_confirmed);
 
+    const scheduleConfirmed =
+        match.team_a_schedule_confirmed && match.team_b_schedule_confirmed;
+
+    const myScheduleConfirmed =
+        (isTeamA && match.team_a_schedule_confirmed) ||
+        (isTeamB && match.team_b_schedule_confirmed);
+
+    const opponentScheduleConfirmed =
+        (isTeamA && match.team_b_schedule_confirmed) ||
+        (isTeamB && match.team_a_schedule_confirmed);
+
+    async function handleConfirmSchedule() {
+        try {
+            await axios.post(
+                `${urlBase}/api/match/confirm-schedule`,
+                { match_id: match.id, team_id: team.id },
+                { withCredentials: true }
+            );
+            setMsg("✅ Match time confirmed!");
+            await loadTeam();
+        } catch (err) {
+            console.error(err);
+            setMsg("❌ Failed to confirm match time.");
+        }
+    }
+
     // 🧍 League Subs
     const [leagueSubs, setLeagueSubs] = useState([]);
     const [selectedSubA, setSelectedSubA] = useState("");
@@ -111,11 +137,11 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                 { match_id: match.id, team_id: team.id, date: utc },
                 { withCredentials: true }
             );
-            setMsg("✅ Match scheduled successfully!");
+            setMsg("✅ Match time requested. Waiting for opponent confirmation.");
             setEditing(false);
             await loadTeam();
         } catch {
-            setMsg("❌ Failed to schedule match.");
+            setMsg("❌ Failed to request match time.");
         }
     }
 
@@ -232,12 +258,42 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                                     ✏️ Edit Date / Time
                                 </button>
                             )}
+
+                            {match.date && (
+                                <div className="mt-3">
+                                    <div className="small text-secondary">
+                                        {myScheduleConfirmed
+                                            ? "✅ Your team has confirmed this date/time."
+                                            : "⚠️ Your team must confirm this date/time before scoring is enabled."}
+                                    </div>
+                                    <div className="small text-secondary">
+                                        {opponentScheduleConfirmed
+                                            ? "✅ Opponent has confirmed the date/time."
+                                            : "⏳ Opponent must confirm the date/time before scoring is unlocked."}
+                                    </div>
+
+                                    {!scheduleConfirmed && isCaptain && !myScheduleConfirmed && (
+                                        <button
+                                            className="btn btn-success btn-sm mt-2"
+                                            onClick={handleConfirmSchedule}
+                                        >
+                                            ✅ Confirm this schedule for your team
+                                        </button>
+                                    )}
+
+                                    {!scheduleConfirmed && !isCaptain && (
+                                        <div className="small text-warning mt-2">
+                                            Only team captains can confirm the scheduled time. Scores stay locked until both teams agree.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </>
                     )}
                 </div>
 
                 {/* ================= SCORING ================= */}
-                {match.date && isCaptain && (
+                {match.date && isCaptain && scheduleConfirmed && (
                     <div className="match-section">
 
                         <h6 className="section-title">
