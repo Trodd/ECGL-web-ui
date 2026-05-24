@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { getApiUrl } from "../config";
 
 export default function Leaderboard() {
   const [view, setView] = useState("teams"); // default: teams
@@ -8,10 +9,10 @@ export default function Leaderboard() {
 
   useEffect(() => {
     if (view === "teams") {
-      axios.get(`${import.meta.env.VITE_API_URL}/api/leaderboard/teams`)
+      axios.get(`${getApiUrl()}/api/leaderboard/teams`)
         .then(res => setTeams(res.data || []));
     } else {
-      axios.get(`${import.meta.env.VITE_API_URL}/api/leaderboard/players`)
+      axios.get(`${getApiUrl()}/api/leaderboard/players`)
         .then(res => setPlayers(res.data || []));
     }
   }, [view]);

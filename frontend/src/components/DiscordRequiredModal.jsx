@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { getApiUrl } from "../config";
 
 export default function DiscordRequiredModal({ show, onClose }) {
     const [info, setInfo] = useState(null);
-    const urlBase = import.meta.env.VITE_API_URL;
+    const urlBase = getApiUrl();
 
     useEffect(() => {
         if (!show) return;

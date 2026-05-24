@@ -14,10 +14,12 @@ import PlayerDetail from "./pages/PlayerDetail";
 import MatchDetail from "./pages/MatchDetail";
 import Finals from "./pages/Finals";
 import LeagueMod from "./pages/LeagueMod";
+import LeagueSettings from "./pages/LeagueSettings";
 
 import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import "./styles.css";
+import { getApiUrl } from "./config";
 
 function App() {
   const navigate = useNavigate();
@@ -252,7 +254,7 @@ function App() {
 
   useEffect(() => {
     // Fetch user (session-based)
-    fetch(`${import.meta.env.VITE_API_URL}/api/me`, {
+    fetch(`${getApiUrl()}/api/me`, {
       credentials: "include",
     })
       .then((res) => (res.ok ? res.json() : null))
@@ -261,13 +263,13 @@ function App() {
       .finally(() => setLoadingUser(false));
 
     // Fetch season
-    fetch(`${import.meta.env.VITE_API_URL}/api/season`)
+    fetch(`${getApiUrl()}/api/season`)
       .then((res) => res.json())
       .then((data) => setSeason(data.season))
       .catch(() => setSeason("Unknown"));
 
     // Fetch finals visibility
-    fetch(`${import.meta.env.VITE_API_URL}/api/finals/visible`)
+    fetch(`${getApiUrl()}/api/finals/visible`)
       .then(res => res.json())
       .then(data => setShowFinals(data.visible))
       .catch(() => setShowFinals(false));
@@ -276,7 +278,7 @@ function App() {
 
   useEffect(() => {
     function handleVisibilityUpdate() {
-      fetch(`${import.meta.env.VITE_API_URL}/api/finals/visible`)
+      fetch(`${getApiUrl()}/api/finals/visible`)
         .then(res => res.json())
         .then(data => setShowFinals(data.visible))
         .catch(() => setShowFinals(false));
@@ -421,6 +423,15 @@ function App() {
                   🛠️ League Mod
                 </button>
               )}
+              {!loadingUser && user?.is_dev && (
+                <button
+                  type="button"
+                  className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/settings" ? "mobile-nav-active" : ""}`}
+                  onClick={() => navigateFromMobile("/settings")}
+                >
+                  ⚙️ Settings
+                </button>
+              )}
             </div>
 
             {/* Auth section with divider */}
@@ -459,7 +470,7 @@ function App() {
                       <button
                         type="button"
                         className="account-dropdown-item"
-                        onClick={() => { window.location.href = `${import.meta.env.VITE_API_URL}/logout`; }}
+                        onClick={() => { window.location.href = `${getApiUrl()}/logout`; }}
                       >
                         🚪 Logout
                       </button>
@@ -470,7 +481,7 @@ function App() {
                 <a
                   className="list-group-item list-group-item-action bg-dark text-light"
                   style={{ borderRadius: '8px' }}
-                  href={`${import.meta.env.VITE_API_URL}/login`}
+                  href={`${getApiUrl()}/login`}
                 >
                   🔑 Login with Discord
                 </a>
@@ -580,6 +591,17 @@ function App() {
                   🛠️ League Mod
                 </NavLink>
               )}
+              {!loadingUser && user?.is_dev && (
+                <NavLink
+                  to="/settings"
+                  className={({ isActive }) =>
+                    `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                    }`
+                  }
+                >
+                  ⚙️ Settings
+                </NavLink>
+              )}
             </div>
 
             {/* Auth section - right under nav tabs */}
@@ -618,7 +640,7 @@ function App() {
                       <button
                         type="button"
                         className="account-dropdown-item"
-                        onClick={() => { window.location.href = `${import.meta.env.VITE_API_URL}/logout`; }}
+                        onClick={() => { window.location.href = `${getApiUrl()}/logout`; }}
                       >
                         🚪 Logout
                       </button>
@@ -628,7 +650,7 @@ function App() {
               ) : (
                 <a
                   className="list-group-item list-group-item-action ecgl-side-link ecgl-side-auth"
-                  href={`${import.meta.env.VITE_API_URL}/login`}
+                  href={`${getApiUrl()}/login`}
                 >
                   🔑 Login with Discord
                 </a>
@@ -654,6 +676,7 @@ function App() {
 
                 {/* 🛠️ League Mod Route (extra protected inside component) */}
                 <Route path="/modpanel" element={<LeagueMod />} />
+                <Route path="/settings" element={<LeagueSettings />} />
               </Routes>
             </ErrorBoundary>
           </div>

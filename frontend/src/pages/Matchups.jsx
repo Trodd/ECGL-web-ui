@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
+import { getApiUrl } from "../config";
 
 export default function Matchups() {
     const [flatMatches, setFlatMatches] = useState([]);
@@ -15,7 +16,7 @@ export default function Matchups() {
     useEffect(() => {
         setLoading(true);
         axios
-            .get(`${import.meta.env.VITE_API_URL}/api/matches/public`)
+            .get(`${getApiUrl()}/api/matches/public`)
             .then((res) => {
                 if (!res.data.success) throw new Error("Invalid response");
 
@@ -228,10 +229,10 @@ export default function Matchups() {
                                                         </span>
                                                         <span
                                                             className={`badge ${m.status === "Completed"
-                                                                    ? "bg-success"
-                                                                    : m.status === "Scheduled"
-                                                                        ? "bg-warning text-dark"
-                                                                        : "bg-secondary"
+                                                                ? "bg-success"
+                                                                : m.status === "Scheduled"
+                                                                    ? "bg-warning text-dark"
+                                                                    : "bg-secondary"
                                                                 }`}
                                                         >
                                                             {m.status}

@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
+import { getApiUrl } from "../config";
 
 export default function Teams() {
   const [teams, setTeams] = useState([]);
@@ -8,7 +9,7 @@ export default function Teams() {
   const [search, setSearch] = useState("");
   const [showDisbanded, setShowDisbanded] = useState(false);
   const [settings, setSettings] = useState(null);
-  const urlBase = import.meta.env.VITE_API_URL || "http://localhost:8080";
+  const urlBase = getApiUrl();
 
   function buildLogoSrc(logoUrl) {
     if (!logoUrl) return "";
@@ -30,7 +31,7 @@ export default function Teams() {
     async function loadTeams() {
       try {
         setError("");
-        const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/teams`, {
+        const res = await axios.get(`${urlBase}/api/teams`, {
           timeout: 15000,
         });
 

@@ -3,9 +3,10 @@ import axios from "axios";
 import { Link } from "react-router-dom";
 import FullSeasonCalendar from "../components/SeasonCalendar";
 import Rules from "../components/Rules";
+import { getApiUrl } from "../config";
 
 export default function Home({ user }) {
-  const urlBase = import.meta.env.VITE_API_URL;
+  const urlBase = getApiUrl();
   const [upcoming, setUpcoming] = useState([]);
 
   // =====================================================

@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import DiscordRequiredModal from "../components/DiscordRequiredModal";
+import { getApiUrl } from "../config";
 
 export default function Register() {
-  const urlBase = import.meta.env.VITE_API_URL;
+  const urlBase = getApiUrl();
 
   const [me, setMe] = useState(null);
   const [team, setTeam] = useState(null);

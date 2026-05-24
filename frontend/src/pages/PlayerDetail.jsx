@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
+import { getApiUrl } from "../config";
 
 export default function PlayerDetail() {
   const { id } = useParams();
@@ -12,7 +13,7 @@ export default function PlayerDetail() {
     async function load() {
       try {
         const res = await axios.get(
-          `${import.meta.env.VITE_API_URL}/api/player/${id}`
+          `${getApiUrl()}/api/player/${id}`
         );
         setPlayer(res.data);
       } catch (err) {

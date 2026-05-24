@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import "./calendar.css";
+import { getApiUrl } from "../config";
 
 export default function FullSeasonCalendar() {
     const [data, setData] = useState(null);
 
     useEffect(() => {
-        axios.get(`${import.meta.env.VITE_API_URL}/api/season/calendar`)
+        axios.get(`${getApiUrl()}/api/season/calendar`)
             .then(res => setData(res.data))
             .catch(() => setData(null));
     }, []);
@@ -16,35 +17,47 @@ export default function FullSeasonCalendar() {
     const {
         season_start,
         season_end,
-        break_start,
-        break_end,
-        finals_start,
-        finals_end
+        breaks,
+        finals
     } = data;
 
+    // Parse date string as local midnight (avoids UTC offset issues)
+    const parseLocal = (str) => {
+        if (!str) return null;
+        const [y, m, d] = str.split("-").map(Number);
+        return new Date(y, m - 1, d);
+    };
+
     // Convert main dates
-    const seasonStart = new Date(season_start);
-    const seasonEnd = new Date(season_end);
+    const seasonStart = parseLocal(season_start);
+    const seasonEnd = parseLocal(season_end);
 
-    const breakStart = break_start ? new Date(break_start) : null;
-    const breakEnd = break_end ? new Date(break_end) : null;
+    // Build break ranges array
+    const breakRanges = [];
+    if (breaks && breaks.length > 0) {
+        for (const b of breaks) {
+            breakRanges.push({ start: parseLocal(b.start), end: parseLocal(b.end) });
+        }
+    }
 
-    const finalsStart = finals_start ? new Date(finals_start) : null;
-    const finalsEnd = finals_end ? new Date(finals_end) : null;
+    // Build finals ranges array
+    const finalsRanges = [];
+    if (finals && finals.length > 0) {
+        for (const f of finals) {
+            finalsRanges.push({ start: parseLocal(f.start), end: parseLocal(f.end) });
+        }
+    }
 
     const seasonStartStr = seasonStart.toDateString();
     const seasonEndStr = seasonEnd.toDateString();
 
-    // Check if date is within break range
     const isInBreakRange = (dateObj) => {
-        if (!breakStart || !breakEnd) return false;
-        return dateObj >= breakStart && dateObj <= breakEnd;
+        return breakRanges.some(b => dateObj >= b.start && dateObj <= b.end);
     };
 
-    // Check if date is within finals range
+    // Check if date is within any finals range (inclusive)
     const isInFinalsRange = (dateObj) => {
-        if (!finalsStart || !finalsEnd) return false;
-        return dateObj >= finalsStart && dateObj <= finalsEnd;
+        return finalsRanges.some(f => dateObj >= f.start && dateObj <= f.end);
     };
 
     // Build list of all months in the season

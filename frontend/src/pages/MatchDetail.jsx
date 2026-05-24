@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
 import CastModal from "../components/CastModal";
+import { getApiUrl } from "../config";
 
 export default function MatchDetail() {
     const { id } = useParams();
@@ -19,7 +20,7 @@ export default function MatchDetail() {
     // -----------------------------------------------------
     useEffect(() => {
         axios
-            .get(`${import.meta.env.VITE_API_URL}/api/players`, { withCredentials: true })
+            .get(`${getApiUrl()}/api/players`, { withCredentials: true })
             .then((res) => {
                 const list = Array.isArray(res.data) ? res.data : [];
 
@@ -54,7 +55,7 @@ export default function MatchDetail() {
         if (!url) return "";
         if (/^https?:\/\//i.test(url)) return url;
 
-        const base = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+        const base = (getApiUrl() || "").replace(/\/$/, "");
         const path = String(url).startsWith("/") ? url : `/${url}`;
         return `${base}${path}`;
     }
@@ -64,7 +65,7 @@ export default function MatchDetail() {
     // -----------------------------------------------------
     useEffect(() => {
         axios
-            .get(`${import.meta.env.VITE_API_URL}/api/match/${id}`)
+            .get(`${getApiUrl()}/api/match/${id}`)
             .then((res) => {
                 console.log("✅ /api/match response:", res.data);
                 setMatchData(res.data);
@@ -81,7 +82,7 @@ export default function MatchDetail() {
     // -----------------------------------------------------
     useEffect(() => {
         axios
-            .get(`${import.meta.env.VITE_API_URL}/api/me`, { withCredentials: true })
+            .get(`${getApiUrl()}/api/me`, { withCredentials: true })
             .then((res) => setMe(res.data))
             .catch(() => setMe(null));
     }, []);
@@ -91,7 +92,7 @@ export default function MatchDetail() {
     // -----------------------------------------------------
     useEffect(() => {
         axios
-            .get(`${import.meta.env.VITE_API_URL}/api/match/cast/get/${id}`, {
+            .get(`${getApiUrl()}/api/match/cast/get/${id}`, {
                 withCredentials: true,
             })
             .then((res) => setExistingCast(res.data || null))
@@ -105,7 +106,7 @@ export default function MatchDetail() {
         if (!players.length) return;
 
         axios
-            .get(`${import.meta.env.VITE_API_URL}/api/match/cast/get/${id}`, {
+            .get(`${getApiUrl()}/api/match/cast/get/${id}`, {
                 withCredentials: true,
             })
             .then((res) => setExistingCast(res.data || null))
@@ -175,7 +176,7 @@ export default function MatchDetail() {
     async function openCastEditor() {
         try {
             const res = await axios.get(
-                `${import.meta.env.VITE_API_URL}/api/match/cast/get/${id}`,
+                `${getApiUrl()}/api/match/cast/get/${id}`,
                 { withCredentials: true }
             );
             setExistingCast(res.data || { casters: [], camera: "" });
@@ -234,11 +235,11 @@ export default function MatchDetail() {
                 onClose={() => setShowCastModal(false)}
                 matchID={id}
                 existingCast={existingCast}
-                urlBase={import.meta.env.VITE_API_URL}
+                urlBase={getApiUrl()}
                 onSaved={() => {
-                    axios.get(`${import.meta.env.VITE_API_URL}/api/match/${id}`)
+                    axios.get(`${getApiUrl()}/api/match/${id}`)
                         .then(res => setMatchData(res.data));
-                    axios.get(`${import.meta.env.VITE_API_URL}/api/match/cast/get/${id}`)
+                    axios.get(`${getApiUrl()}/api/match/cast/get/${id}`)
                         .then(res => setExistingCast(res.data));
                 }}
             />

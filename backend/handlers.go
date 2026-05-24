@@ -41,6 +41,19 @@ func getEnvInt(key string, def int) int {
 	return n
 }
 
+// clampRating enforces floor (0) and ceiling (MAX_RATING env, default 1300) on a rating value.
+func clampRating(rating int) int {
+	min := getEnvInt("MIN_RATING", 0)
+	max := getEnvInt("MAX_RATING", 1300)
+	if rating < min {
+		return min
+	}
+	if rating > max {
+		return max
+	}
+	return rating
+}
+
 // --- Require Login ---
 func requireLogin(w http.ResponseWriter, r *http.Request) (*sessions.Session, bool) {
 	session, _ := store.Get(r, "session")
@@ -3478,6 +3491,59 @@ func requireLeagueMod(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return "", false
 }
 
+// requireDev checks if the user has the DISCORD_DEV_ROLE_ID role.
+func requireDev(w http.ResponseWriter, r *http.Request) (string, bool) {
+	session, _ := store.Get(r, "session")
+	discordID, ok := session.Values["discord_id"].(string)
+	if !ok || discordID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return "", false
+	}
+
+	guildID := os.Getenv("DISCORD_GUILD_ID")
+	devRoleID := os.Getenv("DISCORD_DEV_ROLE_ID")
+	botToken := os.Getenv("DISCORD_BOT_TOKEN")
+
+	if guildID == "" || devRoleID == "" || botToken == "" {
+		http.Error(w, "Server not configured for dev role check", http.StatusInternalServerError)
+		return "", false
+	}
+
+	req, _ := http.NewRequest("GET",
+		fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordID),
+		nil)
+	req.Header.Set("Authorization", "Bot "+botToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, "Failed to reach Discord API", http.StatusInternalServerError)
+		return "", false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		http.Error(w, "Failed to verify Discord role", http.StatusForbidden)
+		return "", false
+	}
+
+	var member struct {
+		Roles []string `json:"roles"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&member); err != nil {
+		http.Error(w, "Failed to parse Discord response", http.StatusInternalServerError)
+		return "", false
+	}
+
+	for _, role := range member.Roles {
+		if role == devRoleID {
+			return discordID, true
+		}
+	}
+
+	http.Error(w, "Forbidden: missing Dev role", http.StatusForbidden)
+	return "", false
+}
+
 // ========= MOD HELPERS (safe utilities) =========
 
 func modJSONErr(w http.ResponseWriter, code int, msg string) {
@@ -3736,6 +3802,7 @@ func ModTeamAdjustRating(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t.Rating += req.Delta
+	t.Rating = clampRating(t.Rating)
 	if err := DB.Save(&t).Error; err != nil {
 		modJSONErr(w, http.StatusInternalServerError, "failed to adjust rating")
 		return
@@ -4611,9 +4678,7 @@ func applyPlayerStats(teamID uint, won bool) {
 			p.Rating += lossPts
 		}
 
-		if p.Rating < 0 {
-			p.Rating = 0
-		}
+		p.Rating = clampRating(p.Rating)
 
 		DB.Save(&p)
 	}
@@ -4803,7 +4868,7 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 	isFinals := match.IsFinals
 
 	if !isFinals && match.WinnerID != nil {
-		updateLeaderboards(*match.WinnerID, *match.LoserID)
+		updateLeaderboards(*match.WinnerID, *match.LoserID, match.MatchCode)
 		applyPlayerStats(*match.WinnerID, true)
 		applyPlayerStats(*match.LoserID, false)
 	}
@@ -4831,6 +4896,7 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 				p.Losses++
 				p.Rating += getEnvInt("ELO_LOSS_POINTS", -25)
 			}
+			p.Rating = clampRating(p.Rating)
 			DB.Save(&p)
 
 			DB.Create(&PlayerHistory{
@@ -4992,26 +5058,48 @@ func snapshotMatchRosters(matchID, teamAID, teamBID uint) error {
 }
 
 // updateLeaderboards updates both team + player leaderboards using ELO from env.
-func updateLeaderboards(winnerID, loserID uint) {
+// Applies underdog bonus based on rating difference; challenge matches get a multiplier.
+func updateLeaderboards(winnerID, loserID uint, matchCode string) {
 	// Read from .env or fallback
 	eloWinPoints := getEnvInt("ELO_WIN_POINTS", 25)
 	eloLossPoints := getEnvInt("ELO_LOSS_POINTS", -25)
 	defaultPlayerRating := getEnvInt("DEFAULT_PLAYER_RATING", 800)
+	underdogBonusPer100 := getEnvInt("UNDERDOG_BONUS_PER_100", 10)
+	challengeMultiplier := getEnvInt("CHALLENGE_BONUS_MULTIPLIER", 2)
+
+	isChallenge := strings.Contains(matchCode, "CHAL")
 
 	var winner, loser Team
-	if err := DB.First(&winner, winnerID).Error; err == nil {
+	winnerFound := DB.First(&winner, winnerID).Error == nil
+	loserFound := DB.First(&loser, loserID).Error == nil
+
+	// Calculate underdog bonus (only if winner rating < loser rating)
+	underdogBonus := 0
+	if winnerFound && loserFound && loser.Rating > winner.Rating {
+		diff := loser.Rating - winner.Rating
+		underdogBonus = diff * underdogBonusPer100 / 100
+		if isChallenge {
+			underdogBonus *= challengeMultiplier
+		}
+	}
+
+	actualWinPts := eloWinPoints + underdogBonus
+
+	if winnerFound {
 		winner.Wins++
 		winner.Matches++
-		winner.Rating += eloWinPoints
+		winner.Rating += actualWinPts
+		winner.Rating = clampRating(winner.Rating)
 		DB.Save(&winner)
 	} else {
 		log.Printf("⚠️ Could not find winner team %d", winnerID)
 	}
 
-	if err := DB.First(&loser, loserID).Error; err == nil {
+	if loserFound {
 		loser.Losses++
 		loser.Matches++
 		loser.Rating += eloLossPoints
+		loser.Rating = clampRating(loser.Rating)
 		DB.Save(&loser)
 	} else {
 		log.Printf("⚠️ Could not find loser team %d", loserID)
@@ -5027,7 +5115,7 @@ func updateLeaderboards(winnerID, loserID uint) {
 			Updates(map[string]any{
 				"wins":    gorm.Expr("wins + 1"),
 				"matches": gorm.Expr("matches + 1"),
-				"rating":  gorm.Expr("COALESCE(rating, ?) + ?", defaultPlayerRating, eloWinPoints),
+				"rating":  gorm.Expr("LEAST(COALESCE(rating, ?) + ?, ?)", defaultPlayerRating, actualWinPts, getEnvInt("MAX_RATING", 1300)),
 			})
 	}
 
@@ -5036,12 +5124,17 @@ func updateLeaderboards(winnerID, loserID uint) {
 			Updates(map[string]any{
 				"losses":  gorm.Expr("losses + 1"),
 				"matches": gorm.Expr("matches + 1"),
-				"rating":  gorm.Expr("COALESCE(rating, ?) + ?", defaultPlayerRating, eloLossPoints),
+				"rating":  gorm.Expr("GREATEST(COALESCE(rating, ?) + ?, ?)", defaultPlayerRating, eloLossPoints, getEnvInt("MIN_RATING", 0)),
 			})
 	}
 
-	log.Printf("📊 Leaderboards updated (ELO %+d / %+d): winner=%d loser=%d",
-		eloWinPoints, eloLossPoints, winnerID, loserID)
+	if underdogBonus > 0 {
+		log.Printf("📊 Leaderboards updated (ELO %+d base + %d underdog bonus, challenge=%v): winner=%d loser=%d",
+			eloWinPoints, underdogBonus, isChallenge, winnerID, loserID)
+	} else {
+		log.Printf("📊 Leaderboards updated (ELO %+d / %+d): winner=%d loser=%d",
+			eloWinPoints, eloLossPoints, winnerID, loserID)
+	}
 }
 
 // snapshotTeamRoster saves all current members of a team into player_history for the current season (if not already recorded).
@@ -6728,7 +6821,7 @@ func HandleModAdjustTeamStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	team.Rating = req.Rating
+	team.Rating = clampRating(req.Rating)
 	team.Wins = req.Wins
 	team.Losses = req.Losses
 	team.Matches = req.Matches
@@ -6780,7 +6873,7 @@ func HandleModAdjustPlayerStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.Rating = req.Rating
+	p.Rating = clampRating(req.Rating)
 	p.Wins = req.Wins
 	p.Losses = req.Losses
 	p.Matches = req.Matches
@@ -8592,13 +8685,41 @@ func SendDiscordToChannel(channelID string, msg string) {
 func HandleGetSeasonCalendar(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	// Multiple breaks: BREAKS=start:end,start:end,...
+	var breaks []map[string]string
+	breaksEnv := getEnv("BREAKS", "")
+	if breaksEnv != "" {
+		for _, pair := range strings.Split(breaksEnv, ",") {
+			parts := strings.SplitN(strings.TrimSpace(pair), ":", 2)
+			if len(parts) == 2 {
+				breaks = append(breaks, map[string]string{
+					"start": strings.TrimSpace(parts[0]),
+					"end":   strings.TrimSpace(parts[1]),
+				})
+			}
+		}
+	}
+
+	// Multiple finals: FINALS=start:end,start:end,...
+	var finals []map[string]string
+	finalsEnv := getEnv("FINALS", "")
+	if finalsEnv != "" {
+		for _, pair := range strings.Split(finalsEnv, ",") {
+			parts := strings.SplitN(strings.TrimSpace(pair), ":", 2)
+			if len(parts) == 2 {
+				finals = append(finals, map[string]string{
+					"start": strings.TrimSpace(parts[0]),
+					"end":   strings.TrimSpace(parts[1]),
+				})
+			}
+		}
+	}
+
 	out := map[string]any{
 		"season_start": getEnv("SEASON_START", ""),
 		"season_end":   getEnv("SEASON_END", ""),
-		"break_start":  getEnv("BREAK_START", ""),
-		"break_end":    getEnv("BREAK_END", ""),
-		"finals_start": getEnv("FINALS_START", ""),
-		"finals_end":   getEnv("FINALS_END", ""),
+		"breaks":       breaks,
+		"finals":       finals,
 	}
 
 	respondJSON(w, out)
@@ -9420,4 +9541,131 @@ func syncMemberRoles(
 			}
 		}
 	}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// League Settings (mod-only) — GET and POST .env settings
+// ═══════════════════════════════════════════════════════════════
+
+// settingsKeys defines the env keys exposed to the settings panel (no secrets).
+var settingsKeys = []string{
+	"SEASON_START",
+	"SEASON_END",
+	"BREAKS",
+	"FINALS",
+	"WEEKLY_CHALLENGE_LIMIT",
+	"ELO_WIN_POINTS",
+	"ELO_LOSS_POINTS",
+	"UNDERDOG_BONUS_PER_100",
+	"CHALLENGE_BONUS_MULTIPLIER",
+	"MAX_RATING",
+	"MIN_RATING",
+	"DEFAULT_PLAYER_RATING",
+	"DEFAULT_TEAM_RATING",
+	"MIN_TEAM_PLAYERS",
+	"MAX_TEAM_PLAYERS",
+	"CURRENT_SEASON",
+	"ARENA_MODE_ENABLED",
+	"DISCORD_INVITE_URL",
+	"FRONTEND_URL",
+	"TLS_HOST",
+	"DEV_MODE",
+}
+
+// GET /api/mod/settings — returns current settings values
+func HandleGetSettings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireDev(w, r); !ok {
+		return
+	}
+
+	settings := map[string]string{}
+	for _, key := range settingsKeys {
+		settings[key] = os.Getenv(key)
+	}
+
+	respondJSON(w, settings)
+}
+
+// POST /api/mod/settings — updates settings in memory and persists to .env
+func HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireDev(w, r); !ok {
+		return
+	}
+
+	var incoming map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Validate only allowed keys
+	allowed := map[string]bool{}
+	for _, k := range settingsKeys {
+		allowed[k] = true
+	}
+
+	for key, val := range incoming {
+		if !allowed[key] {
+			http.Error(w, fmt.Sprintf("Key %q is not configurable", key), http.StatusBadRequest)
+			return
+		}
+		os.Setenv(key, val)
+	}
+
+	// Persist to .env file
+	if err := persistEnvFile(); err != nil {
+		log.Printf("❌ Failed to persist .env: %v", err)
+		http.Error(w, "Failed to save settings", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{"success": true})
+}
+
+// persistEnvFile reads the current .env, updates changed keys, and writes back.
+func persistEnvFile() error {
+	envPath := ".env"
+
+	// Read existing file
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	existing := map[string]bool{}
+
+	// Update existing lines in place
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		parts := strings.SplitN(trimmed, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		existing[key] = true
+
+		// Check if this key is in our settingsKeys and update its value
+		for _, sk := range settingsKeys {
+			if key == sk {
+				lines[i] = key + "=" + os.Getenv(key)
+				break
+			}
+		}
+	}
+
+	// Append any new keys that weren't in the file
+	for _, sk := range settingsKeys {
+		if !existing[sk] {
+			val := os.Getenv(sk)
+			if val != "" {
+				lines = append(lines, sk+"="+val)
+			}
+		}
+	}
+
+	return os.WriteFile(envPath, []byte(strings.Join(lines, "\n")), 0644)
 }

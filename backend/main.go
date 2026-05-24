@@ -190,11 +190,13 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 
 	// --- ✅ Discord Role Check for League Mod (check early, before registration check) ---
 	isMod := false
+	isDev := false
 	guildID := getEnv("DISCORD_GUILD_ID", "")
 	modRoleID := getEnv("DISCORD_LEAGUE_MOD_ROLE_ID", "")
+	devRoleID := getEnv("DISCORD_DEV_ROLE_ID", "")
 	botToken := getEnv("DISCORD_BOT_TOKEN", "")
 
-	if guildID != "" && modRoleID != "" && botToken != "" {
+	if guildID != "" && botToken != "" {
 		req, _ := http.NewRequest("GET",
 			fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordIDStr),
 			nil)
@@ -209,7 +211,9 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 				for _, role := range member.Roles {
 					if role == modRoleID {
 						isMod = true
-						break
+					}
+					if role == devRoleID {
+						isDev = true
 					}
 				}
 			}
@@ -226,6 +230,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 			"username":   session.Values["username"],
 			"avatar":     session.Values["avatar"],
 			"is_mod":     isMod,
+			"is_dev":     isDev,
 		})
 		return
 	}
@@ -238,6 +243,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 			"username":   session.Values["username"],
 			"avatar":     session.Values["avatar"],
 			"is_mod":     isMod,
+			"is_dev":     isDev,
 		})
 		return
 	}
@@ -279,6 +285,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		"timezone":     player.Timezone,
 		"avatar":       session.Values["avatar"],
 		"is_mod":       isMod,
+		"is_dev":       isDev,
 		"is_caster":    isCaster,
 	})
 }
@@ -729,6 +736,8 @@ func main() {
 	r.HandleFunc("/api/mod/team/lock", HandleModToggleTeamLock).Methods("POST")
 	r.HandleFunc("/api/mod/player/remove-cooldown", ModRemoveCooldown).Methods("POST")
 	r.HandleFunc("/api/mod/player/archive-all", HandleArchiveAllPlayers).Methods("POST")
+	r.HandleFunc("/api/mod/settings", HandleGetSettings).Methods("GET")
+	r.HandleFunc("/api/mod/settings", HandleUpdateSettings).Methods("POST")
 	r.HandleFunc("/api/tools/archive-team-stats", HandleArchiveTeamStats).Methods("POST")
 	r.HandleFunc("/api/mod/import-preseason-archive", HandleImportPreseasonArchive).Methods("POST")
 	r.HandleFunc("/api/team/archive", HandleGetTeamArchive).Methods("GET")

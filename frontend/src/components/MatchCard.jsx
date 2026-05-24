@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import { getApiUrl } from "../config";
 
 export default function MatchCard({ match, team, urlBase, loadTeam, myRole, arenaModeEnabled = false }) {
     const isCaptain = myRole === "Captain" || myRole === "Co-Captain";
@@ -57,7 +58,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
         console.log("PingForSub CLICKED:", { matchID, teamID }); // DEBUG
 
         try {
-            await axios.post(`${import.meta.env.VITE_API_URL}/api/match/ping-sub`, {
+            await axios.post(`${getApiUrl()}/api/match/ping-sub`, {
                 match_id: matchID,
                 team_id: teamID,
             });

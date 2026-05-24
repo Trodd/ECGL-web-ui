@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
+import { getApiUrl } from "../config";
 
 export default function Finals() {
-    const API = import.meta.env.VITE_API_URL;
+    const API = getApiUrl();
 
     /* ================= STATE ================= */
     const [visible, setVisible] = useState(true);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
+import { getApiUrl } from "../config";
 
 export default function Players() {
   const [players, setPlayers] = useState([]);
@@ -17,7 +18,7 @@ export default function Players() {
         setLoading(true);
         setError("");
 
-        const urlBase = import.meta?.env?.VITE_API_URL || "";
+        const urlBase = getApiUrl();
         const res = await axios.get(`${urlBase}/api/players`, {
           withCredentials: true,
           timeout: 15000,
@@ -154,10 +155,10 @@ export default function Players() {
                   {/* RIGHT */}
                   <span
                     className={`rank-badge ${p.role === "Banned"
-                        ? "rank-bronze"
-                        : p.role === "League Sub"
-                          ? "rank-silver"
-                          : "rank-gold"
+                      ? "rank-bronze"
+                      : p.role === "League Sub"
+                        ? "rank-silver"
+                        : "rank-gold"
                       }`}
                     style={{ fontSize: "0.75rem" }}
                   >

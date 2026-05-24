@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
+import { getApiUrl } from "../config";
 
 export default function TeamDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const urlBase = import.meta.env.VITE_API_URL || "http://localhost:8080";
+  const urlBase = getApiUrl();
 
   // ───────────────────────────────────────────────
   // 🔹 STATE

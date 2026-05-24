@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import FinalsBracket from "../components/FinalsBracket";
 import FinalsSeedEditor from "../components/FinalsSeedEditor";
+import { getApiUrl } from "../config";
 
 export default function LeagueMod() {
-    const urlBase = import.meta.env.VITE_API_URL;
+    const urlBase = getApiUrl();
     const [me, setMe] = useState(null);
     const [loading, setLoading] = useState(true);
     const [msg, setMsg] = useState("");
@@ -428,7 +429,7 @@ export default function LeagueMod() {
 
         try {
             const res = await axios.post(
-                `${import.meta.env.VITE_API_URL}/api/team/reset_challenges`,
+                `${urlBase}/api/team/reset_challenges`,
                 { team_id: teamID }
             );
 
@@ -2338,7 +2339,7 @@ export default function LeagueMod() {
                                     className="btn btn-outline-primary btn-sm"
                                     onClick={async () => {
                                         try {
-                                            const res = await fetch(`${import.meta.env.VITE_API_URL}/api/tools/archive-team-stats`, {
+                                            const res = await fetch(`${urlBase}/api/tools/archive-team-stats`, {
                                                 method: "POST",
                                                 credentials: "include",
                                             });

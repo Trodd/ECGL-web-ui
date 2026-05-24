@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import MatchCard from "../components/MatchCard";
+import { getApiUrl } from "../config";
 
 export default function MyTeam() {
   const [data, setData] = useState({
@@ -29,7 +30,7 @@ export default function MyTeam() {
   const [logoVersion, setLogoVersion] = useState("");
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
 
-  const urlBase = import.meta.env.VITE_API_URL;
+  const urlBase = getApiUrl();
   const sectionStyle = {
     backgroundColor: "#1a1a1a",
     border: "1px solid #333",
