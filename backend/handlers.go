@@ -2486,15 +2486,16 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Normalize: ALWAYS store subs in real TeamA/TeamB order
-	if req.TeamID == match.TeamAID {
+	switch req.TeamID {
+	case match.TeamAID:
 		// Team A submitted → subA is theirs, subB is opponent
 		match.LeagueSubA = subA
 		match.LeagueSubB = subB
-	} else if req.TeamID == match.TeamBID {
+	case match.TeamBID:
 		// Team B submitted → subA and subB must be flipped
 		match.LeagueSubA = subB
 		match.LeagueSubB = subA
-	} else {
+	default:
 		http.Error(w, "Team not part of this match", http.StatusForbidden)
 		return
 	}
