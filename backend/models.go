@@ -262,3 +262,16 @@ type RuleSection struct {
 	Content   string `json:"content" gorm:"type:text"`
 	SortOrder int    `json:"sort_order" gorm:"default:0"`
 }
+
+// --- Highlight Clips (montage on home page) ---
+type Clip struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Title     string    `json:"title"`
+	URL       string    `json:"url"`
+	VideoID   string    `json:"video_id" gorm:"index"`
+	MatchID   *uint     `json:"match_id"`
+	AddedBy   string    `json:"added_by"`
+	Source    string    `json:"source" gorm:"default:'manual'"` // "manual" or "playlist"
+	SortOrder int       `json:"sort_order" gorm:"default:0"`
+	CreatedAt time.Time `json:"created_at"`
+}

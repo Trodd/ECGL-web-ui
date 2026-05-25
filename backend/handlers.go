@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -9929,6 +9930,7 @@ var settingsKeys = []string{
 	"FRONTEND_URL",
 	"TLS_HOST",
 	"DEV_MODE",
+	"YOUTUBE_PLAYLIST_ID",
 }
 
 // GET /api/mod/settings — returns current settings values
@@ -10063,4 +10065,177 @@ func HandleSaveRules(w http.ResponseWriter, r *http.Request) {
 	tx.Commit()
 
 	respondJSON(w, map[string]string{"status": "ok"})
+}
+
+// ===========================================================================
+// CLIPS / HIGHLIGHT MONTAGE
+// ===========================================================================
+
+// HandleGetClips – public, returns all clips ordered by sort_order desc
+func HandleGetClips(w http.ResponseWriter, r *http.Request) {
+	var clips []Clip
+	DB.Order("sort_order DESC, created_at DESC").Find(&clips)
+	respondJSON(w, clips)
+}
+
+// HandleAddClip – mod only, add a new clip
+func HandleAddClip(w http.ResponseWriter, r *http.Request) {
+	actorID, ok := requireLeagueMod(w, r)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		Title   string `json:"title"`
+		URL     string `json:"url"`
+		MatchID *uint  `json:"match_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if body.URL == "" {
+		http.Error(w, "URL is required", http.StatusBadRequest)
+		return
+	}
+
+	clip := Clip{
+		Title:   body.Title,
+		URL:     body.URL,
+		MatchID: body.MatchID,
+		AddedBy: actorID,
+	}
+	if err := DB.Create(&clip).Error; err != nil {
+		http.Error(w, "Failed to save clip", http.StatusInternalServerError)
+		return
+	}
+	respondJSON(w, clip)
+}
+
+// HandleDeleteClip – mod only, delete a clip by ID
+func HandleDeleteClip(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireLeagueMod(w, r)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		ID uint `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == 0 {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	DB.Delete(&Clip{}, body.ID)
+	respondJSON(w, map[string]string{"status": "ok"})
+}
+
+// HandleReorderClips – mod only, set sort_order for clips
+func HandleReorderClips(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireLeagueMod(w, r)
+	if !ok {
+		return
+	}
+
+	var body []struct {
+		ID        uint `json:"id"`
+		SortOrder int  `json:"sort_order"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	for _, item := range body {
+		DB.Model(&Clip{}).Where("id = ?", item.ID).Update("sort_order", item.SortOrder)
+	}
+	respondJSON(w, map[string]string{"status": "ok"})
+}
+
+// HandleSyncPlaylist – mod only, fetches videos from a public YouTube playlist RSS feed (no API key needed)
+func HandleSyncPlaylist(w http.ResponseWriter, r *http.Request) {
+	actorID, ok := requireLeagueMod(w, r)
+	if !ok {
+		return
+	}
+
+	playlistID := os.Getenv("YOUTUBE_PLAYLIST_ID")
+
+	// Allow override from request body
+	var body struct {
+		PlaylistID string `json:"playlist_id"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if body.PlaylistID != "" {
+		playlistID = body.PlaylistID
+	}
+
+	if playlistID == "" {
+		http.Error(w, "No playlist ID provided", http.StatusBadRequest)
+		return
+	}
+
+	// YouTube exposes public playlist contents via Atom RSS feed (no API key required)
+	feedURL := fmt.Sprintf("https://www.youtube.com/feeds/videos.xml?playlist_id=%s", playlistID)
+
+	resp, err := http.Get(feedURL)
+	if err != nil {
+		http.Error(w, "Failed to reach YouTube", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		http.Error(w, fmt.Sprintf("YouTube returned status %d — is the playlist public?", resp.StatusCode), http.StatusBadGateway)
+		return
+	}
+
+	// Parse Atom XML feed
+	type atomEntry struct {
+		VideoID string `xml:"videoId"`
+		Title   string `xml:"title"`
+	}
+	type atomFeed struct {
+		Entries []atomEntry `xml:"entry"`
+	}
+
+	var feed atomFeed
+	if err := xml.NewDecoder(resp.Body).Decode(&feed); err != nil {
+		http.Error(w, "Failed to parse YouTube feed", http.StatusInternalServerError)
+		return
+	}
+
+	// Get existing playlist clips to avoid duplicates
+	var existing []Clip
+	DB.Where("source = ?", "playlist").Find(&existing)
+	existingMap := map[string]bool{}
+	for _, c := range existing {
+		existingMap[c.VideoID] = true
+	}
+
+	added := 0
+	for _, entry := range feed.Entries {
+		if entry.VideoID == "" || existingMap[entry.VideoID] {
+			continue
+		}
+
+		clip := Clip{
+			Title:   entry.Title,
+			URL:     "https://www.youtube.com/watch?v=" + entry.VideoID,
+			VideoID: entry.VideoID,
+			Source:  "playlist",
+			AddedBy: actorID,
+		}
+		if err := DB.Create(&clip).Error; err == nil {
+			added++
+		}
+	}
+
+	respondJSON(w, map[string]any{
+		"status":            "ok",
+		"total_in_playlist": len(feed.Entries),
+		"added":             added,
+		"already_existed":   len(feed.Entries) - added,
+	})
 }

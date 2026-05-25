@@ -4,9 +4,48 @@ import { Link } from "react-router-dom";
 import FullSeasonCalendar from "../components/SeasonCalendar";
 import { getApiUrl } from "../config";
 
+// Extracts a YouTube embed URL from various YouTube/Shorts link formats
+function getYouTubeEmbedUrl(url) {
+  let id = null;
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes("youtu.be")) {
+      id = u.pathname.slice(1);
+    } else if (u.hostname.includes("youtube.com")) {
+      if (u.pathname.startsWith("/shorts/")) {
+        id = u.pathname.split("/shorts/")[1];
+      } else {
+        id = u.searchParams.get("v");
+      }
+    }
+  } catch { /* ignore */ }
+  return id ? `https://www.youtube-nocookie.com/embed/${id}` : null;
+}
+
+// Extracts a Twitch clip embed URL
+function getTwitchEmbedUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes("clips.twitch.tv")) {
+      const slug = u.pathname.slice(1);
+      return `https://clips.twitch.tv/embed?clip=${slug}&parent=${window.location.hostname}`;
+    }
+    if (u.hostname.includes("twitch.tv") && u.pathname.includes("/clip/")) {
+      const slug = u.pathname.split("/clip/")[1];
+      return `https://clips.twitch.tv/embed?clip=${slug}&parent=${window.location.hostname}`;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function getEmbedUrl(url) {
+  return getYouTubeEmbedUrl(url) || getTwitchEmbedUrl(url) || url;
+}
+
 export default function Home({ user }) {
   const urlBase = getApiUrl();
   const [upcoming, setUpcoming] = useState([]);
+  const [clips, setClips] = useState([]);
 
   // =====================================================
   // Load upcoming matches (same source as Matchups tab)
@@ -88,6 +127,16 @@ export default function Home({ user }) {
 
     loadUpcoming();
     return () => { cancelled = true; };
+  }, [urlBase]);
+
+  // =====================================================
+  // Load highlight clips
+  // =====================================================
+  useEffect(() => {
+    axios
+      .get(`${urlBase}/api/clips`, { withCredentials: true })
+      .then((res) => setClips(Array.isArray(res.data) ? res.data : []))
+      .catch(() => setClips([]));
   }, [urlBase]);
 
   // =====================================================
@@ -289,6 +338,50 @@ export default function Home({ user }) {
           </div>
         </div>
       </div>
+
+      {/* =====================================================
+          HIGHLIGHT CLIPS MONTAGE
+      ====================================================== */}
+      {clips.length > 0 && (
+        <div className="mt-5">
+          <h3>🎬 Match Highlights</h3>
+          <div
+            className="d-flex gap-3 mt-3 pb-2"
+            style={{ overflowX: "auto" }}
+          >
+            {clips.map((clip) => (
+              <div
+                key={clip.id}
+                style={{
+                  minWidth: 320,
+                  maxWidth: 400,
+                  flex: "0 0 auto",
+                  background: "#151515",
+                  border: "1px solid #2a2a2a",
+                  borderRadius: 8,
+                  overflow: "hidden",
+                }}
+              >
+                <iframe
+                  src={getEmbedUrl(clip.url)}
+                  title={clip.title || "Highlight clip"}
+                  width="100%"
+                  height="200"
+                  frameBorder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  style={{ display: "block" }}
+                />
+                {clip.title && (
+                  <div className="p-2 text-light small fw-semibold">
+                    {clip.title}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* =====================================================
           CALENDAR

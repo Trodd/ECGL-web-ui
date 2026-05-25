@@ -749,6 +749,13 @@ func main() {
 	r.HandleFunc("/api/mod/finals/archive", HandleArchiveFinals).Methods("POST")
 	r.HandleFunc("/api/finals/archive", HandleGetFinalsArchive).Methods("GET")
 
+	// Clips (highlight montage)
+	r.HandleFunc("/api/clips", HandleGetClips).Methods("GET")
+	r.HandleFunc("/api/mod/clips", HandleAddClip).Methods("POST")
+	r.HandleFunc("/api/mod/clips/delete", HandleDeleteClip).Methods("POST")
+	r.HandleFunc("/api/mod/clips/reorder", HandleReorderClips).Methods("POST")
+	r.HandleFunc("/api/mod/clips/sync-playlist", HandleSyncPlaylist).Methods("POST")
+
 	// Subrouter for /api
 	api := r.PathPrefix("/api").Subrouter()
 
