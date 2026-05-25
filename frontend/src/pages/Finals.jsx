@@ -1,76 +1,95 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
 
 export default function Finals() {
     const API = getApiUrl();
 
-    /* ================= STATE ================= */
+    /* ═══════════ STATE ═══════════ */
     const [visible, setVisible] = useState(true);
+    const [modVisible, setModVisible] = useState(false);
     const [me, setMe] = useState(null);
+    const [meLoaded, setMeLoaded] = useState(false);
     const [loading, setLoading] = useState(true);
-
     const [wbRaw, setWbRaw] = useState([]);
     const [lbRaw, setLbRaw] = useState([]);
     const [gf, setGf] = useState([]);
+    const [allTeams, setAllTeams] = useState([]);
+    const [selectedMatch, setSelectedMatch] = useState(null);
+    const [modalTeamA, setModalTeamA] = useState("");
+    const [modalTeamB, setModalTeamB] = useState("");
+    const [modalWinner, setModalWinner] = useState("");
+    const [saving, setSaving] = useState(false);
+    const [containerWidth, setContainerWidth] = useState(window.innerWidth);
+    const containerRef = useRef(null);
 
-    /* ================= VIEWPORT / FIT ================= */
-    const pageRef = useRef(null);
-    const fitRef = useRef(null);
-    const [scale, setScale] = useState(1);
-
-    /* ================= DESIGN CONSTANTS ================= */
-    const HEADER_H = 70;
-    const PAD = 16;
-
-    // “Natural” design size (we’ll scale this to fit)
-    const ROUND_W = 260;
-    const ROUND_GAP = 46;
-    const CARD_H = me?.is_mod ? 132 : 96;
-    const CARD_INNER_GAP = 8;
-    const CARD_RADIUS = 16;
-
-    // Lanes: WB on top, LB bottom
-    const LANE_GAP = 18;
-    const LANE_TITLE_H = 40;
-    const computeLaneHeight = (rounds) => {
-        const maxMatches = Math.max(
-            1,
-            ...rounds.map((r) => r.length)
-        );
-        return maxMatches * CARD_H + (maxMatches - 1) * 24;
-    };
-
-    // LB trim rule (removes extra LB round)
-    // A common DE shape is LB rounds = 2*WB - 2 (not counting GF).
-    const trimLosersRounds = (wbRounds, lbRounds) => {
-        const wbCount = wbRounds.length;
-        if (!wbCount) return lbRounds;
-        const want = Math.max(0, wbCount * 2 - 2);
-        return lbRounds.slice(0, Math.min(lbRounds.length, want));
-    };
-
-    const GF_W = 260;
-    const GF_H = me?.is_mod ? 160 : 120;
-    const GF_GAP = 24;
-
-    /* ================= LOAD ================= */
+    /* ═══════════ RESPONSIVE ═══════════ */
     useEffect(() => {
-        axios
-            .get(`${API}/api/finals/visible`)
-            .then((r) => setVisible(!!r.data?.visible))
-            .catch(() => setVisible(false));
+        const measure = () => {
+            if (containerRef.current) {
+                setContainerWidth(containerRef.current.clientWidth);
+            } else {
+                setContainerWidth(window.innerWidth);
+            }
+        };
+        measure();
+        window.addEventListener("resize", measure);
+        return () => window.removeEventListener("resize", measure);
+    }, [loading, meLoaded]);
 
-        axios
-            .get(`${API}/api/me`, { withCredentials: true })
-            .then((r) => setMe(r.data))
-            .catch(() => setMe(null));
+    const isMobile = containerWidth < 500;
+
+    /* ═══════════ DESIGN TOKENS ═══════════ */
+    const COL = {
+        wbAccent: "#5a9fd4",
+        wbDim: "rgba(59,110,165,0.4)",
+        lbAccent: "#a855f7",
+        lbDim: "rgba(168,85,247,0.35)",
+        gfAccent: "#fbbf24",
+        gfDim: "rgba(251,191,36,0.5)",
+        winText: "#4ade80",
+        loseText: "#f87171",
+        teamText: "#e8ecf0",
+        tbdText: "#5c6b7a",
+        boxBg: "rgba(13,17,23,0.92)",
+        boxBgDim: "rgba(13,17,23,0.6)",
+        connWb: "rgba(90,159,212,0.4)",
+        connLb: "rgba(168,85,247,0.35)",
+        connGf: "rgba(251,191,36,0.35)",
+        labelWb: "#5a9fd4",
+        labelLb: "#a855f7",
+        labelGf: "#fbbf24",
+    };
+
+    // Responsive layout constants
+    const MW = isMobile ? 110 : 200;
+    const MH = isMobile ? 44 : 60;
+    const PX = isMobile ? 16 : 50;
+    const PY = isMobile ? 12 : 22;
+    const TOP_PAD = isMobile ? 14 : 24;
+    const FONT_TEAM = isMobile ? 9 : 12;
+    const FONT_LABEL = isMobile ? 7 : 9;
+    const FONT_SECTION = isMobile ? 10 : 14;
+    const TRUNC_LEN = isMobile ? 10 : 18;
+
+    /* ═══════════ DATA LOAD ═══════════ */
+    useEffect(() => {
+        axios.get(`${API}/api/finals/visible`).then(r => {
+            setVisible(!!r.data?.visible);
+            setModVisible(!!r.data?.mod_visible);
+        }).catch(() => setVisible(false));
+        axios.get(`${API}/api/me`, { withCredentials: true }).then(r => { setMe(r.data); setMeLoaded(true); }).catch(() => { setMe(null); setMeLoaded(true); });
     }, [API]);
 
-    const sortRound = (r) =>
-        Array.isArray(r)
-            ? [...r].sort((a, b) => (a.bracket_slot || 0) - (b.bracket_slot || 0))
-            : [];
+    useEffect(() => {
+        if (me?.is_mod) {
+            axios.get(`${API}/api/teams`, { withCredentials: true })
+                .then(r => setAllTeams(Array.isArray(r.data) ? r.data : []))
+                .catch(() => { });
+        }
+    }, [me, API]);
+
+    const sortRound = (r) => Array.isArray(r) ? [...r].sort((a, b) => (a.bracket_slot || 0) - (b.bracket_slot || 0)) : [];
 
     const load = async () => {
         setLoading(true);
@@ -84,430 +103,571 @@ export default function Finals() {
         }
     };
 
-    useEffect(() => {
-        load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [API]);
+    useEffect(() => { load(); }, [API]);
 
-    /* ================= DERIVED ROUNDS (TRIM + REINDEX SLOTS) ================= */
-    const wb = useMemo(() => {
-        // reindex per round so layout is tight and stable
-        return (wbRaw || []).map((round) =>
-            (round || []).map((m, i) => ({ ...m, __slot: i }))
-        );
-    }, [wbRaw]);
+    /* ═══════════ DERIVED ═══════════ */
+    const trimLosersRounds = (wbR, lbR) => {
+        const wc = wbR.length;
+        if (!wc) return lbR;
+        const want = Math.max(0, wc * 2 - 2);
+        return lbR.slice(0, Math.min(lbR.length, want));
+    };
 
+    const wb = useMemo(() => (wbRaw || []).map(r => (r || []).map((m, i) => ({ ...m, __slot: i }))), [wbRaw]);
     const lb = useMemo(() => {
         const trimmed = trimLosersRounds(wbRaw || [], lbRaw || []);
-        return (trimmed || []).map((round) =>
-            (round || []).map((m, i) => ({ ...m, __slot: i }))
-        );
+        return (trimmed || []).map(r => (r || []).map((m, i) => ({ ...m, __slot: i })));
     }, [wbRaw, lbRaw]);
 
-    /* ================= LAYOUT ENGINE (COORDS) =================
-       We compute x/y for every match card, and then draw connectors
-       directly from those coords. No DOM getBoundingClientRect needed.
-    */
-    const layoutLane = (rounds, laneTop) => {
+    /* ═══════════ SVG LAYOUT ═══════════ */
+    const layout = useMemo(() => {
         const positions = new Map();
-        const roundX = (ri) => PAD + ri * (ROUND_W + ROUND_GAP);
+        const connections = [];
 
-        const laneHeight = computeLaneHeight(rounds);
+        let matchNum = 1; // global match counter
 
-        rounds.forEach((round, ri) => {
-            const count = Math.max(1, round.length);
-            const totalCardsH = count * CARD_H;
-            const totalGapsH = (count - 1) * 24;
-            const contentH = totalCardsH + totalGapsH;
+        const wbMaxCount = Math.max(1, ...wb.map(r => r.length));
+        const wbTotalH = wbMaxCount * (MH + PY) - PY;
 
-            const startY =
-                laneTop +
-                LANE_TITLE_H +
-                Math.max(0, (laneHeight - contentH) / 2);
+        wb.forEach((round, ri) => {
+            const count = round.length;
+            const spacing = MH + PY;
+            const totalH = count * spacing - PY;
+            const startY = TOP_PAD + 30 + (wbTotalH - totalH) / 2;
 
             round.forEach((m, i) => {
-                const x = roundX(ri);
-                const y = startY + i * (CARD_H + 24);
-
                 positions.set(m.id, {
-                    x,
-                    y,
-                    w: ROUND_W,
-                    h: CARD_H,
+                    x: ri * (MW + PX),
+                    y: startY + i * spacing,
                     m,
+                    lane: "wb",
+                    matchNum: matchNum++,
                 });
             });
         });
 
-        return { positions, laneHeight };
-    };
+        const lbTop = TOP_PAD + 30 + wbTotalH + 50;
+        const lbMaxCount = Math.max(1, ...lb.map(r => r.length));
+        const lbTotalH = lbMaxCount * (MH + PY) - PY;
 
-    const buildPaths = (positions, rounds) => {
-        const paths = [];
-        rounds.forEach((round) => {
-            round.forEach((m) => {
-                if (!m?.next_match_id) return;
-                const a = positions.get(m.id);
-                const b = positions.get(m.next_match_id);
-                if (!a || !b) return;
+        lb.forEach((round, ri) => {
+            const count = round.length;
+            const spacing = MH + PY;
+            const totalH = count * spacing - PY;
+            const startY = lbTop + 30 + (lbTotalH - totalH) / 2;
 
-                const ax = a.x + a.w;
-                const ay = a.y + a.h / 2;
-
-                const bx = b.x;
-                const by = b.y + b.h / 2;
-
-                const mid = ax + (bx - ax) * 0.5;
-
-                // classic orthogonal connector
-                paths.push(`M ${ax} ${ay} H ${mid} V ${by} H ${bx}`);
+            round.forEach((m, i) => {
+                positions.set(m.id, {
+                    x: ri * (MW + PX),
+                    y: startY + i * spacing,
+                    m,
+                    lane: "lb",
+                    matchNum: matchNum++,
+                });
             });
         });
-        return paths;
-    };
-
-    const natural = useMemo(() => {
-        const wbTop = PAD + HEADER_H;
-        const { positions: wbPos, laneHeight: wbH } = layoutLane(wb, wbTop);
-
-        const lbTop = wbTop + LANE_TITLE_H + wbH + LANE_GAP;
-        const { positions: lbPos, laneHeight: lbH } = layoutLane(lb, lbTop);
-
-        const wbPaths = buildPaths(wbPos, wb);
-        const lbPaths = buildPaths(lbPos, lb);
 
         const roundsMax = Math.max(wb.length, lb.length);
-        const baseWidth =
-            PAD * 2 +
-            roundsMax * ROUND_W +
-            Math.max(0, roundsMax - 1) * ROUND_GAP;
+        const gfX = roundsMax * (MW + PX);
+        const midY = (TOP_PAD + 30 + wbTotalH / 2 + lbTop + 30 + lbTotalH / 2) / 2 - MH / 2;
 
-        const gfTop = lbTop + LANE_TITLE_H + lbH + GF_GAP;
-        const gfLeft = (baseWidth - GF_W) / 2;
+        if (gf?.[0]) {
+            positions.set(gf[0].id, {
+                x: gfX,
+                y: midY - (MH / 2 + PY / 2),
+                m: gf[0],
+                lane: "gf",
+                matchNum: matchNum++,
+            });
+        }
+        if (gf?.[1]) {
+            positions.set(gf[1].id, {
+                x: gfX,
+                y: midY + (MH / 2 + PY / 2),
+                m: gf[1],
+                lane: "gf",
+                matchNum: matchNum++,
+            });
+        }
 
-        const totalHeight =
-            gfTop +
-            GF_H +
-            PAD;
+        const allRounds = [...wb, ...lb];
+        allRounds.forEach(round => {
+            round.forEach(m => {
+                if (!m?.next_match_id) return;
+                const from = positions.get(m.id);
+                const to = positions.get(m.next_match_id);
+                if (!from || !to) return;
+
+                const x1 = from.x + MW;
+                const y1 = from.y + MH / 2;
+                const x2 = to.x;
+                const y2 = to.y + MH / 2;
+                const mx = (x1 + x2) / 2;
+
+                connections.push({
+                    path: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`,
+                    lane: from.lane,
+                });
+            });
+        });
+
+        let maxX = 0, maxY = 0;
+        for (const p of positions.values()) {
+            if (p.x + MW > maxX) maxX = p.x + MW;
+            if (p.y + MH > maxY) maxY = p.y + MH;
+        }
 
         return {
-            wbTop,
-            lbTop,
-            gfTop,
-            gfLeft,
-            wbPos,
-            lbPos,
-            wbPaths,
-            lbPaths,
-            width: baseWidth,
-            height: totalHeight,
+            positions,
+            connections,
+            width: maxX + 40,
+            height: maxY + 40,
+            wbLabelY: TOP_PAD,
+            lbLabelY: lbTop,
+            gfLabelX: gfX,
+            gfLabelY: midY - 20,
         };
+    }, [wb, lb, gf]);
 
-    }, [wb, lb, me?.is_mod]);
-
-    /* ================= ZOOM TO FIT ================= */
-    const recomputeScale = () => {
-        const page = pageRef.current;
-        const fit = fitRef.current;
-        if (!page || !fit) return;
-
-        const vw = page.clientWidth;
-        const vh = page.clientHeight;
-
-        const maxW = Math.max(320, vw - 8);
-        const maxH = Math.max(320, vh - 8);
-
-        const sW = maxW / natural.width;
-        const sH = maxH / natural.height;
-
-        // scale down to fit, but don’t scale up beyond 1
-        const s = Math.min(1, sW, sH);
-        setScale(s);
-    };
-
-    useLayoutEffect(() => {
-        recomputeScale();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [natural.width, natural.height]);
-
-    useEffect(() => {
-        const onResize = () => recomputeScale();
-        window.addEventListener("resize", onResize);
-        return () => window.removeEventListener("resize", onResize);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [natural.width, natural.height]);
-
-    /* ================= ACTION ================= */
-    const setWinner = async (matchId, winnerId) => {
+    /* ═══════════ MODAL ACTIONS ═══════════ */
+    const openModal = (m) => {
         if (!me?.is_mod) return;
-        const idNum = Number(winnerId);
-        if (!idNum) return;
-
-        await axios.post(
-            `${API}/api/mod/finals/update-match`,
-            { match_id: matchId, winner: idNum },
-            { withCredentials: true }
-        );
-        await load();
+        setSelectedMatch(m);
+        setModalTeamA(m.team_a_id ? String(m.team_a_id) : "");
+        setModalTeamB(m.team_b_id ? String(m.team_b_id) : "");
+        setModalWinner(m.winner_id ? String(m.winner_id) : "");
     };
 
-    /* ================= UI ================= */
-    if (!visible) return <p className="text-light">Finals not visible.</p>;
-    if (loading) return <p className="text-light">Loading finals…</p>;
+    const closeModal = () => {
+        setSelectedMatch(null);
+        setModalTeamA("");
+        setModalTeamB("");
+        setModalWinner("");
+    };
 
-    const TeamRow = ({ name, isWinner }) => (
-        <div
-            title={name || "TBD"}
-            style={{
-                width: "100%",
-                padding: "7px 10px",
-                borderRadius: 10,
-                fontWeight: 900,
-                letterSpacing: 0.2,
-                color: "#f8fafc",
-                background: isWinner
-                    ? "linear-gradient(180deg, rgba(34,197,94,0.28), rgba(34,197,94,0.16))"
-                    : "linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06))",
-                border: isWinner
-                    ? "1px solid rgba(34,197,94,0.55)"
-                    : "1px solid rgba(255,255,255,0.25)",
-                whiteSpace: "nowrap",
-                overflow: "visible",
-                textOverflow: "ellipsis",
-            }}
-        >
-            {name || "TBD"}
-        </div>
-    );
+    const saveMatch = async () => {
+        if (!selectedMatch) return;
+        setSaving(true);
+        try {
+            const mid = selectedMatch.id;
+            // Assign teams if changed
+            const oldA = selectedMatch.team_a_id ? String(selectedMatch.team_a_id) : "";
+            const oldB = selectedMatch.team_b_id ? String(selectedMatch.team_b_id) : "";
+            if (modalTeamA !== oldA) {
+                await axios.post(`${API}/api/mod/finals/assign-slot`, {
+                    match_id: mid,
+                    slot: "team_a",
+                    team_id: modalTeamA ? Number(modalTeamA) : 0,
+                }, { withCredentials: true });
+            }
+            if (modalTeamB !== oldB) {
+                await axios.post(`${API}/api/mod/finals/assign-slot`, {
+                    match_id: mid,
+                    slot: "team_b",
+                    team_id: modalTeamB ? Number(modalTeamB) : 0,
+                }, { withCredentials: true });
+            }
+            // Set winner if changed
+            const oldW = selectedMatch.winner_id ? String(selectedMatch.winner_id) : "";
+            if (modalWinner !== oldW) {
+                await axios.post(`${API}/api/mod/finals/set-winner`, {
+                    match_id: mid,
+                    winner: modalWinner ? Number(modalWinner) : 0,
+                }, { withCredentials: true });
+            }
+            await load();
+            closeModal();
+        } finally {
+            setSaving(false);
+        }
+    };
 
-    const MatchCard = ({ pos }) => {
+    const clearMatch = async () => {
+        if (!selectedMatch) return;
+        setSaving(true);
+        try {
+            const mid = selectedMatch.id;
+            await axios.post(`${API}/api/mod/finals/assign-slot`, {
+                match_id: mid, slot: "team_a", team_id: 0,
+            }, { withCredentials: true });
+            await axios.post(`${API}/api/mod/finals/assign-slot`, {
+                match_id: mid, slot: "team_b", team_id: 0,
+            }, { withCredentials: true });
+            await axios.post(`${API}/api/mod/finals/set-winner`, {
+                match_id: mid, winner: 0,
+            }, { withCredentials: true });
+            await load();
+            closeModal();
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    /* ═══════════ RENDER ═══════════ */
+    if (loading || !meLoaded)
+        return (
+            <div className="d-flex justify-content-center align-items-center" style={{ minHeight: 300 }}>
+                <div className="spinner-border text-info" />
+            </div>
+        );
+
+    if (!visible && !(me?.is_mod && modVisible))
+        return <p className="text-secondary text-center mt-5">Finals bracket is not available yet.</p>;
+
+    const escSvg = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const trunc = (s, max) => s.length > max ? s.substring(0, max - 1) + "…" : s;
+
+    const renderMatchBox = (pos) => {
         const m = pos.m;
-        const aWin = m?.winner_id && m.winner_id === m.team_a_id;
-        const bWin = m?.winner_id && m.winner_id === m.team_b_id;
+        const teamA = m.team_a || "TBD";
+        const teamB = m.team_b || "TBD";
+        const aWin = m.winner_id && m.winner_id === m.team_a_id;
+        const bWin = m.winner_id && m.winner_id === m.team_b_id;
+        const hasData = m.team_a || m.team_b;
+
+        const isGf = pos.lane === "gf";
+        const borderColor = isGf ? COL.gfAccent : pos.lane === "lb" ? COL.lbAccent : COL.wbAccent;
+        const dimBorder = isGf ? COL.gfDim : pos.lane === "lb" ? COL.lbDim : COL.wbDim;
+        const border = hasData ? borderColor : dimBorder;
+        const bg = hasData ? COL.boxBg : COL.boxBgDim;
+        const strokeW = isGf ? 2 : 1.5;
+
+        const aColor = aWin ? COL.winText : (m.winner_id && !aWin && m.team_a_id) ? COL.loseText : m.team_a ? COL.teamText : COL.tbdText;
+        const bColor = bWin ? COL.winText : (m.winner_id && !bWin && m.team_b_id) ? COL.loseText : m.team_b ? COL.teamText : COL.tbdText;
+        const aWeight = aWin ? "bold" : "normal";
+        const bWeight = bWin ? "bold" : "normal";
+        const aIcon = aWin ? "✓ " : (m.winner_id && !aWin && m.team_a_id) ? "✗ " : "";
+        const bIcon = bWin ? "✓ " : (m.winner_id && !bWin && m.team_b_id) ? "✗ " : "";
+
+        const labelColor = isGf ? COL.labelGf : pos.lane === "lb" ? COL.labelLb : COL.labelWb;
+        const label = isGf
+            ? (gf?.[1] && m.id === gf[1].id ? "GF Reset" : "Grand Final")
+            : `Match ${pos.matchNum}`;
+
+        return (
+            <g
+                key={`box-${m.id}`}
+                onClick={() => openModal(m)}
+                style={{ cursor: me?.is_mod ? "pointer" : "default" }}
+            >
+                {/* Glow for GF */}
+                {isGf && hasData && (
+                    <rect
+                        x={pos.x - 2} y={pos.y - 2} width={MW + 4} height={MH + 4}
+                        rx="8" fill="none" stroke={COL.gfAccent} strokeWidth="1" opacity="0.3"
+                        filter="url(#glow)"
+                    />
+                )}
+                {/* Box */}
+                <rect
+                    x={pos.x} y={pos.y} width={MW} height={MH}
+                    rx="6" fill={bg} stroke={border} strokeWidth={strokeW}
+                />
+                {/* Label above */}
+                {label && (
+                    <text
+                        x={pos.x + MW / 2} y={pos.y - (isMobile ? 3 : 5)}
+                        textAnchor="middle" fill={labelColor}
+                        fontSize={FONT_LABEL} fontFamily="'Inter', sans-serif" opacity="0.8"
+                    >
+                        {label}
+                    </text>
+                )}
+                {/* Team A */}
+                <text
+                    x={pos.x + (isMobile ? 6 : 10)} y={pos.y + MH * 0.38}
+                    fill={aColor} fontSize={FONT_TEAM} fontWeight={aWeight}
+                    fontFamily="'Inter', sans-serif"
+                >
+                    {aIcon}{escSvg(trunc(teamA, TRUNC_LEN))}
+                </text>
+                {/* Divider */}
+                <line
+                    x1={pos.x + 6} y1={pos.y + MH * 0.5}
+                    x2={pos.x + MW - 6} y2={pos.y + MH * 0.5}
+                    stroke="rgba(255,255,255,0.08)" strokeWidth="1"
+                />
+                {/* Team B */}
+                <text
+                    x={pos.x + (isMobile ? 6 : 10)} y={pos.y + MH * 0.78}
+                    fill={bColor} fontSize={FONT_TEAM} fontWeight={bWeight}
+                    fontFamily="'Inter', sans-serif"
+                >
+                    {bIcon}{escSvg(trunc(teamB, TRUNC_LEN))}
+                </text>
+                {/* Mod clickable indicator */}
+                {me?.is_mod && (
+                    <text
+                        x={pos.x + MW - 8} y={pos.y + 12}
+                        textAnchor="end" fill="rgba(255,255,255,0.3)"
+                        fontSize="8" fontFamily="'Inter', sans-serif"
+                    >
+                        ✎
+                    </text>
+                )}
+            </g>
+        );
+    };
+
+    /* ═══════════ MODAL ═══════════ */
+    const renderModal = () => {
+        if (!selectedMatch) return null;
+        const m = selectedMatch;
+        const lane = (() => {
+            for (const pos of layout.positions.values()) {
+                if (pos.m.id === m.id) return pos.lane;
+            }
+            return "wb";
+        })();
+        const laneLabel = lane === "gf" ? "Grand Final" : lane === "lb" ? "Losers Bracket" : "Winners Bracket";
+        const accentColor = lane === "gf" ? COL.gfAccent : lane === "lb" ? COL.lbAccent : COL.wbAccent;
+
+        // Build winner options based on currently selected teams
+        const teamAName = allTeams.find(t => String(t.id) === modalTeamA)?.name;
+        const teamBName = allTeams.find(t => String(t.id) === modalTeamB)?.name;
 
         return (
             <div
+                onClick={closeModal}
                 style={{
-                    position: "absolute",
-                    left: pos.x,
-                    top: pos.y,
-                    width: pos.w,
-                    height: pos.h,
-                    borderRadius: CARD_RADIUS,
-                    padding: 10,
-                    background: "rgba(0,0,0,0.55)",
-                    border: "1px solid rgba(255,255,255,0.22)",
-                    boxShadow: "0 12px 30px rgba(0,0,0,0.40)",
+                    position: "fixed",
+                    inset: 0,
+                    background: "rgba(0,0,0,0.7)",
                     display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between",
-                    overflow: "visible",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    zIndex: 9999,
                 }}
             >
-                <div style={{ display: "grid", gap: CARD_INNER_GAP }}>
-                    <TeamRow name={m.team_a} isWinner={aWin} />
-                    <TeamRow name={m.team_b} isWinner={bWin} />
-                </div>
+                <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                        background: "#1a1d23",
+                        border: `1px solid ${accentColor}`,
+                        borderRadius: 12,
+                        padding: 24,
+                        minWidth: 340,
+                        maxWidth: 420,
+                        boxShadow: `0 0 30px ${accentColor}33`,
+                    }}
+                >
+                    <h5 style={{ color: accentColor, marginBottom: 4 }}>
+                        Edit Match {layout.positions.get(m.id)?.matchNum || m.id}
+                    </h5>
+                    <p style={{ color: "#8b99a8", fontSize: 13, marginBottom: 16 }}>
+                        {laneLabel}
+                    </p>
 
-                {me?.is_mod && (
+                    {/* Team A */}
+                    <label style={{ color: "#ccc", fontSize: 12, marginBottom: 4, display: "block" }}>Team A</label>
                     <select
-                        className="form-select bg-dark text-light"
-                        value={m.winner_id || ""}
-                        onChange={(e) => setWinner(m.id, e.target.value)}
-                        style={{
-                            marginTop: 8,
-                            borderRadius: 10,
-                            border: "1px solid rgba(255,255,255,0.22)",
-                            backgroundColor: "rgba(0,0,0,0.45)",
-                            fontWeight: 800,
-                            fontSize: 12,
-                            paddingTop: 6,
-                            paddingBottom: 6,
-                        }}
+                        className="form-select form-select-sm bg-dark text-light mb-3"
+                        value={modalTeamA}
+                        onChange={(e) => setModalTeamA(e.target.value)}
                     >
-                        <option value="">Pick winner…</option>
-                        {m.team_a_id ? <option value={m.team_a_id}>{m.team_a}</option> : null}
-                        {m.team_b_id ? <option value={m.team_b_id}>{m.team_b}</option> : null}
+                        <option value="">— Empty —</option>
+                        {allTeams.map(t => (
+                            <option key={t.id} value={String(t.id)}>{t.name}</option>
+                        ))}
                     </select>
-                )}
+
+                    {/* Team B */}
+                    <label style={{ color: "#ccc", fontSize: 12, marginBottom: 4, display: "block" }}>Team B</label>
+                    <select
+                        className="form-select form-select-sm bg-dark text-light mb-3"
+                        value={modalTeamB}
+                        onChange={(e) => setModalTeamB(e.target.value)}
+                    >
+                        <option value="">— Empty —</option>
+                        {allTeams.map(t => (
+                            <option key={t.id} value={String(t.id)}>{t.name}</option>
+                        ))}
+                    </select>
+
+                    {/* Winner */}
+                    <label style={{ color: "#ccc", fontSize: 12, marginBottom: 4, display: "block" }}>Winner</label>
+                    <select
+                        className="form-select form-select-sm bg-dark text-light mb-3"
+                        value={modalWinner}
+                        onChange={(e) => setModalWinner(e.target.value)}
+                    >
+                        <option value="">— No Winner —</option>
+                        {modalTeamA && teamAName && <option value={modalTeamA}>{teamAName}</option>}
+                        {modalTeamB && teamBName && <option value={modalTeamB}>{teamBName}</option>}
+                    </select>
+
+                    {/* Buttons */}
+                    <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                        <button
+                            className="btn btn-success btn-sm"
+                            onClick={saveMatch}
+                            disabled={saving}
+                        >
+                            {saving ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                            className="btn btn-outline-danger btn-sm"
+                            onClick={clearMatch}
+                            disabled={saving}
+                        >
+                            Clear
+                        </button>
+                        <button
+                            className="btn btn-outline-secondary btn-sm ms-auto"
+                            onClick={closeModal}
+                        >
+                            Close
+                        </button>
+                    </div>
+                </div>
             </div>
         );
     };
 
-    const LaneTitle = ({ top, label, rounds }) => (
-        <div
-            style={{
-                position: "absolute",
-                left: PAD,
-                top,
-                height: LANE_TITLE_H,
-                width: natural.width - PAD * 2,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "0 12px",
-                borderRadius: 14,
-                background: "rgba(0,0,0,0.45)",
-                border: "1px solid rgba(255,255,255,0.18)",
-                color: "#e8eaed",
-                fontWeight: 950,
-                letterSpacing: 0.3,
-            }}
-        >
-            <div>{label}</div>
-            <div style={{ fontSize: 12, opacity: 0.75 }}>{rounds} rounds</div>
-        </div>
-    );
-
     return (
-        <div
-            ref={pageRef}
-            style={{
-                height: "calc(100vh - 120px)", // tweak if your site has different header height
-                width: "100%",
-                position: "relative",
-                overflow: "visible",
-                color: "#e8eaed",
-            }}
-        >
-            {/* FIT WRAPPER */}
+        <div style={{ width: "100%", padding: isMobile ? "8px 0" : "16px 0", maxWidth: "100vw", overflowX: "hidden" }}>
+            {/* Page header */}
             <div
-                ref={fitRef}
                 style={{
-                    position: "absolute",
-                    left: "50%",
-                    top: "50%",
-                    transform: `translate(-50%, -50%) scale(${scale})`,
-                    transformOrigin: "center",
-                    width: natural.width,
-                    height: natural.height,
-                    borderRadius: 18,
-                    background:
-                        "radial-gradient(1200px 600px at 15% 15%, rgba(59,110,165,0.18), transparent 60%), radial-gradient(900px 500px at 85% 25%, rgba(160,80,200,0.14), transparent 60%), rgba(0,0,0,0.35)",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    boxShadow: "0 20px 70px rgba(0,0,0,0.55)",
-                    overflow: "visible",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: isMobile ? "0 10px 10px" : "0 16px 16px",
+                    maxWidth: 1200,
+                    margin: "0 auto",
                 }}
             >
-                {/* HEADER */}
-                <div
+                <h2 style={{ fontWeight: 900, fontSize: isMobile ? 16 : 22, color: "#e8ecf0", margin: 0 }}>
+                    <span style={{ marginRight: 6 }}>🏆</span>Finals Bracket
+                </h2>
+                <button
+                    onClick={load}
                     style={{
-                        position: "absolute",
-                        inset: 0,
-                        height: HEADER_H,
-                        padding: "14px 16px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 12,
-                        background: "rgba(0,0,0,0.55)",
-                        borderBottom: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 8,
+                        padding: isMobile ? "4px 10px" : "6px 14px",
+                        fontWeight: 700,
+                        fontSize: isMobile ? 11 : 13,
+                        border: "1px solid rgba(255,255,255,0.15)",
+                        background: "rgba(59, 110, 165, 0.15)",
+                        color: "#6fa8dc",
+                        cursor: "pointer",
                     }}
                 >
-                    <div style={{ fontWeight: 950, letterSpacing: 0.4, fontSize: 18 }}>
-                        🏆 Finals Bracket
-                    </div>
-
-                    <button
-                        className="btn btn-sm"
-                        onClick={load}
-                        style={{
-                            borderRadius: 999,
-                            padding: "6px 10px",
-                            fontWeight: 900,
-                            border: "1px solid rgba(255,255,255,0.18)",
-                            background: "rgba(255,255,255,0.08)",
-                            color: "#e8eaed",
-                        }}
-                    >
-                        ↻ Refresh
-                    </button>
-                </div>
-
-                {/* LANE TITLES */}
-                <LaneTitle top={natural.wbTop} label="🥇 Winners Bracket" rounds={wb.length} />
-                <LaneTitle top={natural.lbTop} label="🥉 Losers Bracket" rounds={lb.length} />
-
-                {/* CONNECTORS (WB + LB) */}
-                <svg
-                    width={natural.width}
-                    height={natural.height}
-                    style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
-                >
-                    {natural.wbPaths.map((d, i) => (
-                        <path key={`wb-${i}`} d={d} stroke="rgba(220,220,220,0.55)" strokeWidth="2" fill="none" />
-                    ))}
-                    {natural.lbPaths.map((d, i) => (
-                        <path key={`lb-${i}`} d={d} stroke="rgba(220,220,220,0.55)" strokeWidth="2" fill="none" />
-                    ))}
-                </svg>
-
-                {/* MATCH CARDS */}
-                {Array.from(natural.wbPos.values()).map((pos) => (
-                    <MatchCard key={`m-${pos.m.id}`} pos={pos} />
-                ))}
-                {Array.from(natural.lbPos.values()).map((pos) => (
-                    <MatchCard key={`m-${pos.m.id}`} pos={pos} />
-                ))}
-
-                {/* GRAND FINALS (OPTIONAL SIMPLE PANEL, STILL FITS) */}
-                {gf?.[0] ? (
-                    <div
-                        style={{
-                            position: "absolute",
-                            top: natural.gfTop,
-                            left: natural.gfLeft,
-                            width: GF_W,
-                            minHeight: GF_H,
-                            borderRadius: 16,
-                            padding: 12,
-                            background: "rgba(0,0,0,0.55)",
-                            border: "1px solid rgba(255,215,0,0.30)",
-                            boxShadow: "0 14px 40px rgba(0,0,0,0.45)",
-                        }}
-                    >
-                        <div style={{ fontWeight: 950, marginBottom: 10, textAlign: "center" }}>
-                            🏁 Grand Finals
-                        </div>
-
-                        <div style={{ display: "grid", gap: 8 }}>
-                            <TeamRow
-                                name={gf[0].team_a}
-                                isWinner={gf[0]?.winner_id === gf[0]?.team_a_id}
-                            />
-                            <TeamRow
-                                name={gf[0].team_b}
-                                isWinner={gf[0]?.winner_id === gf[0]?.team_b_id}
-                            />
-                        </div>
-
-                        {me?.is_mod && (
-                            <select
-                                className="form-select bg-dark text-light"
-                                value={gf[0].winner_id || ""}
-                                onChange={(e) => setWinner(gf[0].id, e.target.value)}
-                                style={{
-                                    marginTop: 10,
-                                    borderRadius: 10,
-                                    border: "1px solid rgba(255,255,255,0.22)",
-                                    backgroundColor: "rgba(0,0,0,0.45)",
-                                    fontWeight: 800,
-                                    fontSize: 12,
-                                }}
-                            >
-                                <option value="">Pick winner…</option>
-                                {gf[0].team_a_id && (
-                                    <option value={gf[0].team_a_id}>{gf[0].team_a}</option>
-                                )}
-                                {gf[0].team_b_id && (
-                                    <option value={gf[0].team_b_id}>{gf[0].team_b}</option>
-                                )}
-                            </select>
-                        )}
-                    </div>
-                ) : null}
+                    ↻ Refresh
+                </button>
             </div>
+
+            {/* Legend */}
+            <div
+                style={{
+                    display: "flex",
+                    gap: isMobile ? 10 : 20,
+                    justifyContent: "center",
+                    marginBottom: isMobile ? 8 : 16,
+                    flexWrap: "wrap",
+                    fontSize: isMobile ? 11 : 13,
+                    color: "#8b99a8",
+                    padding: isMobile ? "0 8px" : 0,
+                }}
+            >
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 12, height: 12, borderRadius: 2, background: COL.wbAccent, display: "inline-block" }} />
+                    Winners
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 12, height: 12, borderRadius: 2, background: COL.lbAccent, display: "inline-block" }} />
+                    Losers
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 12, height: 12, borderRadius: 2, background: COL.gfAccent, display: "inline-block" }} />
+                    Grand Final
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ color: COL.winText, fontWeight: 700 }}>✓</span> Winner
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ color: COL.loseText, fontWeight: 700 }}>✗</span> Eliminated
+                </span>
+            </div>
+
+            {me?.is_mod && (
+                <p style={{ textAlign: "center", color: "#6b7280", fontSize: 12, marginBottom: 12 }}>
+                    Click any match to assign teams or set a winner
+                </p>
+            )}
+
+            {/* SVG Bracket */}
+            <div
+                ref={containerRef}
+                style={{
+                    overflowX: isMobile ? "hidden" : "auto",
+                    width: "100%",
+                    padding: isMobile ? "0 4px 12px" : "0 16px 16px",
+                }}
+            >
+                <svg
+                    viewBox={`0 0 ${layout.width} ${layout.height}`}
+                    width="100%"
+                    preserveAspectRatio="xMidYMin meet"
+                    style={{ display: "block" }}
+                >
+                    <defs>
+                        <filter id="glow">
+                            <feGaussianBlur stdDeviation="3" result="blur" />
+                            <feMerge>
+                                <feMergeNode in="blur" />
+                                <feMergeNode in="SourceGraphic" />
+                            </feMerge>
+                        </filter>
+                    </defs>
+
+                    {/* Connector lines */}
+                    {layout.connections.map((c, i) => (
+                        <path
+                            key={`conn-${i}`}
+                            d={c.path}
+                            fill="none"
+                            stroke={c.lane === "lb" ? COL.connLb : c.lane === "gf" ? COL.connGf : COL.connWb}
+                            strokeWidth="2"
+                        />
+                    ))}
+
+                    {/* Section labels */}
+                    {wb.length > 0 && (
+                        <text
+                            x={0} y={layout.wbLabelY + 14}
+                            fill={COL.labelWb} fontSize={FONT_SECTION} fontWeight="bold"
+                            fontFamily="'Inter', sans-serif" opacity="0.85"
+                        >
+                            WINNERS BRACKET
+                        </text>
+                    )}
+                    {lb.length > 0 && (
+                        <text
+                            x={0} y={layout.lbLabelY + 14}
+                            fill={COL.labelLb} fontSize={FONT_SECTION} fontWeight="bold"
+                            fontFamily="'Inter', sans-serif" opacity="0.85"
+                        >
+                            LOSERS BRACKET
+                        </text>
+                    )}
+                    {gf?.length > 0 && (
+                        <text
+                            x={layout.gfLabelX} y={layout.gfLabelY + 10}
+                            fill={COL.labelGf} fontSize={FONT_SECTION} fontWeight="bold"
+                            fontFamily="'Inter', sans-serif" opacity="0.85"
+                        >
+                            GRAND FINALS
+                        </text>
+                    )}
+
+                    {/* Match boxes */}
+                    {Array.from(layout.positions.values()).map(renderMatchBox)}
+                </svg>
+            </div>
+
+            {/* Edit Modal */}
+            {renderModal()}
         </div>
     );
 }

@@ -5065,6 +5065,7 @@ func updateLeaderboards(winnerID, loserID uint, matchCode string) {
 	eloLossPoints := getEnvInt("ELO_LOSS_POINTS", -25)
 	defaultPlayerRating := getEnvInt("DEFAULT_PLAYER_RATING", 800)
 	underdogBonusPer100 := getEnvInt("UNDERDOG_BONUS_PER_100", 10)
+	underdogLossReductionPer100 := getEnvInt("UNDERDOG_LOSS_REDUCTION_PER_100", 5)
 	challengeMultiplier := getEnvInt("CHALLENGE_BONUS_MULTIPLIER", 2)
 
 	isChallenge := strings.Contains(matchCode, "CHAL")
@@ -5083,7 +5084,18 @@ func updateLeaderboards(winnerID, loserID uint, matchCode string) {
 		}
 	}
 
+	// Calculate loss reduction (if loser rating < winner rating, they lose less)
+	lossReduction := 0
+	if winnerFound && loserFound && winner.Rating > loser.Rating {
+		diff := winner.Rating - loser.Rating
+		lossReduction = diff * underdogLossReductionPer100 / 100
+	}
+
 	actualWinPts := eloWinPoints + underdogBonus
+	actualLossPts := eloLossPoints + lossReduction // e.g. -25 + 20 = -5
+	if actualLossPts > 0 {
+		actualLossPts = 0 // never gain points from a loss
+	}
 
 	if winnerFound {
 		winner.Wins++
@@ -5098,7 +5110,7 @@ func updateLeaderboards(winnerID, loserID uint, matchCode string) {
 	if loserFound {
 		loser.Losses++
 		loser.Matches++
-		loser.Rating += eloLossPoints
+		loser.Rating += actualLossPts
 		loser.Rating = clampRating(loser.Rating)
 		DB.Save(&loser)
 	} else {
@@ -5124,13 +5136,13 @@ func updateLeaderboards(winnerID, loserID uint, matchCode string) {
 			Updates(map[string]any{
 				"losses":  gorm.Expr("losses + 1"),
 				"matches": gorm.Expr("matches + 1"),
-				"rating":  gorm.Expr("GREATEST(COALESCE(rating, ?) + ?, ?)", defaultPlayerRating, eloLossPoints, getEnvInt("MIN_RATING", 0)),
+				"rating":  gorm.Expr("GREATEST(COALESCE(rating, ?) + ?, ?)", defaultPlayerRating, actualLossPts, getEnvInt("MIN_RATING", 0)),
 			})
 	}
 
-	if underdogBonus > 0 {
-		log.Printf("📊 Leaderboards updated (ELO %+d base + %d underdog bonus, challenge=%v): winner=%d loser=%d",
-			eloWinPoints, underdogBonus, isChallenge, winnerID, loserID)
+	if underdogBonus > 0 || lossReduction > 0 {
+		log.Printf("📊 Leaderboards updated (win: %+d [base %d + bonus %d], loss: %+d [base %d + reduction %d], challenge=%v): winner=%d loser=%d",
+			actualWinPts, eloWinPoints, underdogBonus, actualLossPts, eloLossPoints, lossReduction, isChallenge, winnerID, loserID)
 	} else {
 		log.Printf("📊 Leaderboards updated (ELO %+d / %+d): winner=%d loser=%d",
 			eloWinPoints, eloLossPoints, winnerID, loserID)
@@ -8194,7 +8206,8 @@ func HandleModToggleFinalsVisible(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Visible bool `json:"visible"`
+		Visible    *bool `json:"visible"`
+		ModVisible *bool `json:"mod_visible"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -8205,12 +8218,18 @@ func HandleModToggleFinalsVisible(w http.ResponseWriter, r *http.Request) {
 	var s LeagueSettings
 	DB.First(&s)
 
-	s.FinalsVisible = req.Visible
+	if req.Visible != nil {
+		s.FinalsVisible = *req.Visible
+	}
+	if req.ModVisible != nil {
+		s.FinalsModVisible = *req.ModVisible
+	}
 	DB.Save(&s)
 
 	respondJSON(w, map[string]any{
-		"success": true,
-		"visible": s.FinalsVisible,
+		"success":     true,
+		"visible":     s.FinalsVisible,
+		"mod_visible": s.FinalsModVisible,
 	})
 }
 
@@ -8219,11 +8238,11 @@ func HandleGetFinalsVisible(w http.ResponseWriter, r *http.Request) {
 
 	var s LeagueSettings
 	if err := DB.First(&s).Error; err != nil {
-		respondJSON(w, map[string]any{"visible": false})
+		respondJSON(w, map[string]any{"visible": false, "mod_visible": false})
 		return
 	}
 
-	respondJSON(w, map[string]any{"visible": s.FinalsVisible})
+	respondJSON(w, map[string]any{"visible": s.FinalsVisible, "mod_visible": s.FinalsModVisible})
 }
 
 // POST /api/mod/finals/update-seeds
@@ -8259,6 +8278,345 @@ func HandleModFinalsSetSeeds(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{
 		"success": true,
 		"updated": len(req.Seeds),
+	})
+}
+
+// POST /api/mod/finals/generate-empty — creates an empty bracket structure by size
+func HandleModFinalsGenerateEmpty(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		Size int `json:"size"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	// Validate size is power of 2 between 2 and 16
+	valid := false
+	for _, s := range []int{2, 4, 8, 16} {
+		if req.Size == s {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		http.Error(w, "size must be 2, 4, 8, or 16", http.StatusBadRequest)
+		return
+	}
+
+	season := strings.TrimSpace(currentSeason)
+	if season == "" {
+		season = "0"
+	}
+
+	// Delete existing bracket for this season
+	if err := DB.Where("season = ? AND is_finals = true AND archived = false", season).Delete(&Match{}).Error; err != nil {
+		http.Error(w, "failed clearing old finals bracket", http.StatusInternalServerError)
+		return
+	}
+
+	bracketSize := req.Size
+
+	// WB rounds = log2(bracketSize)
+	k := 0
+	for (1 << k) < bracketSize {
+		k++
+	}
+	lbRounds := 2*k - 2
+
+	now := time.Now()
+	code := func(bracket string, round, slot int) string {
+		return fmt.Sprintf("%s-Finals-%s-R%dS%d", season, bracket, round, slot)
+	}
+	create := func(bracket string, round, slot int) Match {
+		return Match{
+			Season:       season,
+			MatchCode:    code(bracket, round, slot),
+			TeamAID:      0,
+			TeamBID:      0,
+			IsFinals:     true,
+			Bracket:      bracket,
+			BracketRound: round,
+			BracketSlot:  slot,
+			Status:       "Scheduled",
+			ProposedDate: &now,
+		}
+	}
+
+	lbMatchCount := func(round int) int {
+		exp := 2 + (round-1)/2
+		if exp > k {
+			exp = k
+		}
+		cnt := bracketSize / (1 << exp)
+		if cnt < 1 {
+			cnt = 1
+		}
+		return cnt
+	}
+
+	// Create all matches
+	var matches []Match
+
+	// Winners bracket
+	for r := 1; r <= k; r++ {
+		mc := bracketSize / (1 << r)
+		for s := 1; s <= mc; s++ {
+			matches = append(matches, create("winners", r, s))
+		}
+	}
+
+	// Losers bracket
+	for r := 1; r <= lbRounds; r++ {
+		mc := lbMatchCount(r)
+		for s := 1; s <= mc; s++ {
+			matches = append(matches, create("losers", r, s))
+		}
+	}
+
+	// Grand Finals (GF1 + GF reset)
+	matches = append(matches, create("grand_final", 1, 1))
+	matches = append(matches, create("grand_final", 2, 1))
+
+	for i := range matches {
+		if err := DB.Create(&matches[i]).Error; err != nil {
+			http.Error(w, "failed creating bracket match", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Reload to get IDs, then wire up next_match pointers
+	var created []Match
+	DB.Where("season = ? AND is_finals = true AND archived = false", season).Find(&created)
+
+	byCode := map[string]uint{}
+	for _, m := range created {
+		byCode[m.MatchCode] = m.ID
+	}
+
+	patch := func(from string, winTo, loseTo *string) {
+		id, ok := byCode[from]
+		if !ok {
+			return
+		}
+		var wID *uint
+		var lID *uint
+		if winTo != nil {
+			if x, ok := byCode[*winTo]; ok {
+				tmp := x
+				wID = &tmp
+			}
+		}
+		if loseTo != nil {
+			if x, ok := byCode[*loseTo]; ok {
+				tmp := x
+				lID = &tmp
+			}
+		}
+		DB.Model(&Match{}).Where("id = ?", id).Updates(map[string]any{
+			"winner_to_match_id": wID,
+			"loser_to_match_id":  lID,
+		})
+	}
+
+	// Wire WB
+	for r := 1; r <= k; r++ {
+		mc := bracketSize / (1 << r)
+		for s := 1; s <= mc; s++ {
+			from := code("winners", r, s)
+
+			var winTo *string
+			if r < k {
+				n := code("winners", r+1, (s+1)/2)
+				winTo = &n
+			} else {
+				n := code("grand_final", 1, 1)
+				winTo = &n
+			}
+
+			var loseTo *string
+			if r == 1 {
+				n := code("losers", 1, (s+1)/2)
+				loseTo = &n
+			} else {
+				n := code("losers", 2*(r-1), s)
+				loseTo = &n
+			}
+
+			patch(from, winTo, loseTo)
+		}
+	}
+
+	// Wire LB
+	for r := 1; r <= lbRounds; r++ {
+		mc := lbMatchCount(r)
+		for s := 1; s <= mc; s++ {
+			from := code("losers", r, s)
+
+			var winTo *string
+			if r < lbRounds {
+				ns := s
+				if r%2 == 0 {
+					ns = (s + 1) / 2
+				}
+				n := code("losers", r+1, ns)
+				winTo = &n
+			} else {
+				n := code("grand_final", 1, 1)
+				winTo = &n
+			}
+
+			patch(from, winTo, nil)
+		}
+	}
+
+	// Wire GF
+	{
+		a := code("grand_final", 1, 1)
+		b := code("grand_final", 2, 1)
+		patch(a, nil, &b)
+	}
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Empty %d-team bracket generated", bracketSize),
+	})
+}
+
+// POST /api/mod/finals/assign-slot — assign a team to a bracket match slot
+func HandleModFinalsAssignSlot(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		MatchID uint   `json:"match_id"`
+		Slot    string `json:"slot"`    // "team_a" or "team_b"
+		TeamID  uint   `json:"team_id"` // 0 to clear
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MatchID == 0 {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+	if req.Slot != "team_a" && req.Slot != "team_b" {
+		http.Error(w, "slot must be 'team_a' or 'team_b'", http.StatusBadRequest)
+		return
+	}
+
+	var m Match
+	if err := DB.First(&m, req.MatchID).Error; err != nil {
+		http.Error(w, "match not found", http.StatusNotFound)
+		return
+	}
+	if !m.IsFinals {
+		http.Error(w, "match is not a finals match", http.StatusBadRequest)
+		return
+	}
+
+	col := "team_a_id"
+	if req.Slot == "team_b" {
+		col = "team_b_id"
+	}
+
+	if err := DB.Model(&Match{}).Where("id = ?", req.MatchID).Update(col, req.TeamID).Error; err != nil {
+		http.Error(w, "failed to assign team", http.StatusInternalServerError)
+		return
+	}
+
+	// Get team name for logging
+	teamName := "TBD"
+	if req.TeamID != 0 {
+		var t Team
+		if err := DB.First(&t, req.TeamID).Error; err == nil {
+			teamName = t.Name
+		}
+	}
+
+	log.Printf("📊 Assigned %s to match #%d slot %s", teamName, req.MatchID, req.Slot)
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Assigned %s to %s", teamName, req.Slot),
+	})
+}
+
+// POST /api/mod/finals/set-winner — set winner on a bracket match and propagate
+func HandleModFinalsSetWinner(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var req struct {
+		MatchID  uint `json:"match_id"`
+		WinnerID uint `json:"winner"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MatchID == 0 {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	var m Match
+	if err := DB.First(&m, req.MatchID).Error; err != nil {
+		http.Error(w, "match not found", http.StatusNotFound)
+		return
+	}
+
+	if req.WinnerID != m.TeamAID && req.WinnerID != m.TeamBID {
+		http.Error(w, "winner must be one of the match teams", http.StatusBadRequest)
+		return
+	}
+
+	// Determine loser
+	loserID := m.TeamAID
+	if req.WinnerID == m.TeamAID {
+		loserID = m.TeamBID
+	}
+
+	// Set winner
+	DB.Model(&Match{}).Where("id = ?", req.MatchID).Update("winner_id", req.WinnerID)
+
+	// Propagate winner to next match
+	if m.WinnerToMatchID != nil && *m.WinnerToMatchID != 0 {
+		// Find which slot the winner goes to in next match
+		var nextMatch Match
+		if err := DB.First(&nextMatch, *m.WinnerToMatchID).Error; err == nil {
+			// Place in first empty slot, or team_a if bracket_slot is even, team_b if odd
+			if nextMatch.TeamAID == 0 {
+				DB.Model(&Match{}).Where("id = ?", nextMatch.ID).Update("team_a_id", req.WinnerID)
+			} else if nextMatch.TeamBID == 0 {
+				DB.Model(&Match{}).Where("id = ?", nextMatch.ID).Update("team_b_id", req.WinnerID)
+			}
+		}
+	}
+
+	// Propagate loser to losers bracket
+	if m.LoserToMatchID != nil && *m.LoserToMatchID != 0 && loserID != 0 {
+		var lbMatch Match
+		if err := DB.First(&lbMatch, *m.LoserToMatchID).Error; err == nil {
+			if lbMatch.TeamAID == 0 {
+				DB.Model(&Match{}).Where("id = ?", lbMatch.ID).Update("team_a_id", loserID)
+			} else if lbMatch.TeamBID == 0 {
+				DB.Model(&Match{}).Where("id = ?", lbMatch.ID).Update("team_b_id", loserID)
+			}
+		}
+	}
+
+	// Get team name for logging
+	teamName := fmt.Sprintf("Team #%d", req.WinnerID)
+	var t Team
+	if err := DB.First(&t, req.WinnerID).Error; err == nil {
+		teamName = t.Name
+	}
+
+	SendDiscordLog(fmt.Sprintf("🏆 **Finals Winner Set:** %s wins match #%d", teamName, req.MatchID))
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("%s wins!", teamName),
 	})
 }
 
@@ -9557,6 +9915,7 @@ var settingsKeys = []string{
 	"ELO_WIN_POINTS",
 	"ELO_LOSS_POINTS",
 	"UNDERDOG_BONUS_PER_100",
+	"UNDERDOG_LOSS_REDUCTION_PER_100",
 	"CHALLENGE_BONUS_MULTIPLIER",
 	"MAX_RATING",
 	"MIN_RATING",
@@ -9668,4 +10027,40 @@ func persistEnvFile() error {
 	}
 
 	return os.WriteFile(envPath, []byte(strings.Join(lines, "\n")), 0644)
+}
+
+// =============================================================================
+// RULES SECTIONS
+// =============================================================================
+
+// GET /api/rules — public, returns all rule sections ordered
+func HandleGetRules(w http.ResponseWriter, r *http.Request) {
+	var sections []RuleSection
+	DB.Order("sort_order ASC, id ASC").Find(&sections)
+	respondJSON(w, sections)
+}
+
+// POST /api/mod/rules — save all rule sections (replace all)
+func HandleSaveRules(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	var incoming []RuleSection
+	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Replace all sections in a transaction
+	tx := DB.Begin()
+	tx.Where("1 = 1").Delete(&RuleSection{})
+	for i, s := range incoming {
+		s.ID = 0
+		s.SortOrder = i
+		tx.Create(&s)
+	}
+	tx.Commit()
+
+	respondJSON(w, map[string]string{"status": "ok"})
 }

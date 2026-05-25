@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
 import FullSeasonCalendar from "../components/SeasonCalendar";
-import Rules from "../components/Rules";
 import { getApiUrl } from "../config";
 
 export default function Home({ user }) {
@@ -290,22 +289,6 @@ export default function Home({ user }) {
           </div>
         </div>
       </div>
-
-      {/* =====================================================
-          RULES (COLLAPSED — FULL CONTENT)
-      ====================================================== */}
-      <details
-        className="mt-5 p-3 rounded"
-        style={{ background: "#121212", border: "1px solid #2a2a2a" }}
-      >
-        <summary style={{ cursor: "pointer", fontSize: "1.1rem" }}>
-          📜 League Rules & Format (click to expand)
-        </summary>
-
-        <div className="mt-4">
-          <Rules />
-        </div>
-      </details>
 
       {/* =====================================================
           CALENDAR

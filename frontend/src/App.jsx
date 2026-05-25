@@ -13,6 +13,7 @@ import Matchups from "./pages/Matchups";
 import PlayerDetail from "./pages/PlayerDetail";
 import MatchDetail from "./pages/MatchDetail";
 import Finals from "./pages/Finals";
+import RulesPage from "./pages/Rules";
 import LeagueMod from "./pages/LeagueMod";
 import LeagueSettings from "./pages/LeagueSettings";
 
@@ -271,8 +272,8 @@ function App() {
     // Fetch finals visibility
     fetch(`${getApiUrl()}/api/finals/visible`)
       .then(res => res.json())
-      .then(data => setShowFinals(data.visible))
-      .catch(() => setShowFinals(false));
+      .then(data => setShowFinals(data))
+      .catch(() => setShowFinals(null));
 
   }, []);
 
@@ -280,8 +281,8 @@ function App() {
     function handleVisibilityUpdate() {
       fetch(`${getApiUrl()}/api/finals/visible`)
         .then(res => res.json())
-        .then(data => setShowFinals(data.visible))
-        .catch(() => setShowFinals(false));
+        .then(data => setShowFinals(data))
+        .catch(() => setShowFinals(null));
     }
 
     window.addEventListener("finals-visibility-updated", handleVisibilityUpdate);
@@ -290,6 +291,9 @@ function App() {
       window.removeEventListener("finals-visibility-updated", handleVisibilityUpdate);
     };
   }, []);
+
+  // Determine if Finals tab should show
+  const finalsTabVisible = showFinals?.visible || (user?.is_mod && showFinals?.mod_visible);
 
   return (
     <div className="app-wrapper">
@@ -354,6 +358,13 @@ function App() {
               >
                 🏠 Home
               </button>
+              <button
+                type="button"
+                className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/rules" ? "mobile-nav-active" : ""}`}
+                onClick={() => navigateFromMobile("/rules")}
+              >
+                📜 Rules
+              </button>
 
               {user && (
                 <>
@@ -389,7 +400,7 @@ function App() {
                 👥 Teams
               </button>
 
-              {showFinals && (
+              {finalsTabVisible && (
                 <button
                   type="button"
                   className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/finals" ? "mobile-nav-active" : ""}`}
@@ -505,6 +516,16 @@ function App() {
                 🏠 Home
               </NavLink>
 
+              <NavLink
+                to="/rules"
+                className={({ isActive }) =>
+                  `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
+                  }`
+                }
+              >
+                📜 Rules
+              </NavLink>
+
               {user && (
                 <>
                   <NavLink
@@ -548,7 +569,7 @@ function App() {
                 👥 Teams
               </NavLink>
 
-              {showFinals && (
+              {finalsTabVisible && (
                 <NavLink
                   to="/finals"
                   className={({ isActive }) =>
@@ -659,26 +680,29 @@ function App() {
           </aside>
 
           {/* === Page Content === */}
-          <div className="page-content ecgl-content">
-            <ErrorBoundary>
-              <Routes>
-                <Route path="/" element={<Home user={user} />} />
-                <Route path="/register" element={<Register />} />
-                <Route path="/teams" element={<Teams />} />
-                <Route path="/teams/:id" element={<TeamDetail />} />
-                <Route path="/matchups" element={<Matchups />} />
-                <Route path="/match/:id" element={<MatchDetail />} />
-                <Route path="/leaderboard" element={<Leaderboard />} />
-                <Route path="/myteam" element={<MyTeam />} />
-                <Route path="/players" element={<Players />} />
-                <Route path="/players/:id" element={<PlayerDetail />} />
-                <Route path="/finals" element={<Finals />} />
+          <div className="ecgl-content">
+            <div className="page-content">
+              <ErrorBoundary>
+                <Routes>
+                  <Route path="/" element={<Home user={user} />} />
+                  <Route path="/register" element={<Register />} />
+                  <Route path="/teams" element={<Teams />} />
+                  <Route path="/teams/:id" element={<TeamDetail />} />
+                  <Route path="/matchups" element={<Matchups />} />
+                  <Route path="/match/:id" element={<MatchDetail />} />
+                  <Route path="/leaderboard" element={<Leaderboard />} />
+                  <Route path="/myteam" element={<MyTeam />} />
+                  <Route path="/players" element={<Players />} />
+                  <Route path="/players/:id" element={<PlayerDetail />} />
+                  <Route path="/finals" element={<Finals />} />
+                  <Route path="/rules" element={<RulesPage />} />
 
-                {/* 🛠️ League Mod Route (extra protected inside component) */}
-                <Route path="/modpanel" element={<LeagueMod />} />
-                <Route path="/settings" element={<LeagueSettings />} />
-              </Routes>
-            </ErrorBoundary>
+                  {/* 🛠️ League Mod Route (extra protected inside component) */}
+                  <Route path="/modpanel" element={<LeagueMod />} />
+                  <Route path="/settings" element={<LeagueSettings />} />
+                </Routes>
+              </ErrorBoundary>
+            </div>
           </div>
         </div>
       </div>{/* end app-content */}

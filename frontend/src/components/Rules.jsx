@@ -1,4 +1,115 @@
+import { useState, useEffect } from "react";
+import axios from "axios";
+import { getApiUrl } from "../config";
+
+function renderContent(content) {
+    const lines = content.split("\n");
+    const elements = [];
+    let currentList = [];
+    let blockquoteLines = [];
+
+    const flushList = () => {
+        if (currentList.length > 0) {
+            elements.push(<ul key={elements.length}>{currentList}</ul>);
+            currentList = [];
+        }
+    };
+
+    const flushBlockquote = () => {
+        if (blockquoteLines.length > 0) {
+            elements.push(
+                <blockquote key={elements.length}>
+                    {blockquoteLines.map((l, i) => <span key={i}>{l}<br /></span>)}
+                </blockquote>
+            );
+            blockquoteLines = [];
+        }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+            flushList();
+            flushBlockquote();
+            continue;
+        }
+
+        if (trimmed.startsWith("> ")) {
+            flushList();
+            blockquoteLines.push(trimmed.slice(2));
+            continue;
+        } else if (blockquoteLines.length > 0) {
+            flushBlockquote();
+        }
+
+        if (trimmed.startsWith("### ")) {
+            flushList();
+            elements.push(<h4 key={elements.length}>{trimmed.slice(4)}</h4>);
+        } else if (trimmed.startsWith("- ")) {
+            const text = trimmed.slice(2);
+            // Check if next lines are indented sub-items
+            const subItems = [];
+            while (i + 1 < lines.length && lines[i + 1].match(/^\s{2,}-\s/)) {
+                i++;
+                subItems.push(lines[i].trim().slice(2));
+            }
+            if (subItems.length > 0) {
+                currentList.push(
+                    <li key={currentList.length}>
+                        {text}
+                        <ul>{subItems.map((s, j) => <li key={j}>{s}</li>)}</ul>
+                    </li>
+                );
+            } else {
+                currentList.push(<li key={currentList.length}>{text}</li>);
+            }
+        } else {
+            flushList();
+            elements.push(<p key={elements.length}>{trimmed}</p>);
+        }
+    }
+
+    flushList();
+    flushBlockquote();
+
+    return elements;
+}
+
 export default function Rules() {
+    const [sections, setSections] = useState(null);
+    const [error, setError] = useState(false);
+
+    useEffect(() => {
+        axios.get(`${getApiUrl()}/api/rules`)
+            .then(res => {
+                if (res.data && res.data.length > 0) {
+                    setSections(res.data);
+                } else {
+                    setError(true);
+                }
+            })
+            .catch(() => setError(true));
+    }, []);
+
+    if (error) return <StaticRules />;
+    if (sections === null) return <p className="text-secondary">Loading rules…</p>;
+
+    return (
+        <div className="rules text-start">
+            {sections.map((section, idx) => (
+                <div key={section.id || idx}>
+                    <hr />
+                    <h2>{section.title}</h2>
+                    {renderContent(section.content)}
+                </div>
+            ))}
+        </div>
+    );
+}
+
+export function StaticRules() {
     return (
         <div className="rules text-start">
 
@@ -51,37 +162,12 @@ export default function Rules() {
 
             <hr />
             <h2>🛠️ Gamemodes</h2>
-
-            <h4>⚙️ Payload</h4>
             <ul>
-                <li>Teams alternate attacking and defending</li>
-                <li>Team that pushes the payload farther wins</li>
-                <li>If both finish, overtime uses remaining time</li>
-            </ul>
-
-            <h4>🎯 Capture Point</h4>
-            <ul>
-                <li>Best-of-3 rounds</li>
-                <li>First team to win 2 rounds wins the map</li>
-            </ul>
-
-            <h4>🔫 Loadout Rules</h4>
-            <ul>
-                <li>🚫 Combat chassis only — no exceptions</li>
-                <li>
-                    📦 <b>Loadout limits scale with match size:</b>
-                    <ul>
-                        <li>🔹 <b>3v3:</b> Max <b>1</b> weapon / tac mod / ordnance per team</li>
-                        <li>🔹 <b>4v4:</b> Max <b>2</b> weapons / tac mods / ordnances per team</li>
-                    </ul>
-                </li>
-                <li>
-                    ⚠️ Experimentals allowed (majority vote), but risky:
-                    <ul>
-                        <li>Some may break loadouts or cause conflicts</li>
-                        <li>Using exploits, leaving the map, or entering enemy spawn = penalties or forfeit</li>
-                    </ul>
-                </li>
+                <li>⚙️ Payload: Teams alternate attacking and defending. Team that pushes farther wins.</li>
+                <li>🎯 Capture Point: Best-of-3 rounds. First to 2 wins the map.</li>
+                <li>🔫 Combat chassis only — no exceptions</li>
+                <li>📦 3v3: Max 1 weapon/tac/ordnance per team. 4v4: Max 2.</li>
+                <li>⚠️ Experimentals allowed by majority vote but risky.</li>
             </ul>
 
             <hr />
@@ -94,7 +180,7 @@ export default function Rules() {
             <hr />
             <h2>🔄 Subs & Rosters</h2>
             <ul>
-                <li>🔍 Use <b>Find Subs</b> to ping eligible substitutes</li>
+                <li>🔍 Use Find Subs to ping eligible substitutes</li>
                 <li>⚖️ All subs allowed</li>
                 <li>1 league sub allowed per match</li>
                 <li>👥 Team roster minimum: 3 players</li>
@@ -114,7 +200,7 @@ export default function Rules() {
             <ul>
                 <li>⌛ 10+ minutes late → possible forfeit</li>
                 <li>⏸️ 10-minute break allowed between maps</li>
-                <li>🤝 <b>3 players minimum</b> required to start</li>
+                <li>🤝 3 players minimum required to start</li>
                 <li>🟦 4v4 allowed if both teams agree and have 4 players</li>
             </ul>
 
@@ -129,63 +215,23 @@ export default function Rules() {
 
             <hr />
             <h2>📋 Eligibility</h2>
-
-            <h4>⚠️ Platform</h4>
             <ul>
                 <li>Must play on PCVR using SteamVR, Oculus PC, or Link/Air Link</li>
                 <li>❌ Quest-native unsupported</li>
-            </ul>
-
-            <h4>👥 Team Size</h4>
-            <ul>
-                <li>Teams must roster 3–5 players</li>
-                <li>Minimum 3 registered to compete</li>
-                <li>Must use the same Discord account in-game</li>
-            </ul>
-
-            <h4>🎖️ League Subs</h4>
-            <ul>
-                <li>Must sign up as a Sub</li>
-                <li>Sub can play for any team</li>
-                <li>Max 1 sub per match for each team</li>
-                <li>Cannot join roster</li>
-            </ul>
-
-            <h4>🌍 Network</h4>
-            <ul>
-                <li>Must stay under 200ms ping</li>
-                <li>Wired strongly recommended</li>
+                <li>Teams must roster 3–5 players, minimum 3 to compete</li>
+                <li>League Subs: max 1 per match per team, cannot join roster</li>
+                <li>Must stay under 200ms ping, wired recommended</li>
             </ul>
 
             <hr />
             <h2>❌ Forfeits & Inactivity</h2>
-
-            <h4>📅 Scheduling Expectations</h4>
-            <p>
-                Weekly matchups must be completed before the next cycle.
-                Teams must propose times promptly or risk forfeits.
-            </p>
-
-            <h4>❌ Forfeit Conditions</h4>
             <ul>
-                <li>Cancelling last-minute without reschedule</li>
-                <li>No-show at agreed time</li>
-                <li>Failure to attempt scheduling before deadline</li>
-            </ul>
-
-            <h4>⚖️ Forfeit Outcomes</h4>
-            <ul>
-                <li>One-team forfeit → win for opponent</li>
-                <li>Double forfeit → both lose</li>
+                <li>Matches must be completed before next cycle</li>
+                <li>Cancelling last-minute, no-show, or failing to schedule → forfeit</li>
+                <li>One-team forfeit → win for opponent. Double forfeit → both lose.</li>
                 <li>Affects ELO and standings</li>
+                <li>Postponement only valid for server outages; mods must be contacted immediately</li>
             </ul>
-
-            <h4>🚫 Postponement Policy</h4>
-            <p>
-                Only valid if Echo VR servers are offline or widespread technical issues occur.
-                Mods must be contacted immediately with context.
-                Otherwise → double forfeit.
-            </p>
 
         </div>
     );

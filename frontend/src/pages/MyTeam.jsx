@@ -574,6 +574,47 @@ export default function MyTeam() {
                   </div>
                 </div>
 
+                {/* TEAM NAME */}
+                <div className="mb-4 border-bottom border-secondary pb-3">
+                  <h6 className="text-info mb-2">✏️ Team Name</h6>
+                  <div className="d-flex gap-2">
+                    <input
+                      className="form-control form-control-sm bg-dark text-light border-secondary"
+                      type="text"
+                      placeholder={team?.name || "New team name"}
+                      value={newTeamName}
+                      onChange={(e) => setNewTeamName(e.target.value)}
+                      maxLength={40}
+                    />
+                    <button
+                      className="btn btn-outline-info btn-sm"
+                      disabled={!newTeamName.trim() || newTeamName.trim() === team?.name}
+                      onClick={async () => {
+                        const trimmed = newTeamName.trim();
+                        if (!trimmed || trimmed === team?.name) return;
+                        try {
+                          await axios.post(
+                            `${urlBase}/api/team/rename`,
+                            { team_id: team.id, new_name: trimmed },
+                            { withCredentials: true }
+                          );
+                          setNewTeamName("");
+                          setMsg("✅ Team renamed!");
+                          await loadTeam();
+                        } catch (err) {
+                          const errMsg = err.response?.data || "Failed to rename team";
+                          setMsg(`⚠️ ${errMsg}`);
+                        }
+                      }}
+                    >
+                      Rename
+                    </button>
+                  </div>
+                  <div className="text-secondary small mt-1">
+                    Renaming doesn't affect match history or stats.
+                  </div>
+                </div>
+
                 {/* TEAM STATUS */}
                 <div className="mb-4 border-bottom border-secondary pb-3">
                   <h6 className="text-warning mb-2">🏁 Team Status</h6>

@@ -169,6 +169,7 @@ type LeagueSettings struct {
 	WeeklyChallengeLimit int        `json:"weekly_challenge_limit"`
 	ChallengesEnabled    bool       `json:"challenges_enabled" gorm:"default:true"`
 	FinalsVisible        bool       `json:"finals_visible" gorm:"column:show_finals_tab;default:false"`
+	FinalsModVisible     bool       `json:"finals_mod_visible" gorm:"default:false"`
 	LastMatchGeneration  *time.Time `json:"last_match_generation"`
 }
 
@@ -252,4 +253,12 @@ type ModAuditLog struct {
 	Target        string    `json:"target,omitempty"`
 	ActorID       string    `json:"actor_id" gorm:"index"`
 	ActorUsername string    `json:"actor_username,omitempty"`
+}
+
+// --- Rules Sections (editable by mods) ---
+type RuleSection struct {
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	Title     string `json:"title"`
+	Content   string `json:"content" gorm:"type:text"`
+	SortOrder int    `json:"sort_order" gorm:"default:0"`
 }
