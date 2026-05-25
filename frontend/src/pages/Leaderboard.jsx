@@ -89,11 +89,11 @@ export default function Leaderboard() {
 
                   <td>
                     <span className={`rank-badge ${getRankClass(t.division)}`}>
-                      {t.division} {t.tier}
+                      {t.in_placement ? "Placement" : `${t.division} ${t.tier}`}
                     </span>
                   </td>
 
-                  <td className="fw-bold">{t.rating}</td>
+                  <td className="fw-bold">{t.in_placement ? "—" : t.rating}</td>
                   <td className="text-success fw-semibold">{t.wins}</td>
                   <td className="text-danger fw-semibold">{t.losses}</td>
                 </tr>

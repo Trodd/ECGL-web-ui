@@ -512,16 +512,19 @@ func GetPlayerLeaderboard(w http.ResponseWriter, r *http.Request) {
 
 // --- Team Leaderboard ---
 func GetTeamLeaderboard(w http.ResponseWriter, r *http.Request) {
+	placementMatches := getEnvInt("PLACEMENT_MATCHES", 3)
+
 	type TeamRow struct {
-		ID       uint   `json:"id"`
-		Name     string `json:"name"`
-		Status   string `json:"status"`
-		Rating   int    `json:"rating"`
-		Wins     int    `json:"wins"`
-		Losses   int    `json:"losses"`
-		Matches  int    `json:"matches"`
-		Division string `json:"division"`
-		Tier     string `json:"tier"`
+		ID          uint   `json:"id"`
+		Name        string `json:"name"`
+		Status      string `json:"status"`
+		Rating      int    `json:"rating"`
+		Wins        int    `json:"wins"`
+		Losses      int    `json:"losses"`
+		Matches     int    `json:"matches"`
+		Division    string `json:"division"`
+		Tier        string `json:"tier"`
+		InPlacement bool   `json:"in_placement"`
 	}
 
 	var rows []TeamRow
@@ -538,11 +541,17 @@ func GetTeamLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add division + tier
+	// Add division + tier + placement status
 	for i := range rows {
-		div, tier := GetDivisionTier(rows[i].Rating)
-		rows[i].Division = div
-		rows[i].Tier = tier
+		if rows[i].Matches < placementMatches {
+			rows[i].InPlacement = true
+			rows[i].Division = "Placement"
+			rows[i].Tier = ""
+		} else {
+			div, tier := GetDivisionTier(rows[i].Rating)
+			rows[i].Division = div
+			rows[i].Tier = tier
+		}
 	}
 
 	respondJSON(w, rows)
@@ -1127,6 +1136,13 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to save join request", http.StatusInternalServerError)
 		return
 	}
+
+	// 🔔 Notify team captains about the join request
+	notifyTeamCaptains(req.TeamID, "join_request",
+		"New Join Request",
+		fmt.Sprintf("%s wants to join your team", player.DisplayName),
+		"/myteam",
+	)
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -2430,6 +2446,17 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 		mentionUserIDs,
 	)
 
+	// 🔔 Notify the OTHER team's captains about the schedule proposal
+	otherTeamID := match.TeamAID
+	if req.TeamID == match.TeamAID {
+		otherTeamID = match.TeamBID
+	}
+	notifyTeamCaptains(otherTeamID, "schedule_proposed",
+		"Match Time Proposed",
+		fmt.Sprintf("%s proposed a time for your match", requestingTeam),
+		fmt.Sprintf("/match/%d", match.ID),
+	)
+
 	respondJSON(w, map[string]any{
 		"success": true,
 		"message": fmt.Sprintf("Match scheduled for %s", date.Format(time.RFC1123)),
@@ -2594,6 +2621,21 @@ func HandleSubmitScore(w http.ResponseWriter, r *http.Request) {
 			log.Printf("❌ Failed to save unchanged match: %v", err)
 		}
 		log.Printf("🔁 Team %d re-submitted SAME scores for match #%d", req.TeamID, match.ID)
+	}
+
+	// 🔔 Notify the OTHER team's captains about score submission
+	if changed {
+		otherTeamID := match.TeamAID
+		submittingTeam := teamB.Name
+		if req.TeamID == match.TeamAID {
+			otherTeamID = match.TeamBID
+			submittingTeam = teamA.Name
+		}
+		notifyTeamCaptains(otherTeamID, "score_submitted",
+			"Scores Submitted",
+			fmt.Sprintf("%s submitted scores — please review and confirm", submittingTeam),
+			fmt.Sprintf("/match/%d", match.ID),
+		)
 	}
 
 	respondJSON(w, map[string]any{
@@ -4400,6 +4442,21 @@ func HandleModDeleteMatch(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("🗑️ Mod deleted match %d (%s)", match.ID, match.MatchCode)
 
+	// 🔔 Notify both teams' captains about deletion
+	var teamA, teamB Team
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+	notifyTeamCaptains(match.TeamAID, "match_deleted",
+		"Match Removed",
+		fmt.Sprintf("A mod removed your match vs %s (%s)", teamB.Name, match.MatchCode),
+		"/matchups",
+	)
+	notifyTeamCaptains(match.TeamBID, "match_deleted",
+		"Match Removed",
+		fmt.Sprintf("A mod removed your match vs %s (%s)", teamA.Name, match.MatchCode),
+		"/matchups",
+	)
+
 	respondJSON(w, map[string]any{
 		"success":  true,
 		"match_id": match.ID,
@@ -5065,9 +5122,11 @@ func updateLeaderboards(winnerID, loserID uint, matchCode string) {
 	eloWinPoints := getEnvInt("ELO_WIN_POINTS", 25)
 	eloLossPoints := getEnvInt("ELO_LOSS_POINTS", -25)
 	defaultPlayerRating := getEnvInt("DEFAULT_PLAYER_RATING", 800)
+	defaultTeamRating := getEnvInt("DEFAULT_TEAM_RATING", 800)
 	underdogBonusPer100 := getEnvInt("UNDERDOG_BONUS_PER_100", 10)
 	underdogLossReductionPer100 := getEnvInt("UNDERDOG_LOSS_REDUCTION_PER_100", 5)
 	challengeMultiplier := getEnvInt("CHALLENGE_BONUS_MULTIPLIER", 2)
+	placementMatches := getEnvInt("PLACEMENT_MATCHES", 3)
 
 	isChallenge := strings.Contains(matchCode, "CHAL")
 
@@ -5075,47 +5134,80 @@ func updateLeaderboards(winnerID, loserID uint, matchCode string) {
 	winnerFound := DB.First(&winner, winnerID).Error == nil
 	loserFound := DB.First(&loser, loserID).Error == nil
 
-	// Calculate underdog bonus (only if winner rating < loser rating)
-	underdogBonus := 0
-	if winnerFound && loserFound && loser.Rating > winner.Rating {
-		diff := loser.Rating - winner.Rating
-		underdogBonus = diff * underdogBonusPer100 / 100
-		if isChallenge {
-			underdogBonus *= challengeMultiplier
-		}
-	}
-
-	// Calculate loss reduction (if loser rating < winner rating, they lose less)
-	lossReduction := 0
-	if winnerFound && loserFound && winner.Rating > loser.Rating {
-		diff := winner.Rating - loser.Rating
-		lossReduction = diff * underdogLossReductionPer100 / 100
-	}
-
-	actualWinPts := eloWinPoints + underdogBonus
-	actualLossPts := eloLossPoints + lossReduction // e.g. -25 + 20 = -5
-	if actualLossPts > 0 {
-		actualLossPts = 0 // never gain points from a loss
-	}
-
+	// --- TEAM STATS (always increment W/L/matches) ---
 	if winnerFound {
 		winner.Wins++
 		winner.Matches++
-		winner.Rating += actualWinPts
-		winner.Rating = clampRating(winner.Rating)
-		DB.Save(&winner)
-	} else {
-		log.Printf("⚠️ Could not find winner team %d", winnerID)
 	}
-
 	if loserFound {
 		loser.Losses++
 		loser.Matches++
-		loser.Rating += actualLossPts
-		loser.Rating = clampRating(loser.Rating)
-		DB.Save(&loser)
+	}
+
+	// --- PLACEMENT CHECK: only adjust ratings if BOTH teams are out of placement ---
+	winnerInPlacement := winnerFound && winner.Matches <= placementMatches
+	loserInPlacement := loserFound && loser.Matches <= placementMatches
+
+	if !winnerInPlacement && !loserInPlacement {
+		// Both placed — normal ELO adjustment
+		underdogBonus := 0
+		if winnerFound && loserFound && loser.Rating > winner.Rating {
+			diff := loser.Rating - winner.Rating
+			underdogBonus = diff * underdogBonusPer100 / 100
+			if isChallenge {
+				underdogBonus *= challengeMultiplier
+			}
+		}
+
+		lossReduction := 0
+		if winnerFound && loserFound && winner.Rating > loser.Rating {
+			diff := winner.Rating - loser.Rating
+			lossReduction = diff * underdogLossReductionPer100 / 100
+		}
+
+		actualWinPts := eloWinPoints + underdogBonus
+		actualLossPts := eloLossPoints + lossReduction
+		if actualLossPts > 0 {
+			actualLossPts = 0
+		}
+
+		if winnerFound {
+			winner.Rating += actualWinPts
+			winner.Rating = clampRating(winner.Rating)
+		}
+		if loserFound {
+			loser.Rating += actualLossPts
+			loser.Rating = clampRating(loser.Rating)
+		}
+
+		log.Printf("📊 Leaderboards updated (win: %+d, loss: %+d, challenge=%v): winner=%d loser=%d",
+			actualWinPts, actualLossPts, isChallenge, winnerID, loserID)
 	} else {
-		log.Printf("⚠️ Could not find loser team %d", loserID)
+		log.Printf("📊 Placement match recorded: winner=%d (matches=%d) loser=%d (matches=%d)",
+			winnerID, winner.Matches, loserID, loser.Matches)
+	}
+
+	// --- Check if either team just completed placement ---
+	if winnerFound && winner.Matches == placementMatches {
+		// Calculate initial rating from W/L
+		winner.Rating = defaultTeamRating + (winner.Wins * eloWinPoints) + ((winner.Matches - winner.Wins) * eloLossPoints)
+		winner.Rating = clampRating(winner.Rating)
+		log.Printf("🎓 Team %d (%s) completed placement: %dW/%dL → rating %d",
+			winner.ID, winner.Name, winner.Wins, winner.Losses, winner.Rating)
+	}
+	if loserFound && loser.Matches == placementMatches {
+		loser.Rating = defaultTeamRating + (loser.Wins * eloWinPoints) + ((loser.Matches - loser.Wins) * eloLossPoints)
+		loser.Rating = clampRating(loser.Rating)
+		log.Printf("🎓 Team %d (%s) completed placement: %dW/%dL → rating %d",
+			loser.ID, loser.Name, loser.Wins, loser.Losses, loser.Rating)
+	}
+
+	// Save teams
+	if winnerFound {
+		DB.Save(&winner)
+	}
+	if loserFound {
+		DB.Save(&loser)
 	}
 
 	// --- Player stats ---
@@ -5123,30 +5215,60 @@ func updateLeaderboards(winnerID, loserID uint, matchCode string) {
 	DB.Where("team_id = ?", winnerID).Find(&winners)
 	DB.Where("team_id = ?", loserID).Find(&losers)
 
-	for _, w := range winners {
-		DB.Model(&Player{}).Where("id = ?", w.PlayerID).
-			Updates(map[string]any{
-				"wins":    gorm.Expr("wins + 1"),
-				"matches": gorm.Expr("matches + 1"),
-				"rating":  gorm.Expr("LEAST(COALESCE(rating, ?) + ?, ?)", defaultPlayerRating, actualWinPts, getEnvInt("MAX_RATING", 1300)),
-			})
-	}
-
-	for _, l := range losers {
-		DB.Model(&Player{}).Where("id = ?", l.PlayerID).
-			Updates(map[string]any{
-				"losses":  gorm.Expr("losses + 1"),
-				"matches": gorm.Expr("matches + 1"),
-				"rating":  gorm.Expr("GREATEST(COALESCE(rating, ?) + ?, ?)", defaultPlayerRating, actualLossPts, getEnvInt("MIN_RATING", 0)),
-			})
-	}
-
-	if underdogBonus > 0 || lossReduction > 0 {
-		log.Printf("📊 Leaderboards updated (win: %+d [base %d + bonus %d], loss: %+d [base %d + reduction %d], challenge=%v): winner=%d loser=%d",
-			actualWinPts, eloWinPoints, underdogBonus, actualLossPts, eloLossPoints, lossReduction, isChallenge, winnerID, loserID)
+	// Players on placement teams don't get rating changes either
+	if !winnerInPlacement {
+		actualWinPts := eloWinPoints
+		if winnerFound && loserFound && loser.Rating > winner.Rating {
+			diff := loser.Rating - winner.Rating
+			bonus := diff * underdogBonusPer100 / 100
+			if isChallenge {
+				bonus *= challengeMultiplier
+			}
+			actualWinPts += bonus
+		}
+		for _, w := range winners {
+			DB.Model(&Player{}).Where("id = ?", w.PlayerID).
+				Updates(map[string]any{
+					"wins":    gorm.Expr("wins + 1"),
+					"matches": gorm.Expr("matches + 1"),
+					"rating":  gorm.Expr("LEAST(COALESCE(rating, ?) + ?, ?)", defaultPlayerRating, actualWinPts, getEnvInt("MAX_RATING", 1300)),
+				})
+		}
 	} else {
-		log.Printf("📊 Leaderboards updated (ELO %+d / %+d): winner=%d loser=%d",
-			eloWinPoints, eloLossPoints, winnerID, loserID)
+		for _, w := range winners {
+			DB.Model(&Player{}).Where("id = ?", w.PlayerID).
+				Updates(map[string]any{
+					"wins":    gorm.Expr("wins + 1"),
+					"matches": gorm.Expr("matches + 1"),
+				})
+		}
+	}
+
+	if !loserInPlacement {
+		actualLossPts := eloLossPoints
+		if winnerFound && loserFound && winner.Rating > loser.Rating {
+			diff := winner.Rating - loser.Rating
+			actualLossPts += diff * underdogLossReductionPer100 / 100
+		}
+		if actualLossPts > 0 {
+			actualLossPts = 0
+		}
+		for _, l := range losers {
+			DB.Model(&Player{}).Where("id = ?", l.PlayerID).
+				Updates(map[string]any{
+					"losses":  gorm.Expr("losses + 1"),
+					"matches": gorm.Expr("matches + 1"),
+					"rating":  gorm.Expr("GREATEST(COALESCE(rating, ?) + ?, ?)", defaultPlayerRating, actualLossPts, getEnvInt("MIN_RATING", 0)),
+				})
+		}
+	} else {
+		for _, l := range losers {
+			DB.Model(&Player{}).Where("id = ?", l.PlayerID).
+				Updates(map[string]any{
+					"losses":  gorm.Expr("losses + 1"),
+					"matches": gorm.Expr("matches + 1"),
+				})
+		}
 	}
 }
 
@@ -6119,6 +6241,13 @@ func HandleChallengeRequest(w http.ResponseWriter, r *http.Request) {
 		target.Name,
 		mentions,
 	))
+
+	// 🔔 Notify target team captains in-app
+	notifyTeamCaptains(target.ID, "challenge_received",
+		"Challenge Match Received",
+		fmt.Sprintf("%s has challenged your team", requester.Name),
+		"/myteam",
+	)
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -9922,6 +10051,7 @@ var settingsKeys = []string{
 	"MIN_RATING",
 	"DEFAULT_PLAYER_RATING",
 	"DEFAULT_TEAM_RATING",
+	"PLACEMENT_MATCHES",
 	"MIN_TEAM_PLAYERS",
 	"MAX_TEAM_PLAYERS",
 	"CURRENT_SEASON",

@@ -686,6 +686,12 @@ func main() {
 	r.HandleFunc("/api/team/logo/{teamID:[0-9]+}/{version}", HandleGetTeamLogo).Methods("GET")
 	r.HandleFunc("/api/season/calendar", HandleGetSeasonCalendar).Methods("GET")
 
+	// Notifications
+	r.HandleFunc("/api/notifications", HandleGetNotifications).Methods("GET")
+	r.HandleFunc("/api/notifications/count", HandleGetNotificationCount).Methods("GET")
+	r.HandleFunc("/api/notifications/read", HandleMarkNotificationRead).Methods("POST")
+	r.HandleFunc("/api/notifications/read-all", HandleMarkAllNotificationsRead).Methods("POST")
+
 	// League Mod routes (all requireLeagueMod inside handlers)
 	r.HandleFunc("/api/mod/audit-logs", HandleModAuditLogs).Methods("GET")
 	r.HandleFunc("/api/mod/match/reset", ModMatchReset).Methods("POST")

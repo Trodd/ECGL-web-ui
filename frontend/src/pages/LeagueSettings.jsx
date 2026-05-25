@@ -98,6 +98,7 @@ const SETTING_GROUPS = [
             { key: "MIN_RATING", label: "Min Rating Floor", type: "number" },
             { key: "DEFAULT_PLAYER_RATING", label: "Default Player Rating", type: "number" },
             { key: "DEFAULT_TEAM_RATING", label: "Default Team Rating", type: "number" },
+            { key: "PLACEMENT_MATCHES", label: "Placement Matches Required", type: "number" },
         ],
     },
     {

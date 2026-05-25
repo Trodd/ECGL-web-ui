@@ -29,6 +29,7 @@ function App() {
   const [season, setSeason] = useState("");
   const [showFinals, setShowFinals] = useState(false);
   const [loadingUser, setLoadingUser] = useState(true);
+  const [notifCount, setNotifCount] = useState(0);
 
   // Pull-to-refresh
   const [pullDistance, setPullDistance] = useState(0);
@@ -277,6 +278,28 @@ function App() {
 
   }, []);
 
+  // Poll notification count
+  useEffect(() => {
+    if (!user) { setNotifCount(0); return; }
+    const fetchCount = () => {
+      fetch(`${getApiUrl()}/api/notifications/count`, { credentials: "include" })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => { if (data) setNotifCount(data.unread_count || 0); })
+        .catch(() => { });
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // Clear notifications when visiting My Team
+  useEffect(() => {
+    if (location.pathname === "/myteam" && notifCount > 0) {
+      fetch(`${getApiUrl()}/api/notifications/read-all`, { method: "POST", credentials: "include" }).catch(() => { });
+      setNotifCount(0);
+    }
+  }, [location.pathname]);
+
   useEffect(() => {
     function handleVisibilityUpdate() {
       fetch(`${getApiUrl()}/api/finals/visible`)
@@ -381,6 +404,7 @@ function App() {
                     onClick={() => navigateFromMobile("/myteam")}
                   >
                     🧑 My Team
+                    {notifCount > 0 && <span className="badge bg-danger rounded-pill ms-2">{notifCount}</span>}
                   </button>
                 </>
               )}
@@ -545,6 +569,7 @@ function App() {
                     }
                   >
                     🧑 My Team
+                    {notifCount > 0 && <span className="badge bg-danger rounded-pill ms-2" style={{ fontSize: 10 }}>{notifCount}</span>}
                   </NavLink>
                 </>
               )}

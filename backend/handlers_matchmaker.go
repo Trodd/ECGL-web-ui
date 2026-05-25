@@ -188,6 +188,17 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		log.Printf("🔄 Reset weekly_challenges_used for all teams")
 	}
 
+	// 🔔 Notify all team captains that new matchups are posted
+	var allCaptains []TeamMember
+	DB.Where("role IN ?", []string{"Captain", "Co-Captain"}).Find(&allCaptains)
+	for _, c := range allCaptains {
+		createNotification(c.PlayerID, "matchup_posted",
+			"New Matchups Posted",
+			fmt.Sprintf("Week %d matchups are live — check your schedule!", req.Week),
+			"/matchups",
+		)
+	}
+
 	respondJSON(w, map[string]any{
 		"success": true,
 		"week":    req.Week,
@@ -641,6 +652,18 @@ func HandleModAddMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🔔 Notify both teams' captains about the new match
+	notifyTeamCaptains(aTeam.ID, "match_added",
+		"New Match Added",
+		fmt.Sprintf("A mod added a match: %s vs %s", aTeam.Name, bTeam.Name),
+		fmt.Sprintf("/match/%d", newMatch.ID),
+	)
+	notifyTeamCaptains(bTeam.ID, "match_added",
+		"New Match Added",
+		fmt.Sprintf("A mod added a match: %s vs %s", aTeam.Name, bTeam.Name),
+		fmt.Sprintf("/match/%d", newMatch.ID),
+	)
+
 	respondJSON(w, map[string]any{
 		"success":    true,
 		"match_code": matchCode,
@@ -744,6 +767,18 @@ func HandleModSetMaps(w http.ResponseWriter, r *http.Request) {
 	match.Status = "Finished"
 
 	DB.Save(&match)
+
+	// 🔔 Notify both teams' captains about mod-set scores
+	notifyTeamCaptains(match.TeamAID, "mod_scores_set",
+		"Match Scores Finalized",
+		fmt.Sprintf("A mod set final scores for %s vs %s", teamA.Name, teamB.Name),
+		fmt.Sprintf("/match/%d", match.ID),
+	)
+	notifyTeamCaptains(match.TeamBID, "mod_scores_set",
+		"Match Scores Finalized",
+		fmt.Sprintf("A mod set final scores for %s vs %s", teamA.Name, teamB.Name),
+		fmt.Sprintf("/match/%d", match.ID),
+	)
 
 	respondJSON(w, map[string]any{
 		"ok":         true,

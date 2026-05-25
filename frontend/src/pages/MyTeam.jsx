@@ -468,6 +468,7 @@ export default function MyTeam() {
         )}
       </div>
 
+
       {/* ================= TEAM SETTINGS ================= */}
       {(myRole === "Captain" || myRole === "Co-Captain") && (
         <div className="accordion mb-4" id="teamSettingsAccordion">

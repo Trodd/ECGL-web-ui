@@ -275,3 +275,15 @@ type Clip struct {
 	SortOrder int       `json:"sort_order" gorm:"default:0"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// --- Notifications ---
+type Notification struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	PlayerID  int64     `json:"player_id" gorm:"index"`
+	Type      string    `json:"type"` // join_request, matchup_posted, schedule_proposed, score_submitted, challenge_received
+	Title     string    `json:"title"`
+	Message   string    `json:"message"`
+	Link      string    `json:"link"` // frontend route to navigate to
+	Read      bool      `json:"read" gorm:"default:false;index"`
+	CreatedAt time.Time `json:"created_at"`
+}
