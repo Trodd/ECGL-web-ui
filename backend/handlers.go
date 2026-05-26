@@ -67,6 +67,13 @@ func requireLogin(w http.ResponseWriter, r *http.Request) (*sessions.Session, bo
 		}
 	}
 
+	// DEV MODE impersonation override — inject into session values for downstream use
+	if os.Getenv("DEV_MODE") == "true" {
+		if overrideID := r.URL.Query().Get("as"); overrideID != "" {
+			session.Values["discord_id"] = overrideID
+		}
+	}
+
 	return session, true
 }
 

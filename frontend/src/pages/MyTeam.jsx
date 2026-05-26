@@ -100,9 +100,9 @@ export default function MyTeam() {
   async function loadTeam() {
     try {
       setLoading(true);
-      // 🧩 Support ?as=<discord_id> override in DEV_MODE
+      // 🧩 Support dev impersonation from sessionStorage or URL ?as= param
       const query = new URLSearchParams(window.location.search);
-      const asParam = query.get("as");
+      const asParam = query.get("as") || sessionStorage.getItem("dev_impersonate");
       const url = asParam
         ? `${urlBase}/api/myteam?as=${asParam}`
         : `${urlBase}/api/myteam`;

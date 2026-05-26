@@ -186,6 +186,14 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+
+	// DEV MODE impersonation override
+	if os.Getenv("DEV_MODE") == "true" {
+		if overrideID := r.URL.Query().Get("as"); overrideID != "" {
+			discordIDStr = overrideID
+		}
+	}
+
 	discordID, _ := strconv.ParseInt(discordIDStr, 10, 64)
 
 	// --- ✅ Discord Role Check for League Mod (check early, before registration check) ---
@@ -287,6 +295,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		"is_mod":       isMod,
 		"is_dev":       isDev,
 		"is_caster":    isCaster,
+		"dev_mode":     os.Getenv("DEV_MODE") == "true",
 	})
 }
 

@@ -21,7 +21,7 @@ export default function Register() {
   const [rosterLocked, setRosterLocked] = useState(false);
 
   const query = new URLSearchParams(window.location.search);
-  const asParam = query.get("as");
+  const asParam = query.get("as") || sessionStorage.getItem("dev_impersonate");
 
   // -----------------------------------------------------
   // Load roster lock
