@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 export default function LeagueMod() {
     const urlBase = getApiUrl();
@@ -266,7 +267,7 @@ export default function LeagueMod() {
     if (loading) return <p>⏳ Checking permissions...</p>;
     if (!me) return <p>🔐 Please log in to access the League Mod Panel.</p>;
     if (!me.is_mod)
-        return <p>🚫 You do not have permission to view this panel.</p>;
+        return <p><E n="banned" className="emoji-danger" /> You do not have permission to view this panel.</p>;
 
     // --- Load Teams (reusable) ---
     async function loadTeams() {
@@ -693,7 +694,7 @@ export default function LeagueMod() {
     return (
         <div className="league-mod-root">
             <div className="text-light container mt-3 mb-5">
-                <h2>🛠️ League Moderator Panel</h2>
+                <h2><E n="tools" /> League Moderator Panel</h2>
                 <p className="text-light small mb-3">
                     Season {season || "?"} • Admin tools for ECGL moderators
                 </p>
@@ -715,16 +716,16 @@ export default function LeagueMod() {
                     <div className="card-header bg-dark border-secondary pb-0">
                         <ul className="nav nav-tabs card-header-tabs flex-wrap">
                             {[
-                                { key: "weeklyMatches", label: "🗓️ Weekly" },
-                                { key: "matchTools", label: "🏁 Matches" },
-                                { key: "scoreTools", label: "🧾 Scores" },
-                                { key: "teamTools", label: "👥 Teams" },
-                                { key: "playerTools", label: "🚫 Players" },
-                                { key: "dataTools", label: "📦 Data" },
-                                { key: "finalsManagement", label: "🏆 Finals" },
-                                { key: "teamHistory", label: "📜 Rename Logs" },
-                                { key: "clips", label: "🎬 Clips" },
-                                { key: "console", label: "🧰 Actions" },
+                                { key: "weeklyMatches", label: "⚔ Weekly" },
+                                { key: "matchTools", label: "⚑ Matches" },
+                                { key: "scoreTools", label: "☆ Scores" },
+                                { key: "teamTools", label: "☰ Teams" },
+                                { key: "playerTools", label: "⊘ Players" },
+                                { key: "dataTools", label: "≡ Data" },
+                                { key: "finalsManagement", label: "★ Finals" },
+                                { key: "teamHistory", label: "↻ Rename Logs" },
+                                { key: "clips", label: "▶ Clips" },
+                                { key: "console", label: "⚙ Actions" },
                             ].map((t) => (
                                 <li className="nav-item" key={t.key}>
                                     <button

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import DiscordRequiredModal from "../components/DiscordRequiredModal";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 export default function Register() {
   const urlBase = getApiUrl();
@@ -234,7 +235,7 @@ export default function Register() {
       <>
         {modal}
         <div className="container text-light py-5 text-center">
-          <h4>🔄 Checking registration status…</h4>
+          <h4><E n="refresh" /> Checking registration status…</h4>
         </div>
       </>
     );
@@ -245,7 +246,7 @@ export default function Register() {
       <>
         {modal}
         <div className="container text-light py-5 text-center">
-          <h4>🔑 Login Required</h4>
+          <h4><E n="key" /> Login Required</h4>
           <p>Please log in with Discord to register.</p>
         </div>
       </>
@@ -258,7 +259,7 @@ export default function Register() {
         {modal}
         <div className="container text-light py-5" style={{ maxWidth: 720 }}>
           <div className="card bg-dark border-secondary p-4">
-            <h3>✅ You’re Registered</h3>
+            <h3><E n="check" className="emoji-success" /> You're Registered</h3>
             <p className="mt-2">
               Team: <strong>{team.name}</strong>
             </p>
@@ -287,7 +288,7 @@ export default function Register() {
         <div className="container text-light py-5" style={{ maxWidth: 720 }}>
           <div className="card bg-dark border-secondary p-4 mb-4">
             <h3>
-              {isBanned ? "🚫 Account Banned" : "✅ Registration Complete"}
+              {isBanned ? <><E n="banned" className="emoji-danger" /> Account Banned</> : <><E n="check" className="emoji-success" /> Registration Complete</>}
             </h3>
 
             {!isBanned && (
@@ -298,7 +299,7 @@ export default function Register() {
 
             {rosterLocked && !isBanned && (
               <div className="alert alert-warning small">
-                ⏳ Roster lock is active.
+                <E n="timer" /> Roster lock is active.
               </div>
             )}
 
@@ -315,7 +316,7 @@ export default function Register() {
           {!isLeagueSub && !isBanned && !rosterLocked && (
             <>
               <div className="card bg-dark border-secondary p-4 mb-4">
-                <h5>👥 Join a Team</h5>
+                <h5><E n="team" /> Join a Team</h5>
                 <input
                   className="form-control bg-dark text-light"
                   placeholder="Search team…"
@@ -343,7 +344,7 @@ export default function Register() {
               </div>
 
               <div className="card bg-dark border-secondary p-4">
-                <h5>➕ Create a Team</h5>
+                <h5><E n="plus" /> Create a Team</h5>
                 <div className="d-flex gap-2">
                   <input
                     className="form-control bg-dark text-light"
@@ -368,10 +369,10 @@ export default function Register() {
       {modal}
       <div className="container text-muted py-5" style={{ maxWidth: 720 }}>
         <div className="card bg-dark border-secondary p-4">
-          <h3>📝 League Registration</h3>
+          <h3><E n="register" /> League Registration</h3>
 
           <div className="alert ecgl-alert-warning small mb-3">
-            ⚠️ <strong>PCVR ONLY</strong>
+            <E n="warning" className="emoji-warning" /> <strong>PCVR ONLY</strong>
             <br />
             Quest <strong>standalone / native</strong> is <strong>NOT eligible</strong>.
             <br />
@@ -398,7 +399,7 @@ export default function Register() {
               <option value="rift">Rift</option>
               <option value="quest_link">Quest + Link/AirLink</option>
               <option value="quest_native" disabled>
-                Quest Native ❌
+                Quest Native ✗
               </option>
             </select>
 

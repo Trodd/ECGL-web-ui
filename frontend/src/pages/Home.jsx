@@ -3,6 +3,7 @@ import axios from "axios";
 import { Link } from "react-router-dom";
 import FullSeasonCalendar from "../components/SeasonCalendar";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 // Extracts a YouTube embed URL from various YouTube/Shorts link formats
 function getYouTubeEmbedUrl(url) {
@@ -168,7 +169,7 @@ export default function Home({ user }) {
           border: "1px solid #2a2a2a",
         }}
       >
-        <h1 className="mb-2">📢 Welcome to the Echo Combat George League!</h1>
+        <h1 className="mb-2"><E n="megaphone" /> Welcome to the Echo Combat George League!</h1>
         <p className="text-secondary mb-3">
           Your guide to format, rules, and expectations for ECGL.
         </p>
@@ -223,19 +224,19 @@ export default function Home({ user }) {
             </a>
           )}
 
-          {/* 📝 Sign Up */}
+          {/* Sign Up */}
           <a href="/register" className="btn ecgl-btn btn-primary">
-            📝 Sign Up
+            <E n="register" /> Sign Up
           </a>
 
-          {/* 👥 Teams */}
+          {/* Teams */}
           <a href="/teams" className="btn ecgl-btn btn-outline-light">
-            👥 Teams
+            <E n="team" /> Teams
           </a>
 
-          {/* 📊 Leaderboard */}
+          {/* Leaderboard */}
           <a href="/leaderboard" className="btn ecgl-btn btn-outline-info">
-            📊 Leaderboard
+            <E n="leaderboard" /> Leaderboard
           </a>
         </div>
       </div>
@@ -253,7 +254,7 @@ export default function Home({ user }) {
             className="p-3 rounded mb-4"
             style={{ background: "#151515", border: "1px solid #2a2a2a" }}
           >
-            <h4>🗓️ Upcoming Matches</h4>
+            <h4><E n="calendar" /> Upcoming Matches</h4>
 
             {upcoming.length === 0 ? (
               <p className="text-secondary mt-2">
@@ -279,7 +280,7 @@ export default function Home({ user }) {
                       >
                         <div>
                           <div className="fw-semibold">
-                            {m.isFinals && "🏆 FINALS — "}
+                            {m.isFinals && <><E n="trophy" className="emoji-gold" /> FINALS — </>}
                             {m.team_a} vs {m.team_b}
 
                             {m.isLive && (
@@ -321,20 +322,20 @@ export default function Home({ user }) {
             className="p-3 rounded mb-4"
             style={{ background: "#151515", border: "1px solid #2a2a2a" }}
           >
-            <h4>📊 League Snapshot</h4>
+            <h4><E n="leaderboard" /> League Snapshot</h4>
             <ul className="mt-3">
-              <li>🎮 Format: <b>3v3</b> (4v4 optional)</li>
-              <li>🗺️ Best-of-3 maps</li>
-              <li>📈 ELO-based rankings</li>
-              <li>👥 Teams: 3–5 players</li>
-              <li>⚔️ 2 matches per week</li>
+              <li><E n="gamepad" /> Format: <b>3v3</b> (4v4 optional)</li>
+              <li><E n="map" /> Best-of-3 maps</li>
+              <li><E n="leaderboard" /> ELO-based rankings</li>
+              <li><E n="team" /> Teams: 3–5 players</li>
+              <li><E n="swords" /> 2 matches per week</li>
             </ul>
           </div>
 
           {/* PLATFORM NOTICE */}
           <div className="alert alert-warning small">
-            ⚠️ PCVR ONLY — SteamVR, Oculus PC, or Quest via Link/Air Link.<br />
-            ❌ Quest-native is not supported.
+            <E n="warning" className="emoji-warning" /> PCVR ONLY — SteamVR, Oculus PC, or Quest via Link/Air Link.<br />
+            <E n="error" className="emoji-danger" /> Quest-native is not supported.
           </div>
         </div>
       </div>
@@ -344,7 +345,7 @@ export default function Home({ user }) {
       ====================================================== */}
       {clips.length > 0 && (
         <div className="mt-5">
-          <h3>🎬 Match Highlights</h3>
+          <h3><E n="gamepad" /> Match Highlights</h3>
           <div
             className="d-flex gap-3 mt-3 pb-2"
             style={{ overflowX: "auto" }}
@@ -387,7 +388,7 @@ export default function Home({ user }) {
           CALENDAR
       ====================================================== */}
       <div className="mt-5">
-        <h3>🗓️ Season Timeline</h3>
+        <h3><E n="calendar" /> Season Timeline</h3>
         <FullSeasonCalendar />
       </div>
 

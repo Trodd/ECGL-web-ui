@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import MatchCard from "../components/MatchCard";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 export default function MyTeam() {
   const [data, setData] = useState({
@@ -177,7 +178,7 @@ export default function MyTeam() {
   }, []);
 
 
-  if (loading) return <p>⏳ Fetching team data…</p>;
+  if (loading) return <p><E n="refresh" /> Fetching team data…</p>;
   if (!team?.id) {
     return (
       <div
@@ -197,7 +198,7 @@ export default function MyTeam() {
             className="mb-3"
             style={{ fontSize: "3rem", opacity: 0.85 }}
           >
-            👥
+            <E n="team" size="3rem" />
           </div>
 
           <h4 className="fw-semibold mb-2">
@@ -426,18 +427,18 @@ export default function MyTeam() {
                 className="btn btn-outline-danger btn-sm"
                 onClick={() => setConfirmLeave(true)}
               >
-                🚪 Leave Team
+                <E n="door" /> Leave Team
               </button>
             ) : (
               <div className="d-flex gap-2">
                 <button className="btn btn-danger btn-sm" onClick={handleLeaveTeam}>
-                  ✅ Confirm
+                  <E n="check" /> Confirm
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => setConfirmLeave(false)}
                 >
-                  ❌ Cancel
+                  <E n="error" /> Cancel
                 </button>
               </div>
             )
@@ -447,7 +448,7 @@ export default function MyTeam() {
         {/* COOLDOWN BANNER (dark readable text on yellow) */}
         {roster?.some((p) => p?.on_cooldown && p?.role === myRole) && (
           <div className="alert ecgl-alert-warning small mt-3 mb-0">
-            <strong>⏳ Cooldown:</strong> You recently left a team. You can’t play matches
+            <strong><E n="timer" /> Cooldown:</strong> You recently left a team. You can’t play matches
             for your new team until the next matchup cycle.
             <br />
           </div>
@@ -484,7 +485,7 @@ export default function MyTeam() {
                   localStorage.setItem("accordion_team_settings_open", next ? "true" : "false");
                 }}
               >
-                ⚙️ Team Settings
+                <E n="gear" /> Team Settings
               </button>
             </h2>
 
@@ -492,7 +493,7 @@ export default function MyTeam() {
               <div className="accordion-body bg-black text-light">
                 {/* TEAM LOGO */}
                 <div className="mb-4 border-bottom border-secondary pb-3">
-                  <h6 className="text-info mb-2">🖼️ Team Logo</h6>
+                  <h6 className="text-info mb-2"><E n="image" /> Team Logo</h6>
 
                   <div className="d-flex flex-column flex-md-row gap-3 align-items-md-center">
                     <div style={{ width: 96, height: 96 }}>
@@ -577,7 +578,7 @@ export default function MyTeam() {
 
                 {/* TEAM NAME */}
                 <div className="mb-4 border-bottom border-secondary pb-3">
-                  <h6 className="text-info mb-2">✏️ Team Name</h6>
+                  <h6 className="text-info mb-2"><E n="pencil" /> Team Name</h6>
                   <div className="d-flex gap-2">
                     <input
                       className="form-control form-control-sm bg-dark text-light border-secondary"
@@ -618,7 +619,7 @@ export default function MyTeam() {
 
                 {/* TEAM STATUS */}
                 <div className="mb-4 border-bottom border-secondary pb-3">
-                  <h6 className="text-warning mb-2">🏁 Team Status</h6>
+                  <h6 className="text-warning mb-2"><E n="flag" /> Team Status</h6>
                   <div className="d-flex align-items-center gap-2">
                     <div className="form-check form-switch m-0">
                       <input
@@ -642,15 +643,15 @@ export default function MyTeam() {
                     </div>
                     <span className="small">
                       {team?.status === "Active"
-                        ? "✅ Active / Match-Eligible"
-                        : "⛔ Inactive / Hidden"}
+                        ? <><E n="check" className="emoji-success" /> Active / Match-Eligible</>
+                        : <><E n="stop" className="emoji-danger" /> Inactive / Hidden</>}
                     </span>
                   </div>
                 </div>
 
                 {/* JOIN REQUEST TOGGLE */}
                 <div className="mb-4 border-bottom border-secondary pb-3">
-                  <h6 className="text-success mb-2">👥 Join Requests</h6>
+                  <h6 className="text-success mb-2"><E n="team" /> Join Requests</h6>
                   <div className="d-flex align-items-center gap-2">
                     <div
                       className="form-check form-switch m-0"
@@ -679,17 +680,17 @@ export default function MyTeam() {
                     </div>
                     <span className="small">
                       {joinDisabled
-                        ? "🔒 Roster is locked"
+                        ? <><E n="lock" className="emoji-muted" /> Roster is locked</>
                         : team?.join_allowed
-                          ? "✅ Allowed"
-                          : "🚫 Disabled"}
+                          ? <><E n="check" className="emoji-success" /> Allowed</>
+                          : <><E n="banned" className="emoji-danger" /> Disabled</>}
                     </span>
                   </div>
                 </div>
 
                 {/* CHALLENGE TOGGLE */}
                 <div>
-                  <h6 className="text-info mb-2">🏆 Challenge Matches</h6>
+                  <h6 className="text-info mb-2"><E n="trophy" /> Challenge Matches</h6>
                   <div className="d-flex align-items-center gap-2">
                     <div className="form-check form-switch m-0">
                       <input
@@ -726,16 +727,16 @@ export default function MyTeam() {
 
                     <span className="small">
                       {!globalChallengesEnabled
-                        ? "⚠️ Challenge matches disabled league-wide."
+                        ? <><E n="warning" className="emoji-warning" /> Challenge matches disabled league-wide.</>
                         : allowChallenges
-                          ? "✅ Accepting Challenges"
-                          : "🚫 Challenges Disabled"}
+                          ? <><E n="check" className="emoji-success" /> Accepting Challenges</>
+                          : <><E n="banned" className="emoji-danger" /> Challenges Disabled</>}
                     </span>
                   </div>
 
                   {team?.status !== "Active" && (
                     <p className="text-warning small mt-2 mb-0">
-                      ⚠️ Team is <b>Inactive</b>. Challenge matches disabled automatically.
+                      <E n="warning" className="emoji-warning" /> Team is <b>Inactive</b>. Challenge matches disabled automatically.
                     </p>
                   )}
                 </div>
@@ -747,7 +748,7 @@ export default function MyTeam() {
 
       {/* ================= ROSTER ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
-        <h4 className="mb-3">👥 Roster</h4>
+        <h4 className="mb-3"><E n="team" /> Roster</h4>
 
         <ul className="list-group">
           {(roster ?? []).length > 0 ? (
@@ -763,7 +764,7 @@ export default function MyTeam() {
 
                   {m.on_cooldown && (
                     <span className="badge bg-warning text-dark ms-2">
-                      ⏳ Cooldown
+                      <E n="timer" /> Cooldown
                     </span>
                   )}
                 </div>
@@ -809,7 +810,7 @@ export default function MyTeam() {
           {/* JOIN REQUESTS */}
           <div className="col-12 col-lg-6">
             <div className="card bg-dark border-secondary p-4 shadow-sm h-100">
-              <h4 className="mb-3">📥 Join Requests</h4>
+              <h4 className="mb-3"><E n="signup" /> Join Requests</h4>
 
               {requests.length === 0 ? (
                 <p className="text-secondary mb-0">No join requests.</p>
@@ -847,7 +848,7 @@ export default function MyTeam() {
           {/* CHALLENGE REQUESTS */}
           <div className="col-12 col-lg-6">
             <div className="card bg-dark border-secondary p-4 shadow-sm h-100">
-              <h4 className="mb-3">⚔️ Challenge Requests</h4>
+              <h4 className="mb-3"><E n="swords" /> Challenge Requests</h4>
 
               {challengeRequests.length === 0 ? (
                 <p className="text-secondary mb-0">No challenge requests.</p>
@@ -888,7 +889,7 @@ export default function MyTeam() {
 
       {/* ================= ACTIVE MATCHES (Scheduled ONLY) ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
-        <h4 className="mb-3">📅 Active Matches</h4>
+        <h4 className="mb-3"><E n="calendar" /> Active Matches</h4>
 
         {(() => {
           const activeMatches = (matches ?? []).filter((m) => {
@@ -935,7 +936,7 @@ export default function MyTeam() {
 
       {/* ================= PAST MATCHES (Card style like Active) ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
-        <h4 className="mb-3">🏁 Past Matches</h4>
+        <h4 className="mb-3"><E n="flag" /> Past Matches</h4>
 
         {/* Season Filter */}
         <div className="d-flex justify-content-end mb-3">

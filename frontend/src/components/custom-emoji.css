@@ -1,0 +1,86 @@
+.custom-emoji {
+    display: inline-block;
+    vertical-align: -0.15em;
+    width: 1.1em;
+    height: 1.1em;
+    flex-shrink: 0;
+    color: currentColor;
+    filter: drop-shadow(0 0 2px rgba(100, 200, 255, 0.3));
+    transition: filter 0.2s ease;
+}
+
+.custom-emoji:hover {
+    filter: drop-shadow(0 0 4px rgba(100, 200, 255, 0.6));
+}
+
+/* Size variants */
+.custom-emoji.emoji-sm {
+    width: 0.85em;
+    height: 0.85em;
+}
+
+.custom-emoji.emoji-lg {
+    width: 1.4em;
+    height: 1.4em;
+}
+
+.custom-emoji.emoji-xl {
+    width: 1.8em;
+    height: 1.8em;
+}
+
+/* Color accents for specific contexts */
+.custom-emoji.emoji-success {
+    color: #4ade80;
+    filter: drop-shadow(0 0 3px rgba(74, 222, 128, 0.4));
+}
+
+.custom-emoji.emoji-danger {
+    color: #f87171;
+    filter: drop-shadow(0 0 3px rgba(248, 113, 113, 0.4));
+}
+
+.custom-emoji.emoji-warning {
+    color: #fbbf24;
+    filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.4));
+}
+
+.custom-emoji.emoji-info {
+    color: #60a5fa;
+    filter: drop-shadow(0 0 3px rgba(96, 165, 250, 0.4));
+}
+
+.custom-emoji.emoji-gold {
+    color: #f59e0b;
+    filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.5));
+}
+
+.custom-emoji.emoji-muted {
+    color: #94a3b8;
+    filter: none;
+}
+
+/* Notification bell animation */
+.custom-emoji.emoji-bell-active {
+    animation: bellPulse 2s ease-in-out infinite;
+}
+
+@keyframes bellPulse {
+
+    0%,
+    100% {
+        filter: drop-shadow(0 0 2px rgba(100, 200, 255, 0.3));
+    }
+
+    50% {
+        filter: drop-shadow(0 0 6px rgba(100, 200, 255, 0.8));
+    }
+}
+
+/* Fallback for missing emoji */
+.custom-emoji-fallback {
+    display: inline-block;
+    font-size: 0.8em;
+    color: #94a3b8;
+    font-style: italic;
+}

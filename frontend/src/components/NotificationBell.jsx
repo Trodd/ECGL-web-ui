@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { getApiUrl } from "../config";
+import { E } from "./CustomEmoji";
 
 export default function NotificationBell() {
     const [open, setOpen] = useState(false);
@@ -70,15 +71,15 @@ export default function NotificationBell() {
 
     const getIcon = (type) => {
         switch (type) {
-            case "join_request": return "👤";
-            case "matchup_posted": return "📅";
-            case "schedule_proposed": return "🕐";
-            case "score_submitted": return "📝";
-            case "challenge_received": return "⚔️";
-            case "match_added": return "➕";
-            case "match_deleted": return "🗑️";
-            case "mod_scores_set": return "🛠️";
-            default: return "🔔";
+            case "join_request": return <E n="person" />;
+            case "matchup_posted": return <E n="calendar" />;
+            case "schedule_proposed": return <E n="clock" />;
+            case "score_submitted": return <E n="register" />;
+            case "challenge_received": return <E n="swords" />;
+            case "match_added": return <E n="plus" />;
+            case "match_deleted": return <E n="trash" />;
+            case "mod_scores_set": return <E n="tools" />;
+            default: return <E n="bell" />;
         }
     };
 
@@ -110,7 +111,7 @@ export default function NotificationBell() {
                 }}
                 aria-label="Notifications"
             >
-                🔔
+                <E n="bell" size={20} />
                 {unreadCount > 0 && (
                     <span
                         style={{

@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 export default function Teams() {
   const [teams, setTeams] = useState([]);
@@ -72,7 +73,7 @@ export default function Teams() {
     <div className="d-flex justify-content-center">
       <div style={{ width: "100%", maxWidth: 680 }}>
         <div className="card bg-dark border-secondary p-4 shadow-sm">
-          <h2 className="mb-3">👥 Teams</h2>
+          <h2 className="mb-3"><E n="team" /> Teams</h2>
 
           {error && (
             <div className="alert alert-danger small mb-3">
@@ -85,7 +86,7 @@ export default function Teams() {
             <input
               type="text"
               className="form-control bg-dark text-light"
-              placeholder="🔍 Search team name…"
+              placeholder="Search team name…"
               value={search}
               onChange={(e) => setSearch(e.target.value || "")}
               style={{ maxWidth: 320 }}
@@ -136,7 +137,7 @@ export default function Teams() {
                       />
                       <span>{t.name}</span>
 
-                      {/* 🏆 Accepting Challenges */}
+                      {/* Accepting Challenges */}
                       {t.status === "Active" &&
                         settings?.challenges_enabled &&
                         t.allow_challenges && (
@@ -144,17 +145,17 @@ export default function Teams() {
                             className="badge bg-warning text-dark"
                             title="Accepting challenge matches"
                           >
-                            🏆
+                            <E n="trophy" />
                           </span>
                         )}
 
-                      {/* 🔒 Inactive / Disbanded */}
+                      {/* Inactive / Disbanded */}
                       {t.status !== "Active" && (
                         <span
                           className="badge bg-danger"
                           title="This team cannot receive or issue challenges"
                         >
-                          🔒
+                          <E n="lock" />
                         </span>
                       )}
                     </div>

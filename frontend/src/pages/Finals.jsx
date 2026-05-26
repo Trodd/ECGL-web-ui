@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 export default function Finals() {
     const API = getApiUrl();
@@ -538,7 +539,7 @@ export default function Finals() {
                 }}
             >
                 <h2 style={{ fontWeight: 900, fontSize: isMobile ? 16 : 22, color: "#e8ecf0", margin: 0 }}>
-                    <span style={{ marginRight: 6 }}>🏆</span>Finals Bracket
+                    <span style={{ marginRight: 6 }}><E n="trophy" className="emoji-gold" /></span>Finals Bracket
                 </h2>
                 <button
                     onClick={load}

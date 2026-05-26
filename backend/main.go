@@ -636,6 +636,9 @@ func main() {
 	// 🔹 REGISTER PREFIX COMMAND HANDLERS HERE
 	RegisterPrefixCommands(dg)
 
+	// 🔹 REGISTER BUTTON INTERACTION HANDLERS
+	RegisterCloseChannelHandler(dg)
+
 	// Open Discord gateway
 	if err := dg.Open(); err != nil {
 		log.Fatalf("❌ Failed to connect to Discord: %v", err)

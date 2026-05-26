@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
+import { E } from "./CustomEmoji";
 
 export default function MatchCard({ match, team, urlBase, loadTeam, myRole, arenaModeEnabled = false }) {
     const isCaptain = myRole === "Captain" || myRole === "Co-Captain";
@@ -221,7 +222,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
 
                 {/* ================= SCHEDULE ================= */}
                 <div className="match-section">
-                    <h6 className="section-title">🗓️ Match Time</h6>
+                    <h6 className="section-title"><E n="calendar" /> Match Time</h6>
 
                     {isCaptain && (
                         <>
@@ -256,7 +257,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                                     className="btn btn-outline-warning btn-sm mt-2"
                                     onClick={() => setEditing(true)}
                                 >
-                                    ✏️ Edit Date / Time
+                                    <E n="pencil" /> Edit Date / Time
                                 </button>
                             )}
 
@@ -278,7 +279,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                                             className="btn btn-success btn-sm mt-2"
                                             onClick={handleConfirmSchedule}
                                         >
-                                            ✅ Confirm this schedule for your team
+                                            <E n="check" /> Confirm this schedule for your team
                                         </button>
                                     )}
 
@@ -298,13 +299,13 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                     <div className="match-section">
 
                         <h6 className="section-title">
-                            {arenaModeEnabled ? "🏟️ Arena Match (Best of 3)" : "🎯 Match Setup & Scoring"}
+                            {arenaModeEnabled ? <><E n="target" /> Arena Match (Best of 3)</> : <><E n="target" /> Match Setup & Scoring</>}
                         </h6>
 
                         {/* ================= COIN FLIP (hidden in Arena mode) ================= */}
                         {!arenaModeEnabled && (
                             <div className="sub-card">
-                                <label className="fw-bold mb-1 d-block">🎲 Coin Flip</label>
+                                <label className="fw-bold mb-1 d-block"><E n="refresh" /> Coin Flip</label>
 
                                 <div className="d-flex align-items-center gap-2 flex-wrap">
                                     <select
@@ -356,7 +357,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
 
                         {/* ================= SUBS ================= */}
                         <div className="sub-card">
-                            <label className="fw-bold mb-2 d-block">🧍 League Subs</label>
+                            <label className="fw-bold mb-2 d-block"><E n="person" /> League Subs</label>
 
                             <div className="d-flex flex-wrap gap-3">
                                 <select
@@ -393,7 +394,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                                     className="btn btn-warning btn-sm"
                                     onClick={() => pingForSub(match.id, team.id)}
                                 >
-                                    🔔 Ping for Sub
+                                    <E n="bell" /> Ping for Sub
                                 </button>
                             </div>
                         </div>
@@ -455,12 +456,12 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                                 onClick={handleConfirmScores}
                                 disabled={bothTeamsConfirmedScores || myScoresConfirmed}
                             >
-                                ✅ Confirm Scores
+                                <E n="check" /> Confirm Scores
                             </button>
 
                             {myScoresConfirmed && !bothTeamsConfirmedScores && (
                                 <span className="text-warning small">
-                                    ⏳ Waiting for opponent…
+                                    <E n="timer" /> Waiting for opponent…
                                 </span>
                             )}
                         </div>
@@ -470,7 +471,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                 {/* ================= FINAL ================= */}
                 {bothTeamsConfirmedScores && (
                     <div className="match-final">
-                        ✅ Both teams confirmed — match completed!
+                        <E n="check" className="emoji-success" /> Both teams confirmed — match completed!
                     </div>
                 )}
 

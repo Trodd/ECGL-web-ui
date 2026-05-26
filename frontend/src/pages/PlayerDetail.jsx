@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 export default function PlayerDetail() {
   const { id } = useParams();
@@ -35,7 +36,7 @@ export default function PlayerDetail() {
       {/* ================= PLAYER HEADER ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
         <h2 className="mb-1">
-          🎮 {player.display_name || "Unknown Player"}
+          <E n="gamepad" /> {player.display_name || "Unknown Player"}
         </h2>
 
         <div className="text-secondary small">
@@ -95,7 +96,7 @@ export default function PlayerDetail() {
                   padding: "2px 8px",
                 }}
               >
-                📋
+                <E n="clipboard" size={16} />
               </button>
             </div>
           )}
@@ -104,7 +105,7 @@ export default function PlayerDetail() {
 
       {/* ================= PLAYER STATS ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
-        <h4 className="mb-3">🏆 Player Stats</h4>
+        <h4 className="mb-3"><E n="trophy" className="emoji-gold" /> Player Stats</h4>
 
         <div className="row text-center">
           <div className="col-6 col-md-3">
@@ -128,7 +129,7 @@ export default function PlayerDetail() {
 
       {/* ================= CURRENT TEAM ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
-        <h4 className="mb-2">👥 Current Team</h4>
+        <h4 className="mb-2"><E n="team" /> Current Team</h4>
 
         {player.current_team ? (
           <Link
@@ -144,7 +145,7 @@ export default function PlayerDetail() {
 
       {/* ================= TEAM HISTORY ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
-        <h4 className="mb-3">📜 Team History</h4>
+        <h4 className="mb-3"><E n="scroll" /> Team History</h4>
 
         {Array.isArray(player.history) && player.history.length > 0 ? (
           <div className="table-responsive">
@@ -188,7 +189,7 @@ export default function PlayerDetail() {
 
       {/* ================= ARCHIVED STATS ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
-        <h4 className="mb-3">📦 Archived Season Stats</h4>
+        <h4 className="mb-3"><E n="medal" /> Archived Season Stats</h4>
 
         {Array.isArray(player.archived_stats) &&
           player.archived_stats.length > 0 ? (

@@ -390,9 +390,10 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 		}
 	}
 
-	// 🔨 Create channel
+	// 🔨 Create channel (team-vs-team naming)
+	channelName := fmt.Sprintf("%s-vs-%s", sanitizeChannelName(teamA.Name), sanitizeChannelName(teamB.Name))
 	channel, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
-		Name:                 fmt.Sprintf("match-%d", m.ID),
+		Name:                 channelName,
 		Type:                 discordgo.ChannelTypeGuildText,
 		ParentID:             categoryID,
 		PermissionOverwrites: overwrites,
@@ -402,7 +403,6 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 	}
 
 	now := time.Now().UTC()
-	closeAt := now.Add(3 * time.Hour)
 
 	DB.Model(m).Updates(map[string]any{
 		"discord_channel_id": channel.ID,
@@ -424,17 +424,15 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 			"📅 **Match Time:** %s\n"+
 			"%s\n"+
 			"👥 %s\n\n"+
-			"🔒 **Channel closes:** <t:%d:R> *(<t:%d:F>)*",
+			"🔒 A League Mod can close this channel with the button below.",
 		teamA.Name,
 		teamB.Name,
 		matchTime,
 		matchTimeRel,
 		strings.Join(mentions, " "),
-		closeAt.Unix(),
-		closeAt.Unix(),
 	)
 
-	// ---- SEND WITH SAFE PINGS ----
+	// ---- SEND WITH SAFE PINGS + CLOSE BUTTON ----
 	userIDs := make([]string, 0, len(mentions))
 	for id := range seen {
 		userIDs = append(userIDs, strconv.FormatInt(id, 10))
@@ -442,6 +440,20 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 
 	s.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
 		Content: msg,
+		Components: []discordgo.MessageComponent{
+			discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					discordgo.Button{
+						Label:    "Close Channel",
+						Style:    discordgo.DangerButton,
+						CustomID: fmt.Sprintf("close_match_channel_%d", m.ID),
+						Emoji: &discordgo.ComponentEmoji{
+							Name: "🔒",
+						},
+					},
+				},
+			},
+		},
 		AllowedMentions: &discordgo.MessageAllowedMentions{
 			Users: userIDs,
 		},
@@ -568,6 +580,7 @@ func sendChannelMessageHTTP(channelID, content, botToken string) error {
 	return nil
 }
 
+// 🗑️ DELETE MATCH CHANNEL (called by mod via button)
 func deleteMatchChannel(s *discordgo.Session, m *Match) {
 	if s == nil || m == nil || m.DiscordChannelID == nil {
 		return
@@ -584,81 +597,297 @@ func deleteMatchChannel(s *discordgo.Session, m *Match) {
 	})
 }
 
-func RecoverMatchChannels(s *discordgo.Session) {
-	if s == nil {
-		return
-	}
+// -------------------------------------------------------------------
+// 📋 TRANSCRIPT + CLOSE — triggered by mod button click (2-step)
+// -------------------------------------------------------------------
 
-	var matches []Match
-
-	// Only matches with existing channels
-	DB.Where(
-		"discord_channel_id IS NOT NULL AND channel_created_at IS NOT NULL",
-	).Find(&matches)
-
-	now := time.Now().UTC()
-
-	for _, m := range matches {
-		if m.DiscordChannelID == nil || m.ChannelCreatedAt == nil {
-			continue
+// RegisterCloseChannelHandler registers the interaction handler for the
+// "Close Channel" button on match channels with a 2-step confirmation.
+func RegisterCloseChannelHandler(dg *discordgo.Session) {
+	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		// Only handle message component (button) interactions
+		if i.Type != discordgo.InteractionMessageComponent {
+			return
 		}
 
-		closeAt := m.ChannelCreatedAt.Add(3 * time.Hour)
+		customID := i.MessageComponentData().CustomID
 
-		// Channel already expired → delete immediately
-		if now.After(closeAt) {
-			_, _ = s.ChannelDelete(*m.DiscordChannelID)
+		// --- STEP 1: Initial "Close Channel" button → show confirmation ---
+		if strings.HasPrefix(customID, "close_match_channel_") && !strings.HasPrefix(customID, "close_match_channel_confirm_") {
+			matchIDStr := strings.TrimPrefix(customID, "close_match_channel_")
 
-			DB.Model(&m).Updates(map[string]any{
+			// Mod check
+			if !isInteractionMod(i) {
+				respondInteractionEphemeral(s, i, "❌ Only League Mods can close match channels.")
+				return
+			}
+
+			// Respond with confirmation prompt (ephemeral)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "⚠️ **Are you sure you want to close this channel?**\nThis will transcript all messages and delete the channel.",
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Components: []discordgo.MessageComponent{
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								discordgo.Button{
+									Label:    "Confirm Close",
+									Style:    discordgo.DangerButton,
+									CustomID: fmt.Sprintf("close_match_channel_confirm_%s", matchIDStr),
+									Emoji: &discordgo.ComponentEmoji{
+										Name: "✅",
+									},
+								},
+								discordgo.Button{
+									Label:    "Cancel",
+									Style:    discordgo.SecondaryButton,
+									CustomID: "close_match_channel_cancel",
+								},
+							},
+						},
+					},
+				},
+			})
+			return
+		}
+
+		// --- CANCEL: dismiss the confirmation ---
+		if customID == "close_match_channel_cancel" {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseUpdateMessage,
+				Data: &discordgo.InteractionResponseData{
+					Content:    "❌ Channel close cancelled.",
+					Components: []discordgo.MessageComponent{},
+				},
+			})
+			return
+		}
+
+		// --- STEP 2: Confirmed close ---
+		if strings.HasPrefix(customID, "close_match_channel_confirm_") {
+			matchIDStr := strings.TrimPrefix(customID, "close_match_channel_confirm_")
+			matchID, err := strconv.ParseUint(matchIDStr, 10, 64)
+			if err != nil {
+				respondInteractionEphemeral(s, i, "❌ Invalid match ID.")
+				return
+			}
+
+			// Double-check mod role
+			if !isInteractionMod(i) {
+				respondInteractionEphemeral(s, i, "❌ Only League Mods can close match channels.")
+				return
+			}
+
+			// ACK with deferred update
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags: discordgo.MessageFlagsEphemeral,
+				},
+			})
+
+			// Load match
+			var match Match
+			if err := DB.First(&match, matchID).Error; err != nil {
+				s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+					Content: "❌ Match not found.",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				})
+				return
+			}
+
+			channelID := i.ChannelID
+
+			// --- TRANSCRIPT THE CHANNEL ---
+			transcriptChannelID := os.Getenv("DISCORD_TRANSCRIPT_CHANNEL_ID")
+			if transcriptChannelID != "" {
+				transcriptMatchChannel(s, channelID, transcriptChannelID, &match)
+			} else {
+				log.Println("⚠️ DISCORD_TRANSCRIPT_CHANNEL_ID not set, skipping transcript")
+			}
+
+			// --- DELETE THE CHANNEL ---
+			_, err = s.ChannelDelete(channelID)
+			if err != nil {
+				log.Printf("❌ Failed to delete channel %s: %v", channelID, err)
+			}
+
+			// Clear DB references
+			DB.Model(&match).Updates(map[string]any{
 				"discord_channel_id": nil,
 				"channel_created_at": nil,
 			})
-			continue
+
+			log.Printf("✅ Match channel %s closed by mod %s", channelID, i.Member.User.Username)
 		}
-
-		// Still active → reschedule deletion
-		go scheduleChannelDeletion(
-			s,
-			*m.DiscordChannelID,
-			closeAt.Sub(now),
-			m.ID,
-		)
-	}
-}
-
-func scheduleChannelDeletion(
-	s *discordgo.Session,
-	channelID string,
-	delay time.Duration,
-	matchID uint,
-) {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-
-	<-timer.C
-
-	_, _ = s.ChannelDelete(channelID)
-
-	DB.Model(&Match{}).Where("id = ?", matchID).Updates(map[string]any{
-		"discord_channel_id": nil,
-		"channel_created_at": nil,
 	})
 }
 
+// isInteractionMod checks if the interaction member has the league mod role.
+func isInteractionMod(i *discordgo.InteractionCreate) bool {
+	modRoleID := os.Getenv("DISCORD_LEAGUE_MOD_ROLE_ID")
+	if modRoleID == "" || i.Member == nil {
+		return false
+	}
+	for _, role := range i.Member.Roles {
+		if role == modRoleID {
+			return true
+		}
+	}
+	return false
+}
+
+// transcriptMatchChannel fetches all messages from a channel, builds a .txt
+// transcript file, and posts it with a match info embed to the transcript channel.
+func transcriptMatchChannel(s *discordgo.Session, sourceChannelID, transcriptChannelID string, m *Match) {
+	// Fetch all messages (up to 100 per request)
+	var allMessages []*discordgo.Message
+	beforeID := ""
+
+	for {
+		msgs, err := s.ChannelMessages(sourceChannelID, 100, beforeID, "", "")
+		if err != nil {
+			log.Printf("❌ Failed to fetch messages from %s: %v", sourceChannelID, err)
+			break
+		}
+		if len(msgs) == 0 {
+			break
+		}
+		allMessages = append(allMessages, msgs...)
+		beforeID = msgs[len(msgs)-1].ID
+		if len(msgs) < 100 {
+			break
+		}
+	}
+
+	if len(allMessages) == 0 {
+		return
+	}
+
+	// Reverse messages so they're in chronological order
+	for i, j := 0, len(allMessages)-1; i < j; i, j = i+1, j-1 {
+		allMessages[i], allMessages[j] = allMessages[j], allMessages[i]
+	}
+
+	// Load team names
+	var teamA, teamB Team
+	DB.First(&teamA, m.TeamAID)
+	DB.First(&teamB, m.TeamBID)
+
+	// Build transcript as plain text file
+	var transcript strings.Builder
+	transcript.WriteString(fmt.Sprintf("ECGL Match Transcript - Match #%d\n", m.ID))
+	transcript.WriteString(fmt.Sprintf("%s vs %s\n", teamA.Name, teamB.Name))
+	if m.ScheduledDate != nil {
+		transcript.WriteString(fmt.Sprintf("Scheduled: %s\n", m.ScheduledDate.Format("2006-01-02 15:04 UTC")))
+	}
+	transcript.WriteString(fmt.Sprintf("Status: %s\n", m.Status))
+	if m.TeamAScore > 0 || m.TeamBScore > 0 {
+		transcript.WriteString(fmt.Sprintf("Score: %s %d - %d %s\n", teamA.Name, m.TeamAScore, m.TeamBScore, teamB.Name))
+	}
+	transcript.WriteString(strings.Repeat("─", 50) + "\n\n")
+
+	for _, msg := range allMessages {
+		if msg.Author == nil {
+			continue
+		}
+		ts := msg.Timestamp.Format("2006-01-02 15:04:05")
+		line := fmt.Sprintf("[%s] %s: %s\n", ts, msg.Author.Username, msg.Content)
+		if len(msg.Attachments) > 0 {
+			for _, att := range msg.Attachments {
+				line += fmt.Sprintf("  [Attachment: %s]\n", att.URL)
+			}
+		}
+		transcript.WriteString(line)
+	}
+
+	// Create file reader
+	fileName := fmt.Sprintf("transcript-match-%d-%s-vs-%s.txt",
+		m.ID,
+		sanitizeChannelName(teamA.Name),
+		sanitizeChannelName(teamB.Name),
+	)
+	fileReader := strings.NewReader(transcript.String())
+
+	// Build embed with match info
+	embed := &discordgo.MessageEmbed{
+		Title: fmt.Sprintf("📋 Match #%d — %s vs %s", m.ID, teamA.Name, teamB.Name),
+		Color: 0x3498DB,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Teams", Value: fmt.Sprintf("%s vs %s", teamA.Name, teamB.Name), Inline: true},
+			{Name: "Season", Value: m.Season, Inline: true},
+			{Name: "Week", Value: m.Week, Inline: true},
+			{Name: "Status", Value: m.Status, Inline: true},
+			{Name: "Messages", Value: fmt.Sprintf("%d", len(allMessages)), Inline: true},
+		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: fmt.Sprintf("Channel closed at %s", time.Now().UTC().Format("2006-01-02 15:04 UTC")),
+		},
+	}
+
+	if m.ScheduledDate != nil {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name: "Match Time", Value: fmt.Sprintf("<t:%d:F>", m.ScheduledDate.Unix()), Inline: true,
+		})
+	}
+
+	// Send embed + file attachment
+	_, err := s.ChannelMessageSendComplex(transcriptChannelID, &discordgo.MessageSend{
+		Embeds: []*discordgo.MessageEmbed{embed},
+		Files: []*discordgo.File{
+			{
+				Name:   fileName,
+				Reader: fileReader,
+			},
+		},
+	})
+	if err != nil {
+		log.Printf("❌ Failed to send transcript to %s: %v", transcriptChannelID, err)
+	}
+}
+
+// sanitizeChannelName converts a team name to a valid Discord channel name segment.
+func sanitizeChannelName(name string) string {
+	name = strings.ToLower(name)
+	name = strings.ReplaceAll(name, " ", "-")
+	// Remove characters not allowed in Discord channel names
+	var clean strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			clean.WriteRune(r)
+		}
+	}
+	result := clean.String()
+	if result == "" {
+		return "team"
+	}
+	return result
+}
+
+// respondInteractionEphemeral sends an ephemeral message response to an interaction.
+func respondInteractionEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, msg string) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: msg,
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+// 📅 SCHEDULE CHANNEL CREATION for a specific match
 func scheduleMatchChannel(s *discordgo.Session, m *Match) {
 	if s == nil || m == nil || m.ScheduledDate == nil {
 		return
 	}
 
 	openAt := m.ScheduledDate.Add(-1 * time.Hour)
-	closeAfter := 3 * time.Hour
-
 	now := time.Now().UTC()
 
 	// If already past open time → create immediately
 	if now.After(openAt) {
 		createMatchChannel(s, m)
-		go scheduleChannelDeletion(s, *m.DiscordChannelID, closeAfter, m.ID)
 		return
 	}
 
@@ -671,16 +900,5 @@ func scheduleMatchChannel(s *discordgo.Session, m *Match) {
 		<-timer.C
 
 		createMatchChannel(s, m)
-
-		// Reload match to get channel ID
-		var updated Match
-		if err := DB.First(&updated, m.ID).Error; err == nil && updated.DiscordChannelID != nil {
-			go scheduleChannelDeletion(
-				s,
-				*updated.DiscordChannelID,
-				closeAfter,
-				updated.ID,
-			)
-		}
 	}()
 }

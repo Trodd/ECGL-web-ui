@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 export default function Leaderboard() {
   const [view, setView] = useState("teams"); // default: teams
@@ -43,7 +44,7 @@ export default function Leaderboard() {
     >
       {/* ================= HEADER ================= */}
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <h2 className="mb-0 text-light">🏆 Leaderboard</h2>
+        <h2 className="mb-0 text-light"><E n="trophy" className="emoji-gold" /> Leaderboard</h2>
 
         {/* Toggle */}
         <div className="btn-group">
@@ -52,14 +53,14 @@ export default function Leaderboard() {
               }`}
             onClick={() => setView("teams")}
           >
-            🏆 Teams
+            <E n="trophy" /> Teams
           </button>
           <button
             className={`btn btn-sm ${view === "players" ? "btn-primary" : "btn-outline-primary"
               }`}
             onClick={() => setView("players")}
           >
-            🎮 Players
+            <E n="gamepad" /> Players
           </button>
         </div>
       </div>

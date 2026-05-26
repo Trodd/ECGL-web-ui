@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 // Helper: parse "start:end, start:end" into [{start, end}, ...]
 function parseRanges(str) {
@@ -183,7 +184,7 @@ export default function LeagueSettings() {
 
     return (
         <div className="page-content">
-            <h2>⚙️ League Settings</h2>
+            <h2><E n="gear" /> League Settings</h2>
             <p className="text-secondary mb-4">
                 Configure league parameters. Changes are saved to the server environment.
             </p>

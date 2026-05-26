@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 export default function TeamDetail() {
   const { id } = useParams();
@@ -265,41 +266,41 @@ export default function TeamDetail() {
                   onClick={handleCopyLogoUrl}
                   type="button"
                 >
-                  {copiedLogo ? "✅ Copied" : "Copy Logo URL"}
+                  {copiedLogo ? <><E n="check" className="emoji-success" /> Copied</> : "Copy Logo URL"}
                 </button>
               </div>
             ) : null}
             {settings?.challenges_enabled ? (
               team.status !== "Active" ? (
                 <span className="text-warning small">
-                  🔒 Team inactive
+                  <E n="lock" /> Team inactive
                 </span>
               ) : myTeam?.status !== "Active" ? (
                 <span className="text-warning small">
-                  🔒 Your team inactive
+                  <E n="lock" /> Your team inactive
                 </span>
               ) : canChallenge ? (
                 <button
                   className="btn btn-warning"
                   onClick={handleChallengeRequest}
                 >
-                  ⚔️ Challenge Team
+                  <E n="swords" /> Challenge Team
                 </button>
               ) : (
                 <span className="text-secondary small">
                   {teamSettings?.allow_challenges !== true
-                    ? "🚫 Not accepting challenges"
+                    ? <><E n="banned" /> Not accepting challenges</>
                     : (myTeam?.weekly_challenges_used ?? 0) >=
                       (settings?.weekly_challenge_limit ?? 999)
-                      ? "⚠️ Weekly challenge limit reached"
+                      ? <><E n="warning" className="emoji-warning" /> Weekly challenge limit reached</>
                       : !isCaptain
-                        ? "⛔ Captain only"
+                        ? <><E n="stop" /> Captain only</>
                         : ""}
                 </span>
               )
             ) : (
               <span className="text-warning small">
-                ⛔ Challenges disabled league-wide
+                <E n="stop" /> Challenges disabled league-wide
               </span>
             )}
           </div>

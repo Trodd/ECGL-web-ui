@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import axios from "axios";
 import CastModal from "../components/CastModal";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 export default function MatchDetail() {
     const { id } = useParams();
@@ -114,7 +115,7 @@ export default function MatchDetail() {
     }, [players]);
 
     if (loading) return <p className="text-light">Loading match details...</p>;
-    if (!matchData) return <p className="text-danger">⚠️ Match not found.</p>;
+    if (!matchData) return <p className="text-danger"><E n="warning" className="emoji-warning" /> Match not found.</p>;
 
     // -----------------------------------------------------
     // NORMALIZE MATCH DATA
@@ -225,7 +226,7 @@ export default function MatchDetail() {
                         className="btn btn-info btn-sm"
                         onClick={openCastEditor}
                     >
-                        🎥 {existingCast ? "Edit Cast" : "Cast Match"}
+                        <E n="gamepad" /> {existingCast ? "Edit Cast" : "Cast Match"}
                     </button>
                 )}
             </div>
@@ -296,7 +297,7 @@ export default function MatchDetail() {
             {(castCasters.length > 0 || castCamera || streamURL) && (
                 <div className="card bg-dark border-info shadow-sm mb-4">
                     <div className="card-header text-info fw-bold">
-                        🔴 Match Broadcast
+                        <E n="target" /> Match Broadcast
                     </div>
 
                     <div className="card-body">
@@ -334,7 +335,7 @@ export default function MatchDetail() {
             )}
 
             {/* ================= MAP SCORES ================= */}
-            <h4 className="mb-3">🗺️ Match Result</h4>
+            <h4 className="mb-3"><E n="map" /> Match Result</h4>
 
             {(() => {
                 const maps = Array.isArray(matchData.map_scores) ? matchData.map_scores : [];
@@ -361,7 +362,7 @@ export default function MatchDetail() {
 
                             {winner && (
                                 <div className="text-success fw-bold mt-2">
-                                    🏆 Winner: {winner}
+                                    <E n="trophy" className="emoji-gold" /> Winner: {winner}
                                 </div>
                             )}
                         </div>
@@ -393,8 +394,8 @@ export default function MatchDetail() {
                                                     {m.team_b_score}
                                                 </td>
                                                 <td>
-                                                    {aWin && "✅ " + teamA.name}
-                                                    {bWin && "✅ " + teamB.name}
+                                                    {aWin && <><E n="check" className="emoji-success" /> {teamA.name}</>}
+                                                    {bWin && <><E n="check" className="emoji-success" /> {teamB.name}</>}
                                                 </td>
                                             </tr>
                                         );
@@ -407,7 +408,7 @@ export default function MatchDetail() {
             })()}
 
             {/* ================= LEAGUE SUBS ================= */}
-            <h4 className="mt-4 mb-3">🧍 League Subs</h4>
+            <h4 className="mt-4 mb-3"><E n="person" /> League Subs</h4>
 
             <div className="card bg-dark border-secondary shadow-sm mb-4">
                 <div className="card-body d-flex justify-content-between">
@@ -428,7 +429,7 @@ export default function MatchDetail() {
             </div>
 
             {/* ================= ROSTERS ================= */}
-            <h4 className="mt-4 mb-3">👥 Rosters at Match Time</h4>
+            <h4 className="mt-4 mb-3"><E n="team" /> Rosters at Match Time</h4>
 
             <div className="row g-3">
                 {[{ team: teamA, roster: rosterA }, { team: teamB, roster: rosterB }].map(

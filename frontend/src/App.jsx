@@ -22,6 +22,7 @@ import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import "./styles.css";
 import { getApiUrl } from "./config";
 import DevToolbar from "./components/DevToolbar";
+import { E } from "./components/CustomEmoji";
 
 function App() {
   const navigate = useNavigate();
@@ -371,15 +372,15 @@ function App() {
               aria-label="Open navigation"
               onClick={openMobileNav}
             >
-              ☰
+              <E n="menu" />
             </button>
             <div className="flex-grow-1">
-              <h1 className="m-0">⚡ Echo Combat George League</h1>
+              <h1 className="m-0"><E n="lightning" /> Echo Combat George League</h1>
             </div>
             <div style={{ width: 44 }} className="d-md-none" />
           </div>
           <p className="season-text">
-            📅 {season !== "" ? `Season ${season}` : "Loading..."}
+            <E n="calendar" /> {season !== "" ? `Season ${season}` : "Loading..."}
           </p>
         </header>
 
@@ -408,14 +409,14 @@ function App() {
                 className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/" ? "mobile-nav-active" : ""}`}
                 onClick={() => navigateFromMobile("/")}
               >
-                🏠 Home
+                <E n="home" /> Home
               </button>
               <button
                 type="button"
                 className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/rules" ? "mobile-nav-active" : ""}`}
                 onClick={() => navigateFromMobile("/rules")}
               >
-                📜 Rules
+                <E n="scroll" /> Rules
               </button>
 
               {user && (
@@ -425,14 +426,14 @@ function App() {
                     className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/register" ? "mobile-nav-active" : ""}`}
                     onClick={() => navigateFromMobile("/register")}
                   >
-                    📝 Register
+                    <E n="register" /> Register
                   </button>
                   <button
                     type="button"
                     className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/myteam" ? "mobile-nav-active" : ""}`}
                     onClick={() => navigateFromMobile("/myteam")}
                   >
-                    🧑 My Team
+                    <E n="team" /> My Team
                     {notifCount > 0 && <span className="badge bg-danger rounded-pill ms-2">{notifCount}</span>}
                   </button>
                 </>
@@ -443,14 +444,14 @@ function App() {
                 className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/players" ? "mobile-nav-active" : ""}`}
                 onClick={() => navigateFromMobile("/players")}
               >
-                📋 Players
+                <E n="clipboard" /> Players
               </button>
               <button
                 type="button"
                 className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/teams" ? "mobile-nav-active" : ""}`}
                 onClick={() => navigateFromMobile("/teams")}
               >
-                👥 Teams
+                <E n="team" /> Teams
               </button>
 
               {finalsTabVisible && (
@@ -459,7 +460,7 @@ function App() {
                   className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/finals" ? "mobile-nav-active" : ""}`}
                   onClick={() => navigateFromMobile("/finals")}
                 >
-                  🏆 Finals
+                  <E n="trophy" /> Finals
                 </button>
               )}
 
@@ -468,14 +469,14 @@ function App() {
                 className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/matchups" ? "mobile-nav-active" : ""}`}
                 onClick={() => navigateFromMobile("/matchups")}
               >
-                📅 Matchups
+                <E n="calendar" /> Matchups
               </button>
               <button
                 type="button"
                 className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/leaderboard" ? "mobile-nav-active" : ""}`}
                 onClick={() => navigateFromMobile("/leaderboard")}
               >
-                🏆 Leaderboard
+                <E n="leaderboard" /> Leaderboard
               </button>
 
               {!loadingUser && user?.is_mod && (
@@ -484,7 +485,7 @@ function App() {
                   className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/modpanel" ? "mobile-nav-active" : ""}`}
                   onClick={() => navigateFromMobile("/modpanel")}
                 >
-                  🛠️ League Mod
+                  <E n="tools" /> League Mod
                 </button>
               )}
               {!loadingUser && user?.is_dev && (
@@ -493,7 +494,7 @@ function App() {
                   className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/settings" ? "mobile-nav-active" : ""}`}
                   onClick={() => navigateFromMobile("/settings")}
                 >
-                  ⚙️ Settings
+                  <E n="gear" /> Settings
                 </button>
               )}
             </div>
@@ -536,7 +537,7 @@ function App() {
                         className="account-dropdown-item"
                         onClick={() => { window.location.href = `${getApiUrl()}/logout`; }}
                       >
-                        🚪 Logout
+                        <E n="door" /> Logout
                       </button>
                     </div>
                   )}
@@ -547,7 +548,7 @@ function App() {
                   style={{ borderRadius: '8px' }}
                   href={`${getApiUrl()}/login`}
                 >
-                  🔑 Login with Discord
+                  <E n="key" /> Login with Discord
                 </a>
               )}
             </div>
@@ -566,7 +567,7 @@ function App() {
                   }`
                 }
               >
-                🏠 Home
+                <E n="home" /> Home
               </NavLink>
 
               <NavLink
@@ -576,7 +577,7 @@ function App() {
                   }`
                 }
               >
-                📜 Rules
+                <E n="scroll" /> Rules
               </NavLink>
 
               {user && (
@@ -588,7 +589,7 @@ function App() {
                       }`
                     }
                   >
-                    📝 Register
+                    <E n="register" /> Register
                   </NavLink>
                   <NavLink
                     to="/myteam"
@@ -597,7 +598,7 @@ function App() {
                       }`
                     }
                   >
-                    🧑 My Team
+                    <E n="team" /> My Team
                     {notifCount > 0 && <span className="badge bg-danger rounded-pill ms-2" style={{ fontSize: 10 }}>{notifCount}</span>}
                   </NavLink>
                 </>
@@ -610,7 +611,7 @@ function App() {
                   }`
                 }
               >
-                📋 Players
+                <E n="clipboard" /> Players
               </NavLink>
 
               <NavLink
@@ -620,7 +621,7 @@ function App() {
                   }`
                 }
               >
-                👥 Teams
+                <E n="team" /> Teams
               </NavLink>
 
               {finalsTabVisible && (
@@ -631,7 +632,7 @@ function App() {
                     }`
                   }
                 >
-                  🏆 Finals
+                  <E n="trophy" /> Finals
                 </NavLink>
               )}
 
@@ -642,7 +643,7 @@ function App() {
                   }`
                 }
               >
-                📅 Matchups
+                <E n="calendar" /> Matchups
               </NavLink>
 
               <NavLink
@@ -652,7 +653,7 @@ function App() {
                   }`
                 }
               >
-                🏆 Leaderboard
+                <E n="leaderboard" /> Leaderboard
               </NavLink>
 
               {!loadingUser && user?.is_mod && (
@@ -663,7 +664,7 @@ function App() {
                     }`
                   }
                 >
-                  🛠️ League Mod
+                  <E n="tools" /> League Mod
                 </NavLink>
               )}
               {!loadingUser && user?.is_dev && (
@@ -674,7 +675,7 @@ function App() {
                     }`
                   }
                 >
-                  ⚙️ Settings
+                  <E n="gear" /> Settings
                 </NavLink>
               )}
             </div>
@@ -717,7 +718,7 @@ function App() {
                         className="account-dropdown-item"
                         onClick={() => { window.location.href = `${getApiUrl()}/logout`; }}
                       >
-                        🚪 Logout
+                        <E n="door" /> Logout
                       </button>
                     </div>
                   )}
@@ -727,7 +728,7 @@ function App() {
                   className="list-group-item list-group-item-action ecgl-side-link ecgl-side-auth"
                   href={`${getApiUrl()}/login`}
                 >
-                  🔑 Login with Discord
+                  <E n="key" /> Login with Discord
                 </a>
               )}
             </div>

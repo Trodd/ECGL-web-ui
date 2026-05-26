@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
 import { getApiUrl } from "../config";
+import { E } from "../components/CustomEmoji";
 
 export default function Matchups() {
     const [flatMatches, setFlatMatches] = useState([]);
@@ -102,10 +103,10 @@ export default function Matchups() {
         <div className="d-flex justify-content-center">
             <div style={{ width: "100%", maxWidth: 820 }}>
                 <div className="card bg-dark border-secondary p-4 shadow-sm">
-                    <h2 className="mb-3">📅 Matchups</h2>
+                    <h2 className="mb-3"><E n="calendar" /> Matchups</h2>
 
-                    {loading && <p className="text-secondary">⏳ Loading matchups…</p>}
-                    {error && <p className="text-danger">⚠️ {error}</p>}
+                    {loading && <p className="text-secondary"><E n="refresh" /> Loading matchups…</p>}
+                    {error && <p className="text-danger"><E n="warning" className="emoji-warning" /> {error}</p>}
 
                     {/* ================= FILTER BAR ================= */}
                     {!loading && !error && (
@@ -171,7 +172,7 @@ export default function Matchups() {
                                         {season === "Preseason"
                                             ? "Preseason"
                                             : `Season ${season}`}{" "}
-                                        — {week === "Finals" ? "Finals 🏁" : `Week ${week}`}
+                                        — {week === "Finals" ? <><E n="flag" /> Finals</> : `Week ${week}`}
                                     </h5>
 
                                     {weeks[week].map((m) => {
@@ -192,11 +193,11 @@ export default function Matchups() {
                                                     <div className="d-flex justify-content-between align-items-center mb-1">
                                                         <div className="fw-semibold">
                                                             <span className={winnerA ? "text-success" : ""}>
-                                                                {m.team_a} {winnerA && "🏆"}
+                                                                {m.team_a} {winnerA && <E n="trophy" className="emoji-gold" />}
                                                             </span>{" "}
                                                             <span className="text-secondary mx-1">vs</span>
                                                             <span className={winnerB ? "text-success" : ""}>
-                                                                {m.team_b} {winnerB && "🏆"}
+                                                                {m.team_b} {winnerB && <E n="trophy" className="emoji-gold" />}
                                                             </span>
 
                                                             {m.cast_active && (
