@@ -4,6 +4,7 @@ import axios from "axios";
 import CastModal from "../components/CastModal";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
+import PlayerIdentity from "../components/PlayerIdentity";
 
 export default function MatchDetail() {
     const { id } = useParams();
@@ -448,9 +449,9 @@ export default function MatchDetail() {
                                         >
                                             <Link
                                                 to={`/players/${p.player_id}`}
-                                                className="text-info fw-semibold text-decoration-none"
+                                                className="text-decoration-none"
                                             >
-                                                {p.display_name || p.username}
+                                                <PlayerIdentity player={{ id: p.player_id, display_name: p.display_name, username: p.username, avatar: p.avatar }} size={24} />
                                             </Link>
                                             <span className="text-secondary">{p.role}</span>
                                         </li>

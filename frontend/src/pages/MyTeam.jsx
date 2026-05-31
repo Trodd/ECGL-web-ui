@@ -3,6 +3,7 @@ import axios from "axios";
 import MatchCard from "../components/MatchCard";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
+import PlayerIdentity from "../components/PlayerIdentity";
 
 export default function MyTeam() {
   const [data, setData] = useState({
@@ -759,8 +760,8 @@ export default function MyTeam() {
                 style={{ borderColor: "#333" }}
               >
                 <div>
-                  <strong className="text-info">{m.display_name || m.username || "Unknown"}</strong>{" "}
-                  <span className="text-secondary small">{m.role || "-"}</span>
+                  <PlayerIdentity player={m} size={26} />
+                  <span className="text-secondary small ms-2">{m.role || "-"}</span>
 
                   {m.on_cooldown && (
                     <span className="badge bg-warning text-dark ms-2">
@@ -821,9 +822,7 @@ export default function MyTeam() {
                     className="border rounded p-3 mb-3"
                     style={{ borderColor: "#444" }}
                   >
-                    <strong className="text-info">
-                      {req.display_name || req.username || "Unknown Player"}
-                    </strong>
+                    <PlayerIdentity player={{ id: req.player_id, display_name: req.display_name, username: req.username, avatar: req.avatar }} size={26} />
 
                     <div className="d-flex gap-2 mt-2">
                       <button

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
+import PlayerIdentity from "../components/PlayerIdentity";
 
 export default function TeamDetail() {
   const { id } = useParams();
@@ -326,7 +327,7 @@ export default function TeamDetail() {
                 style={{ borderColor: "#333" }}
               >
                 <div className="d-flex align-items-center gap-2">
-                  <strong>{p.display_name || p.username || "Unknown"}</strong>
+                  <PlayerIdentity player={p} size={26} />
                   <span className={`badge bg-secondary`}>
                     {p.role || "-"}
                   </span>

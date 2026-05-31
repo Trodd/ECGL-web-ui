@@ -297,6 +297,7 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 		ID          int64
 		Username    string
 		DisplayName string
+		Avatar      string
 		Role        string
 		Device      string
 		Timezone    string
@@ -305,7 +306,7 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 	roleFilter := strings.TrimSpace(r.URL.Query().Get("role"))
 
 	query := DB.Table("players").
-		Select("id, username, display_name, role, device, timezone").
+		Select("id, username, display_name, avatar, role, device, timezone").
 		Where("username <> ''").
 		Where("display_name <> ''").
 		Where("role IS NOT NULL AND role <> '' AND role <> 'Unregistered'")
@@ -341,6 +342,7 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 			"id":           idStr,
 			"username":     r.Username,
 			"display_name": r.DisplayName,
+			"avatar":       r.Avatar,
 			"role":         r.Role,
 			"device":       r.Device,
 			"timezone":     r.Timezone,
@@ -392,6 +394,7 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 		ID          string `json:"id"`
 		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
+		Avatar      string `json:"avatar"`
 		Role        string `json:"role"`
 		Rating      int    `json:"rating"`
 		OnCooldown  bool   `json:"on_cooldown"`
@@ -405,6 +408,7 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 			CAST(players.id AS TEXT) AS id,
 			players.username,
 			players.display_name,
+			players.avatar,
 			team_members.role,
 			players.rating
 		`).
@@ -424,6 +428,7 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 				CAST(p.id AS TEXT) AS id,
 				p.username,
 				p.display_name,
+				p.avatar,
 				ph.role,
 				p.rating
 			FROM player_history ph
@@ -948,6 +953,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 		ID          string `json:"id"`
 		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
+		Avatar      string `json:"avatar"`
 		Role        string `json:"role"`
 		Rating      int    `json:"rating"`
 		OnCooldown  bool   `json:"on_cooldown"`
@@ -959,6 +965,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
                 CAST(players.id AS text) AS id,
                 players.username,
                 players.display_name,
+                players.avatar,
                 team_members.role,
                 players.rating`).
 		Joins("JOIN players ON players.id = team_members.player_id").
@@ -974,6 +981,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
                     CAST(p.id AS text) AS id,
                     p.username,
                     p.display_name,
+                    p.avatar,
                     ph.role,
                     p.rating
                 FROM player_history ph
@@ -993,6 +1001,7 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
         SELECT r.id, r.player_id,
                p.username,
                COALESCE(p.display_name, '') AS display_name,
+               COALESCE(p.avatar, '') AS avatar,
                r.status
         FROM team_join_requests r
         JOIN players p ON p.id = r.player_id
@@ -2669,6 +2678,7 @@ type MatchRosterPlayer struct {
 	PlayerID    int64  `json:"player_id"`
 	DisplayName string `json:"display_name"`
 	Username    string `json:"username"`
+	Avatar      string `json:"avatar"`
 	Role        string `json:"role"`
 }
 
@@ -2754,6 +2764,7 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 				p.id AS player_id,
 				p.display_name,
 				p.username,
+				p.avatar,
 				tm.role
 			FROM team_members tm
 			JOIN players p ON p.id = tm.player_id
@@ -2765,6 +2776,7 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 				p.id AS player_id,
 				p.display_name,
 				p.username,
+				p.avatar,
 				tm.role
 			FROM team_members tm
 			JOIN players p ON p.id = tm.player_id
@@ -3124,6 +3136,7 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 		"id":              strconv.FormatInt(player.ID, 10),
 		"username":        player.Username,
 		"display_name":    player.DisplayName,
+		"avatar":          player.Avatar,
 		"role":            player.Role,
 		"timezone":        player.Timezone,
 		"rating":          player.Rating,

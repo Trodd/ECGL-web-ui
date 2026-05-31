@@ -12,6 +12,7 @@ type Player struct {
 	IDStr          string     `json:"id" gorm:"-"`         // exposed as string in JSON
 	Username       string     `json:"username"`
 	DisplayName    string     `json:"display_name"`
+	Avatar         string     `json:"avatar"`
 	Role           string     `json:"role"`
 	Timezone       string     `json:"timezone"`
 	Device         string     `json:"device"`

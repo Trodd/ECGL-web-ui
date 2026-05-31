@@ -142,6 +142,7 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 			ID:          discordID,
 			Username:    user.Username,
 			DisplayName: serverDisplay,
+			Avatar:      user.Avatar,
 			Role:        "",  // not registered yet
 			Timezone:    "",  // empty until registration
 			Rating:      800, // default starting ELO
@@ -155,13 +156,16 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 			log.Printf("🆕 Created new player record for %s (%s)", user.Username, user.ID)
 		}
 	} else if err == nil {
-		// ✅ Existing record — update username/display if changed
+		// ✅ Existing record — update username/display/avatar if changed
 		updates := map[string]any{}
 		if existing.Username != user.Username {
 			updates["username"] = user.Username
 		}
 		if existing.DisplayName != serverDisplay {
 			updates["display_name"] = serverDisplay
+		}
+		if existing.Avatar != user.Avatar {
+			updates["avatar"] = user.Avatar
 		}
 		if len(updates) > 0 {
 			DB.Model(&existing).Updates(updates)
@@ -574,6 +578,65 @@ func HandleGetSeason(w http.ResponseWriter, r *http.Request) {
 var currentSeason string
 var rosterLocked bool = false
 
+// syncPlayerAvatars runs once at startup to backfill avatar/username/display_name
+// for all players using the Discord bot's guild member list.
+func syncPlayerAvatars(dg *discordgo.Session) {
+	guildID := os.Getenv("DISCORD_GUILD_ID")
+	if guildID == "" {
+		log.Println("⚠️ DISCORD_GUILD_ID not set, skipping avatar sync")
+		return
+	}
+
+	// Get all player IDs from DB
+	var playerIDs []int64
+	if err := DB.Table("players").Pluck("id", &playerIDs).Error; err != nil {
+		log.Printf("⚠️ Avatar sync: failed to load player IDs: %v", err)
+		return
+	}
+
+	if len(playerIDs) == 0 {
+		return
+	}
+
+	log.Printf("🔄 Avatar sync: checking %d players...", len(playerIDs))
+	updated := 0
+
+	for _, pid := range playerIDs {
+		memberID := strconv.FormatInt(pid, 10)
+		member, err := dg.GuildMember(guildID, memberID)
+		if err != nil {
+			continue // user may have left the guild
+		}
+		if member.User == nil {
+			continue
+		}
+
+		updates := map[string]any{}
+
+		if member.User.Avatar != "" {
+			updates["avatar"] = member.User.Avatar
+		}
+		if member.User.Username != "" {
+			updates["username"] = member.User.Username
+		}
+		// Use guild nick > global display name > username
+		displayName := member.Nick
+		if displayName == "" && member.User.GlobalName != "" {
+			displayName = member.User.GlobalName
+		}
+		if displayName != "" {
+			updates["display_name"] = displayName
+		}
+
+		if len(updates) > 0 {
+			DB.Table("players").Where("id = ?", pid).Updates(updates)
+			updated++
+		}
+	}
+
+	log.Printf("✅ Avatar sync complete: updated %d/%d players", updated, len(playerIDs))
+}
+
 func main() {
 	// ✅ Load .env first
 	_ = godotenv.Load()
@@ -647,6 +710,9 @@ func main() {
 	defer dg.Close()
 
 	log.Println("🤖 Discord bot connected (prefix commands enabled)")
+
+	// 🔄 One-time sync: backfill avatars for all players from Discord
+	go syncPlayerAvatars(dg)
 
 	r := mux.NewRouter()
 

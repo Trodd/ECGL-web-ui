@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
+import { getDiscordAvatarUrl } from "../components/PlayerIdentity";
 
 export default function PlayerDetail() {
   const { id } = useParams();
@@ -35,12 +36,24 @@ export default function PlayerDetail() {
     <div className="container text-light py-4" style={{ maxWidth: 960 }}>
       {/* ================= PLAYER HEADER ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
-        <h2 className="mb-1">
-          <E n="gamepad" /> {player.display_name || "Unknown Player"}
-        </h2>
+        <div className="d-flex align-items-center gap-3 mb-2">
+          <img
+            src={getDiscordAvatarUrl(player)}
+            alt=""
+            style={{ width: 48, height: 48, borderRadius: "50%", border: "2px solid var(--border-default, #1e2a3a)" }}
+            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "https://cdn.discordapp.com/embed/avatars/0.png"; }}
+          />
+          <div>
+            <h2 className="mb-0">
+              {player.display_name || "Unknown Player"}
+            </h2>
+            <span className="players-discord-username" style={{ fontSize: "0.82rem" }}>
+              @{player.username || "unknown"}
+            </span>
+          </div>
+        </div>
 
         <div className="text-secondary small">
-          <div><b>Username:</b> {player.username || "-"}</div>
           <div><b>Role:</b> {player.role || "-"}</div>
           <div><b>Timezone:</b> {player.timezone || "-"}</div>
 

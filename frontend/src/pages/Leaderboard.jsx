@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
+import PlayerIdentity from "../components/PlayerIdentity";
 
 export default function Leaderboard() {
   const [view, setView] = useState("teams"); // default: teams
@@ -121,8 +122,8 @@ export default function Leaderboard() {
                 <tr key={p.id}>
                   <td className="fw-bold text-secondary">{idx + 1}</td>
 
-                  <td className="fw-semibold">
-                    {p.display_name || p.username}
+                  <td>
+                    <PlayerIdentity player={p} size={24} />
                   </td>
 
                   <td>

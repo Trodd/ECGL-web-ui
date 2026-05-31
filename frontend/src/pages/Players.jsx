@@ -42,6 +42,8 @@ export default function Players() {
               typeof p.display_name === "string"
                 ? p.display_name
                 : p.username || "",
+            username: typeof p.username === "string" ? p.username : "",
+            avatar: typeof p.avatar === "string" ? p.avatar : "",
             role: typeof p.role === "string" ? p.role : "",
             timezone: typeof p.timezone === "string" ? p.timezone : "",
           }));
@@ -68,12 +70,28 @@ export default function Players() {
   const safeIncludes = (haystack, needle) =>
     safeLower(haystack).includes(safeLower(needle));
 
+  const getDiscordAvatarUrl = (player) => {
+    if (!player?.id) return "https://cdn.discordapp.com/embed/avatars/0.png";
+    if (player.avatar) {
+      return `https://cdn.discordapp.com/avatars/${player.id}/${player.avatar}.png?size=64`;
+    }
+    try {
+      const idx = Number((BigInt(player.id) >> 22n) % 6n);
+      return `https://cdn.discordapp.com/embed/avatars/${idx}.png`;
+    } catch {
+      return "https://cdn.discordapp.com/embed/avatars/0.png";
+    }
+  };
+
   const filteredPlayers = useMemo(() => {
     const srch = safeLower(search);
     const rf = safeLower(roleFilter);
 
     return (Array.isArray(players) ? players : []).filter((p) => {
-      const matchesSearch = !srch || safeIncludes(p.display_name || "", srch);
+      const matchesSearch =
+        !srch ||
+        safeIncludes(p.display_name || "", srch) ||
+        safeIncludes(p.username || "", srch);
       const matchesRole =
         rf === "all" || safeLower(p.role || "") === rf;
       return matchesSearch && matchesRole;
@@ -133,23 +151,40 @@ export default function Players() {
                   }}
                 >
                   {/* LEFT */}
-                  <div className="d-flex flex-column lh-sm">
-                    <span className="fw-semibold">
-                      {p.id ? (
-                        <Link
-                          to={`/players/${p.id}`}
-                          className="text-info text-decoration-none"
-                        >
-                          {p.display_name || "Unknown"}
-                        </Link>
-                      ) : (
-                        p.display_name || "Unknown"
-                      )}
-                    </span>
+                  <div className="d-flex align-items-center gap-2 lh-sm">
+                    <img
+                      src={getDiscordAvatarUrl(p)}
+                      alt=""
+                      className="players-discord-avatar"
+                      loading="lazy"
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = "https://cdn.discordapp.com/embed/avatars/0.png";
+                      }}
+                    />
 
-                    <span className="text-secondary" style={{ fontSize: "0.8rem" }}>
-                      {p.timezone || "No timezone"}
-                    </span>
+                    <div className="d-flex flex-column players-name-block">
+                      <span className="fw-semibold">
+                        {p.id ? (
+                          <Link
+                            to={`/players/${p.id}`}
+                            className="text-info text-decoration-none"
+                          >
+                            {p.display_name || "Unknown"}
+                          </Link>
+                        ) : (
+                          p.display_name || "Unknown"
+                        )}
+                      </span>
+
+                      <span className="players-discord-username">
+                        @{p.username || "unknown"}
+                      </span>
+
+                      <span className="text-secondary" style={{ fontSize: "0.8rem" }}>
+                        {p.timezone || "No timezone"}
+                      </span>
+                    </div>
                   </div>
 
                   {/* RIGHT */}

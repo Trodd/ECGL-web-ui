@@ -19,6 +19,7 @@ type ModAuditEntry struct {
 	Target        string    `json:"target,omitempty"`
 	ActorID       string    `json:"actor_id"`
 	ActorUsername string    `json:"actor_username,omitempty"`
+	ActorAvatar   string    `json:"actor_avatar,omitempty"`
 }
 
 const modAuditMaxEntries = 500
@@ -78,6 +79,27 @@ func HandleModAuditLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Convert to response format
 	entries := make([]ModAuditEntry, len(logs))
+
+	// Build a set of actor IDs to batch-lookup avatars
+	actorIDs := make([]string, 0, len(logs))
+	for _, l := range logs {
+		if l.ActorID != "" {
+			actorIDs = append(actorIDs, l.ActorID)
+		}
+	}
+	avatarMap := map[string]string{}
+	if len(actorIDs) > 0 {
+		type av struct {
+			ID     int64
+			Avatar string
+		}
+		var avs []av
+		DB.Table("players").Select("id, avatar").Where("id IN ?", actorIDs).Scan(&avs)
+		for _, a := range avs {
+			avatarMap[strconv.FormatInt(a.ID, 10)] = a.Avatar
+		}
+	}
+
 	for i, l := range logs {
 		entries[i] = ModAuditEntry{
 			ID:            l.ID,
@@ -89,6 +111,7 @@ func HandleModAuditLogs(w http.ResponseWriter, r *http.Request) {
 			Target:        l.Target,
 			ActorID:       l.ActorID,
 			ActorUsername: l.ActorUsername,
+			ActorAvatar:   avatarMap[l.ActorID],
 		}
 	}
 

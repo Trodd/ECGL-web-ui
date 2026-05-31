@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
+import PlayerIdentity, { getDiscordAvatarUrl } from "../components/PlayerIdentity";
 
 export default function LeagueMod() {
     const urlBase = getApiUrl();
@@ -1640,7 +1641,7 @@ export default function LeagueMod() {
                                                                 {filteredPlayers.map((p) => (
                                                                     <li
                                                                         key={p.id}
-                                                                        className="list-group-item bg-dark text-light small"
+                                                                        className="list-group-item bg-dark text-light small d-flex align-items-center gap-2"
                                                                         onMouseDown={() => {
                                                                             setAddPlayerInput(`${p.display_name} (#${p.id})`);
                                                                             setAddPlayerID(p.id);
@@ -1648,7 +1649,7 @@ export default function LeagueMod() {
                                                                         }}
                                                                         style={{ cursor: "pointer" }}
                                                                     >
-                                                                        {p.display_name || p.username} #{p.id}
+                                                                        <PlayerIdentity player={p} size={22} />
                                                                     </li>
                                                                 ))}
                                                             </ul>
@@ -1695,9 +1696,8 @@ export default function LeagueMod() {
                                                                     className="list-group-item bg-dark text-light border-secondary
                                                                                 d-flex align-items-center gap-2"
                                                                 >
-                                                                    <span className="flex-grow-1 text-truncate">
-                                                                        <b>{m.display_name}</b>{" "}
-                                                                        <span className="text-info">#{m.player_id}</span>{" "}
+                                                                    <span className="flex-grow-1 text-truncate d-flex align-items-center gap-2">
+                                                                        <PlayerIdentity player={{ id: m.player_id, display_name: m.display_name, username: m.username, avatar: m.avatar }} size={24} />
                                                                         <span className="text-warning small">[{m.role}]</span>
                                                                     </span>
 
@@ -2051,7 +2051,7 @@ export default function LeagueMod() {
                                                 {playerSuggestions.map((p) => (
                                                     <li
                                                         key={p.id}
-                                                        className="list-group-item list-group-item-action bg-dark text-light border-secondary small"
+                                                        className="list-group-item list-group-item-action bg-dark text-light border-secondary small d-flex align-items-center gap-2"
                                                         style={{ cursor: "pointer" }}
                                                         onMouseDown={() => {
                                                             setPlayerSearch(`${p.display_name} (${p.id})`);
@@ -2059,8 +2059,7 @@ export default function LeagueMod() {
                                                             setPlayerSuggestions([]);
                                                         }}
                                                     >
-                                                        {p.display_name || p.username}{" "}
-                                                        <span className="text-light">#{p.id}</span>
+                                                        <PlayerIdentity player={p} size={22} />
                                                     </li>
                                                 ))}
                                             </ul>
@@ -2188,7 +2187,7 @@ export default function LeagueMod() {
                                                 {statSuggestions.map((p) => (
                                                     <li
                                                         key={p.id}
-                                                        className="list-group-item list-group-item-action bg-dark text-light border-secondary small"
+                                                        className="list-group-item list-group-item-action bg-dark text-light border-secondary small d-flex align-items-center gap-2"
                                                         style={{ cursor: "pointer" }}
                                                         onMouseDown={() => {
                                                             setStatSearch(`${p.display_name || p.username} (#${p.id})`);
@@ -2212,8 +2211,7 @@ export default function LeagueMod() {
                                                                 });
                                                         }}
                                                     >
-                                                        {p.display_name || p.username}
-                                                        <span className="text-info ms-1">#{p.id}</span>
+                                                        <PlayerIdentity player={p} size={22} />
                                                     </li>
                                                 ))}
                                             </ul>
@@ -2756,7 +2754,7 @@ function ModAuditLogPanel({ urlBase }) {
                                         {e.target || ""}
                                     </td>
                                     <td>
-                                        {e.actor_username ? `${e.actor_username} (${e.actor_id})` : e.actor_id}
+                                        <PlayerIdentity player={{ id: e.actor_id, display_name: e.actor_username, username: e.actor_username, avatar: e.actor_avatar }} size={22} />
                                     </td>
                                 </tr>
                             ))}

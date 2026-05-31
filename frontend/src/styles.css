@@ -957,6 +957,32 @@ a:hover {
   color: var(--text-tertiary);
 }
 
+/* Players page: Discord identity row */
+.players-discord-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border-default);
+  flex-shrink: 0;
+  display: block;
+}
+
+.players-name-block {
+  min-width: 0;
+}
+
+.players-discord-username {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-tertiary) !important;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
 /* ─── Rules ─── */
 .rules {
   background: var(--bg-card);
