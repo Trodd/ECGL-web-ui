@@ -399,6 +399,20 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		player.Rating = getEnvInt("DEFAULT_PLAYER_RATING", 800)
 	}
 
+	// 🛡️ Detect if this is a real signup vs a duplicate submit.
+	// If the player already exists with the same role/device/timezone,
+	// treat it as a no-op so we don't double-ping Discord or re-apply roles.
+	var existing Player
+	alreadyRegistered := false
+	if err := DB.First(&existing, discordID).Error; err == nil {
+		if strings.EqualFold(existing.Role, req.Role) &&
+			strings.EqualFold(existing.Device, req.Device) &&
+			strings.EqualFold(existing.Timezone, req.Timezone) &&
+			strings.TrimSpace(existing.Role) != "" {
+			alreadyRegistered = true
+		}
+	}
+
 	// ✅ Upsert player row
 	if err := DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "id"}},
@@ -413,30 +427,32 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	DB.First(&player, discordID)
 
-	// ⭐ NEW — Discord role handling
-	rolePlayer := os.Getenv("DISCORD_PLAYER_ROLE_ID")
-	roleSub := os.Getenv("DISCORD_LEAGUE_SUB_ROLE_ID")
+	if !alreadyRegistered {
+		// ⭐ Discord role handling — only on first signup or role change
+		rolePlayer := os.Getenv("DISCORD_PLAYER_ROLE_ID")
+		roleSub := os.Getenv("DISCORD_LEAGUE_SUB_ROLE_ID")
 
-	// Cleanup previous roles
-	go DiscordRemoveRole(discordIDStr, rolePlayer)
-	go DiscordRemoveRole(discordIDStr, roleSub)
+		// Cleanup previous roles
+		go DiscordRemoveRole(discordIDStr, rolePlayer)
+		go DiscordRemoveRole(discordIDStr, roleSub)
 
-	// Assign correct role
-	if req.Role == "Player" {
-		go DiscordAddRole(discordIDStr, rolePlayer)
-	}
-	if req.Role == "League Sub" {
-		go DiscordAddRole(discordIDStr, roleSub)
+		// Assign correct role
+		if req.Role == "Player" {
+			go DiscordAddRole(discordIDStr, rolePlayer)
+		}
+		if req.Role == "League Sub" {
+			go DiscordAddRole(discordIDStr, roleSub)
+		}
+
+		// Log registration
+		SendDiscordLog(
+			fmt.Sprintf("🟢 **<@%s>** has signed up as a **%s** in timezone **%s**",
+				discordIDStr, player.Role, player.Timezone,
+			),
+		)
 	}
 
 	player.Registered = true
-
-	// Log registration
-	SendDiscordLog(
-		fmt.Sprintf("🟢 **<@%s>** has signed up as a **%s** in timezone **%s**",
-			discordIDStr, player.Role, player.Timezone,
-		),
-	)
 
 	respondJSON(w, player)
 }

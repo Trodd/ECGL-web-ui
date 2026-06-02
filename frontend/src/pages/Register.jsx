@@ -20,6 +20,9 @@ export default function Register() {
   const [teamQuery, setTeamQuery] = useState("");
   const [newTeamName, setNewTeamName] = useState("");
   const [rosterLocked, setRosterLocked] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUnregistering, setIsUnregistering] = useState(false);
+  const [isCreatingTeam, setIsCreatingTeam] = useState(false);
 
   const query = new URLSearchParams(window.location.search);
   const asParam = query.get("as") || sessionStorage.getItem("dev_impersonate");
@@ -81,6 +84,8 @@ export default function Register() {
   // -----------------------------------------------------
   async function handleRegister(e) {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
 
     try {
       // 1️⃣ Check server membership
@@ -108,14 +113,7 @@ export default function Register() {
         { withCredentials: true }
       );
 
-      // 3️⃣ 🔑 RE-FETCH ME (WITH asParam SUPPORT)
-      const updated = await axios.get(
-        asParam
-          ? `${urlBase}/api/me?as=${asParam}`
-          : `${urlBase}/api/me`,
-        { withCredentials: true }
-      );
-
+      // 3️⃣ Refresh user + team state
       const [meRes, teamRes] = await Promise.all([
         axios.get(
           asParam
@@ -144,10 +142,14 @@ export default function Register() {
       }
 
       alert(err.response?.data || "❌ Failed to register");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
   async function handleUnregister() {
+    if (isUnregistering) return;
+    setIsUnregistering(true);
     try {
       await axios.post(
         asParam
@@ -159,11 +161,14 @@ export default function Register() {
       window.location.reload();
     } catch {
       alert("❌ Failed to unregister");
+      setIsUnregistering(false);
     }
   }
 
   async function handleCreateTeam() {
     if (!newTeamName.trim()) return alert("Enter a team name");
+    if (isCreatingTeam) return;
+    setIsCreatingTeam(true);
 
     try {
       await axios.post(
@@ -193,6 +198,8 @@ export default function Register() {
       setNewTeamName("");
     } catch {
       alert("❌ Failed to create team");
+    } finally {
+      setIsCreatingTeam(false);
     }
   }
 
@@ -269,8 +276,9 @@ export default function Register() {
             <button
               className="btn btn-outline-danger mt-3 w-auto"
               onClick={handleUnregister}
+              disabled={isUnregistering}
             >
-              Unregister
+              {isUnregistering ? "Unregistering…" : "Unregister"}
             </button>
           </div>
         </div>
@@ -307,8 +315,9 @@ export default function Register() {
               <button
                 className="btn btn-outline-danger mt-2 w-auto"
                 onClick={handleUnregister}
+                disabled={isUnregistering}
               >
-                Unregister
+                {isUnregistering ? "Unregistering…" : "Unregister"}
               </button>
             )}
           </div>
@@ -352,8 +361,12 @@ export default function Register() {
                     value={newTeamName}
                     onChange={(e) => setNewTeamName(e.target.value)}
                   />
-                  <button className="btn btn-info" onClick={handleCreateTeam}>
-                    Create
+                  <button
+                    className="btn btn-info"
+                    onClick={handleCreateTeam}
+                    disabled={isCreatingTeam}
+                  >
+                    {isCreatingTeam ? "Creating…" : "Create"}
                   </button>
                 </div>
               </div>
@@ -448,8 +461,12 @@ export default function Register() {
               </select>
             </div>
 
-            <button type="submit" className="btn btn-primary w-auto">
-              Register
+            <button
+              type="submit"
+              className="btn btn-primary w-auto"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? "Registering…" : "Register"}
             </button>
           </form>
         </div>
