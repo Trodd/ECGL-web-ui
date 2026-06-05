@@ -71,6 +71,13 @@
     color: black !important;
 }
 
+.roster-lock {
+    background: #d50000 !important;
+    border-color: #9c0000 !important;
+    font-weight: bold;
+    color: white !important;
+}
+
 /* Legend */
 .legend-item {
     display: flex;
@@ -93,6 +100,10 @@
 
 .legend-box.season-end {
     background: #b300ff;
+}
+
+.legend-box.roster-lock {
+    background: #d50000;
 }
 
 .legend-box.break-week {

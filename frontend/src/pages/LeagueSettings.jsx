@@ -82,6 +82,7 @@ const SETTING_GROUPS = [
         keys: [
             { key: "SEASON_START", label: "Season Start", type: "date" },
             { key: "SEASON_END", label: "Season End", type: "date" },
+            { key: "ROSTER_LOCK", label: "Roster Lock Date", type: "date" },
             { key: "BREAKS", label: "Break Weeks", type: "dateranges" },
             { key: "FINALS", label: "Finals Periods", type: "dateranges" },
             { key: "CURRENT_SEASON", label: "Current Season #", type: "number" },

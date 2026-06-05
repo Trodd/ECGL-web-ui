@@ -42,6 +42,24 @@ func getEnvInt(key string, def int) int {
 	return n
 }
 
+func isRosterLocked() bool {
+	var dbLocked bool
+	if err := DB.Raw("SELECT roster_locked FROM settings WHERE id = 1").Scan(&dbLocked).Error; err == nil && dbLocked {
+		return true
+	}
+	rl := os.Getenv("ROSTER_LOCK")
+	if rl != "" {
+		if t, err := time.Parse("2006-01-02", rl); err == nil {
+			nowLocal := time.Now().Local()
+			lockTime := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local)
+			if nowLocal.After(lockTime) || nowLocal.Format("2006-01-02") == rl {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // clampRating enforces floor (0) and ceiling (MAX_RATING env, default 1300) on a rating value.
 func clampRating(rating int) int {
 	min := getEnvInt("MIN_RATING", 0)
@@ -170,7 +188,7 @@ func GetSettings(w http.ResponseWriter, r *http.Request) {
 	arenaModeEnabled := os.Getenv("ARENA_MODE_ENABLED") == "true"
 
 	respondJSON(w, map[string]any{
-		"roster_locked":          rosterLocked,
+		"roster_locked":          isRosterLocked(),
 		"min_team_players":       minPlayers,
 		"max_team_players":       maxPlayers,
 		"current_week":           s.CurrentWeek,
@@ -1106,8 +1124,7 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 🚫 Prevent join if roster globally locked
-	var rosterLocked bool
-	if err := DB.Raw("SELECT roster_locked FROM settings WHERE id = 1").Scan(&rosterLocked).Error; err == nil && rosterLocked {
+	if isRosterLocked() {
 		http.Error(w, "Roster lock is active — joining teams is disabled.", http.StatusForbidden)
 		return
 	}
@@ -1198,8 +1215,7 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 🚫 Prevent team creation when global roster lock is active
-	var rosterLocked bool
-	if err := DB.Raw("SELECT roster_locked FROM settings WHERE id = 1").Scan(&rosterLocked).Error; err == nil && rosterLocked {
+	if isRosterLocked() {
 		http.Error(w, "Roster lock is active — team creation disabled", http.StatusForbidden)
 		return
 	}
@@ -5670,12 +5686,7 @@ func ModRosterUnlockAll(w http.ResponseWriter, r *http.Request) {
 
 // Get global roster lock status
 func GetRosterLockStatus(w http.ResponseWriter, r *http.Request) {
-	var locked bool
-	if err := DB.Raw("SELECT roster_locked FROM settings WHERE id = 1").Scan(&locked).Error; err != nil {
-		http.Error(w, "failed to fetch status", http.StatusInternalServerError)
-		return
-	}
-	respondJSON(w, map[string]any{"locked": locked})
+	respondJSON(w, map[string]any{"locked": isRosterLocked()})
 }
 
 // --- GET /api/mod/team/history ---
@@ -9226,6 +9237,7 @@ func HandleGetSeasonCalendar(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"season_start": getEnv("SEASON_START", ""),
 		"season_end":   getEnv("SEASON_END", ""),
+		"roster_lock":  getEnv("ROSTER_LOCK", ""),
 		"breaks":       breaks,
 		"finals":       finals,
 	}
@@ -10059,6 +10071,7 @@ func syncMemberRoles(
 var settingsKeys = []string{
 	"SEASON_START",
 	"SEASON_END",
+	"ROSTER_LOCK",
 	"BREAKS",
 	"FINALS",
 	"WEEKLY_CHALLENGE_LIMIT",

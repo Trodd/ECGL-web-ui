@@ -17,6 +17,7 @@ export default function FullSeasonCalendar() {
     const {
         season_start,
         season_end,
+        roster_lock,
         breaks,
         finals
     } = data;
@@ -31,6 +32,8 @@ export default function FullSeasonCalendar() {
     // Convert main dates
     const seasonStart = parseLocal(season_start);
     const seasonEnd = parseLocal(season_end);
+    const rosterLock = parseLocal(roster_lock);
+    const rosterLockStr = rosterLock ? rosterLock.toDateString() : null;
 
     // Build break ranges array
     const breakRanges = [];
@@ -98,6 +101,7 @@ export default function FullSeasonCalendar() {
                 inRange: dateObj >= seasonStart && dateObj <= seasonEnd,
                 isStart: dateStr === seasonStartStr,
                 isEnd: dateStr === seasonEndStr,
+                isRosterLock: rosterLockStr && dateStr === rosterLockStr,
                 isBreak: isInBreakRange(dateObj),
                 isFinals: isInFinalsRange(dateObj)
             });
@@ -138,15 +142,17 @@ export default function FullSeasonCalendar() {
                                                 (c.inRange ? "in-range " : "out-range ") +
                                                 (c.isStart ? "season-start " : "") +
                                                 (c.isEnd ? "season-end " : "") +
+                                                (c.isRosterLock ? "roster-lock " : "") +
                                                 (c.isBreak ? "break-week " : "") +
                                                 (c.isFinals ? "finals-week " : "")
                                             }
                                             title={
                                                 c.isStart ? "Season Start" :
                                                     c.isEnd ? "Season End" :
-                                                        c.isBreak ? "Break Period" :
-                                                            c.isFinals ? "Finals Period" :
-                                                                ""
+                                                        c.isRosterLock ? "Roster Lock Date" :
+                                                            c.isBreak ? "Break Period" :
+                                                                c.isFinals ? "Finals Period" :
+                                                                    ""
                                             }
                                         >
                                             {c.day}
@@ -164,6 +170,7 @@ export default function FullSeasonCalendar() {
                 <h5 className="text-info">Legend</h5>
                 <div><span className="legend-box season-start"></span>Season Start</div>
                 <div><span className="legend-box season-end"></span>Season End</div>
+                <div><span className="legend-box roster-lock"></span>Roster Lock Date{rosterLock ? ` (${rosterLock.toLocaleDateString()})` : " (Not set)"}</div>
                 <div><span className="legend-box break-week"></span>Break Range</div>
                 <div><span className="legend-box finals-week"></span>Finals Range</div>
             </div>
