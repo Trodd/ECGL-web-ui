@@ -10,6 +10,8 @@ export default function PlayerDetail() {
   const [player, setPlayer] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [me, setMe] = useState(null);
+  const [copiedAvatar, setCopiedAvatar] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -26,11 +28,33 @@ export default function PlayerDetail() {
       }
     }
     load();
+    axios
+      .get(`${getApiUrl()}/api/me`, { withCredentials: true })
+      .then((res) => setMe(res.data))
+      .catch(() => setMe(null));
   }, [id]);
 
   if (loading) return <p>Loading player...</p>;
   if (error) return <div className="alert alert-danger">{error}</div>;
   if (!player) return <p>No player data.</p>;
+
+  const canCopyAvatarUrl = !!me?.is_caster || !!me?.is_mod;
+
+  async function handleCopyAvatarUrl() {
+    const url = getDiscordAvatarUrl(player);
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        window.prompt("Copy avatar URL:", url);
+      }
+      setCopiedAvatar(true);
+      window.setTimeout(() => setCopiedAvatar(false), 1500);
+    } catch (e) {
+      console.error("Failed to copy avatar URL", e);
+      window.prompt("Copy avatar URL:", url);
+    }
+  }
 
   return (
     <div className="container text-light py-4" style={{ maxWidth: 960 }}>
@@ -40,7 +64,19 @@ export default function PlayerDetail() {
           <img
             src={getDiscordAvatarUrl(player)}
             alt=""
-            style={{ width: 48, height: 48, borderRadius: "50%", border: "2px solid var(--border-default, #1e2a3a)" }}
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: "50%",
+              border: copiedAvatar ? "2px solid #28a745" : "2px solid var(--border-default, #1e2a3a)",
+              flexShrink: 0,
+              cursor: canCopyAvatarUrl ? "pointer" : "default",
+              transition: "border-color 0.2s, box-shadow 0.2s",
+            }}
+            title={canCopyAvatarUrl ? "Copy avatar URL" : undefined}
+            onClick={canCopyAvatarUrl ? handleCopyAvatarUrl : undefined}
+            onMouseEnter={canCopyAvatarUrl ? (e) => { e.currentTarget.style.boxShadow = "0 0 0 3px rgba(13,202,240,0.45)"; } : undefined}
+            onMouseLeave={canCopyAvatarUrl ? (e) => { e.currentTarget.style.boxShadow = "none"; } : undefined}
             onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "https://cdn.discordapp.com/embed/avatars/0.png"; }}
           />
           <div>
