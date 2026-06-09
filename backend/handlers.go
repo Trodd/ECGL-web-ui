@@ -1177,6 +1177,17 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		"/myteam",
 	)
 
+	// 📣 Discord log to general channel with captain mentions
+	go func() {
+		var captains []TeamMember
+		DB.Where("team_id = ? AND (role = 'Captain' OR role = 'Co-Captain')", req.TeamID).Find(&captains)
+		captainMentions := ""
+		for _, c := range captains {
+			captainMentions += fmt.Sprintf(" <@%d>", c.PlayerID)
+		}
+		SendDiscordLog(fmt.Sprintf("<@%d> has requested to join **%s**%s", playerID, team.Name, captainMentions))
+	}()
+
 	respondJSON(w, map[string]any{
 		"success": true,
 		"message": "Join request submitted",
