@@ -2475,12 +2475,17 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 	SendDiscordEmbedToGeneral(
 		fmt.Sprintf("📌 Match Time Request — %s", match.MatchCode),
 		fmt.Sprintf(
-			"Requested by: **%s**\nTeams: **%s** vs **%s**\nRequested Date: <t:%d:f>\nStatus: Waiting on opponent confirmation.\n\n"+
+			"### 🕐 Proposed Match Time\n"+
+				"**<t:%d:F>** — <t:%d:R>\n\n"+
+				"Requested by: **%s**\n"+
+				"Teams: **%s** vs **%s**\n"+
+				"Status: Waiting on opponent confirmation.\n\n"+
 				"🔵 Team A Captains:\n%s\n\n🔴 Team B Captains:\n%s",
+			date.Unix(),
+			date.Unix(),
 			requestingTeam,
 			teamA.Name,
 			teamB.Name,
-			date.Unix(),
 			captainA,
 			captainB,
 		),
@@ -4622,9 +4627,10 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 		// 📅 Include scheduled date/time
 		// ================================
 		scheduledDate := "Not Set"
+		scheduledDateRel := ""
 		if match.ScheduledDate != nil {
-			// Discord timestamp style
-			scheduledDate = fmt.Sprintf("<t:%d:f>", match.ScheduledDate.Unix())
+			scheduledDate = fmt.Sprintf("<t:%d:F>", match.ScheduledDate.Unix())
+			scheduledDateRel = fmt.Sprintf("<t:%d:R>", match.ScheduledDate.Unix())
 		}
 
 		// ================================
@@ -4636,15 +4642,16 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 			// 🔁 Reschedule log
 			logMsg = fmt.Sprintf(
 				"🔁 **Match Rescheduled:** %s\n"+
+					"### 🕐 **%s** — %s\n\n"+
 					"Teams: **%s** vs **%s**\n"+
-					"Rescheduled by <@%s>\n"+
-					"📅 New Date: %s\n\n"+
+					"Rescheduled by <@%s>\n\n"+
 					"🔵 **Team %s Players:**\n%s\n\n"+
 					"🔴 **Team %s Players:**\n%s",
 				match.MatchCode,
+				scheduledDate,
+				scheduledDateRel,
 				teamA.Name, teamB.Name,
 				actorDiscordID,
-				scheduledDate,
 				teamA.Name, pingA,
 				teamB.Name, pingB,
 			)
@@ -4652,15 +4659,16 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 			// 🆕 Initial schedule log
 			logMsg = fmt.Sprintf(
 				"📅 **Match Scheduled:** %s\n"+
+					"### 🕐 **%s** — %s\n\n"+
 					"Teams: **%s** vs **%s**\n"+
-					"Confirmed by <@%s>\n"+
-					"📅 Match Date: %s\n\n"+
+					"Confirmed by <@%s>\n\n"+
 					"🔵 **Team %s Players:**\n%s\n\n"+
 					"🔴 **Team %s Players:**\n%s",
 				match.MatchCode,
+				scheduledDate,
+				scheduledDateRel,
 				teamA.Name, teamB.Name,
 				actorDiscordID,
-				scheduledDate,
 				teamA.Name, pingA,
 				teamB.Name, pingB,
 			)
