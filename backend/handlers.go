@@ -2475,8 +2475,7 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 	SendDiscordEmbedToGeneral(
 		fmt.Sprintf("📌 Match Time Request — %s", match.MatchCode),
 		fmt.Sprintf(
-			"### 🕐 Proposed Match Time\n"+
-				"**<t:%d:F>** — <t:%d:R>\n\n"+
+			"🕐 **Proposed Match Time:** <t:%d:F> (<t:%d:R>)\n\n"+
 				"Requested by: **%s**\n"+
 				"Teams: **%s** vs **%s**\n"+
 				"Status: Waiting on opponent confirmation.\n\n"+
@@ -4642,7 +4641,7 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 			// 🔁 Reschedule log
 			logMsg = fmt.Sprintf(
 				"🔁 **Match Rescheduled:** %s\n"+
-					"### 🕐 **%s** — %s\n\n"+
+					"🕐 **%s** (%s)\n\n"+
 					"Teams: **%s** vs **%s**\n"+
 					"Rescheduled by <@%s>\n\n"+
 					"🔵 **Team %s Players:**\n%s\n\n"+
@@ -4659,7 +4658,7 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 			// 🆕 Initial schedule log
 			logMsg = fmt.Sprintf(
 				"📅 **Match Scheduled:** %s\n"+
-					"### 🕐 **%s** — %s\n\n"+
+					"🕐 **%s** (%s)\n\n"+
 					"Teams: **%s** vs **%s**\n"+
 					"Confirmed by <@%s>\n\n"+
 					"🔵 **Team %s Players:**\n%s\n\n"+
