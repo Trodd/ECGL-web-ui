@@ -715,6 +715,9 @@ func main() {
 	// 🔹 REGISTER PREFIX COMMAND HANDLERS HERE
 	RegisterPrefixCommands(dg)
 
+	// 🔹 REGISTER SLASH COMMAND HANDLERS (commands registered after Open)
+	RegisterSlashHandlers(dg)
+
 	// 🔹 REGISTER BUTTON INTERACTION HANDLERS
 	RegisterCloseChannelHandler(dg)
 
@@ -726,6 +729,9 @@ func main() {
 	defer dg.Close()
 
 	log.Println("🤖 Discord bot connected (prefix commands enabled)")
+
+	// 🔹 REGISTER SLASH COMMANDS (requires active connection)
+	RegisterSlashCommands(dg)
 
 	// 🔄 One-time sync: backfill avatars for all players from Discord
 	go syncPlayerAvatars(dg)
@@ -788,6 +794,7 @@ func main() {
 
 	// League Mod routes (all requireLeagueMod inside handlers)
 	r.HandleFunc("/api/mod/audit-logs", HandleModAuditLogs).Methods("GET")
+	r.HandleFunc("/api/mod/audit-logs", HandleClearModAuditLogs).Methods("DELETE")
 	r.HandleFunc("/api/mod/match/reset", ModMatchReset).Methods("POST")
 	r.HandleFunc("/api/mod/match/reset-schedule", ModResetMatchSchedule).Methods("POST")
 	r.HandleFunc("/api/mod/match/forfeit", ModMatchForfeit).Methods("POST")

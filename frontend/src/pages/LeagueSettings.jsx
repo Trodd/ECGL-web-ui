@@ -129,6 +129,7 @@ export default function LeagueSettings() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState(null);
+    const [clearingLogs, setClearingLogs] = useState(false);
 
     useEffect(() => {
         axios
@@ -179,6 +180,84 @@ export default function LeagueSettings() {
     const handleReset = () => {
         setSettings({ ...original });
         setMessage(null);
+    };
+
+    const handleClearLogs = async () => {
+        if (!confirm("Delete ALL mod audit log entries? This cannot be undone.")) return;
+        try {
+            setClearingLogs(true);
+            await axios.delete(`${getApiUrl()}/api/mod/audit-logs`, { withCredentials: true });
+            setMessage({ type: "success", text: "Audit logs cleared." });
+        } catch (err) {
+            setMessage({ type: "danger", text: "Failed to clear audit logs." });
+        } finally {
+            setClearingLogs(false);
+        }
+    };
+
+    // ── Data tools handlers ──
+    const handleArchiveSeason = async () => {
+        const reset = confirm("Archive current season and reset everything?");
+        try {
+            await axios.post(`${getApiUrl()}/api/mod/season/archive`, { reset_after: reset }, { withCredentials: true });
+            setMessage({ type: "success", text: "Archived season data" });
+        } catch (err) {
+            setMessage({ type: "danger", text: "Failed to archive season" });
+        }
+    };
+
+    const handleResetLeaderboard = async () => {
+        try {
+            await axios.post(`${getApiUrl()}/api/mod/leaderboard/reset`, {}, { withCredentials: true });
+            setMessage({ type: "success", text: "Reset leaderboards" });
+        } catch (err) {
+            setMessage({ type: "danger", text: "Failed to reset leaderboards" });
+        }
+    };
+
+    const handleResetPlayerLeaderboard = async () => {
+        try {
+            const res = await axios.post(`${getApiUrl()}/api/mod/reset_player_leaderboard`, {}, { withCredentials: true });
+            setMessage({ type: "success", text: res.data.message || "Player leaderboard reset!" });
+        } catch (err) {
+            setMessage({ type: "danger", text: "Failed to reset player leaderboard" });
+        }
+    };
+
+    const handleArchivePlayerStats = async () => {
+        try {
+            const seasonRes = await axios.get(`${getApiUrl()}/api/season`, { withCredentials: true });
+            const season = seasonRes.data?.season ?? "Preseason";
+            await axios.post(`${getApiUrl()}/api/mod/player/archive-all`, { season }, { withCredentials: true });
+            setMessage({ type: "success", text: `Archived all player stats for Season ${season}` });
+        } catch (err) {
+            console.error("Archive failed:", err);
+            setMessage({ type: "danger", text: "Failed to archive player stats" });
+        }
+    };
+
+    const handleArchiveTeamStats = async () => {
+        try {
+            const res = await fetch(`${getApiUrl()}/api/tools/archive-team-stats`, {
+                method: "POST",
+                credentials: "include",
+            });
+            const data = await res.json();
+            setMessage({ type: "success", text: `Archived ${data.archived} teams successfully` });
+        } catch (err) {
+            setMessage({ type: "danger", text: "Failed to archive team stats" });
+        }
+    };
+
+    const handleSyncRoles = async () => {
+        if (!confirm("Sync all player Discord roles?")) return;
+        try {
+            await axios.post(`${getApiUrl()}/api/mod/sync-roles`, {}, { withCredentials: true });
+            setMessage({ type: "success", text: "Discord roles synced successfully!" });
+        } catch (err) {
+            console.error("Sync roles failed:", err);
+            setMessage({ type: "danger", text: "Failed to sync Discord roles" });
+        }
     };
 
     if (loading) return <p className="text-secondary p-4">Loading settings…</p>;
@@ -260,6 +339,47 @@ export default function LeagueSettings() {
                 >
                     Reset Changes
                 </button>
+            </div>
+
+            <div className="card mb-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
+                <div className="card-header" style={{ background: "var(--bg-elevated)", borderBottom: "1px solid var(--border-default)" }}>
+                    <h5 className="mb-0" style={{ color: "var(--text-primary)" }}>🧹 Maintenance</h5>
+                </div>
+                <div className="card-body">
+                    <p className="text-secondary">Clear the mod action log entries from the database.</p>
+                    <button
+                        className="btn btn-outline-danger btn-sm"
+                        onClick={handleClearLogs}
+                        disabled={clearingLogs}
+                    >
+                        {clearingLogs ? "Clearing…" : "Clear Mod Audit Logs"}
+                    </button>
+                </div>
+            </div>
+
+            <div className="card mb-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
+                <div className="card-header" style={{ background: "var(--bg-elevated)", borderBottom: "1px solid var(--border-default)" }}>
+                    <h5 className="mb-0" style={{ color: "var(--text-primary)" }}>≡ Data Tools</h5>
+                </div>
+                <div className="card-body">
+                    <div className="d-flex flex-wrap gap-2">
+                        <button className="btn btn-outline-secondary btn-sm" onClick={handleArchiveSeason}>Archive Season</button>
+                        <button className="btn btn-outline-info btn-sm" onClick={handleArchivePlayerStats}>📦 Archive Player Stats (All Players)</button>
+                        <button className="btn btn-outline-primary btn-sm" onClick={handleArchiveTeamStats}>📦 Archive Team Stats</button>
+                        <button className="btn btn-outline-warning btn-sm" onClick={handleResetLeaderboard}>Reset Team Leaderboard</button>
+                        <button className="btn btn-outline-warning btn-sm" onClick={handleResetPlayerLeaderboard}>Reset Player Leaderboard</button>
+                        <button className="btn btn-outline-primary btn-sm" onClick={handleSyncRoles}>🔄 Sync Roles</button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="card mb-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
+                <div className="card-header" style={{ background: "var(--bg-elevated)", borderBottom: "1px solid var(--border-default)" }}>
+                    <h5 className="mb-0" style={{ color: "var(--text-primary)" }}>▶ Clips</h5>
+                </div>
+                <div className="card-body">
+                    <ClipsManager urlBase={getApiUrl()} setMsg={(text) => setMessage({ type: text.startsWith("✅") ? "success" : text.startsWith("❌") ? "danger" : "info", text })} />
+                </div>
             </div>
 
             <hr className="my-5" />
@@ -559,6 +679,200 @@ function RulesEditor() {
                     {saving ? "Saving…" : "Save Rules"}
                 </button>
             </div>
+        </div>
+    );
+}
+
+// =============================================================================
+// CLIPS MANAGER
+// =============================================================================
+
+function ClipsManager({ urlBase, setMsg }) {
+    const [clips, setClips] = useState([]);
+    const [newTitle, setNewTitle] = useState("");
+    const [newUrl, setNewUrl] = useState("");
+    const [playlistUrl, setPlaylistUrl] = useState("");
+    const [syncing, setSyncing] = useState(false);
+
+    function loadClips() {
+        axios
+            .get(`${urlBase}/api/clips`, { withCredentials: true })
+            .then((res) => setClips(Array.isArray(res.data) ? res.data : []))
+            .catch(() => setClips([]));
+    }
+
+    useEffect(() => { loadClips(); }, []);
+
+    async function addClip() {
+        if (!newUrl.trim()) {
+            setMsg("⚠️ URL is required");
+            return;
+        }
+        try {
+            await axios.post(
+                `${urlBase}/api/mod/clips`,
+                { title: newTitle.trim(), url: newUrl.trim() },
+                { withCredentials: true }
+            );
+            setMsg("✅ Clip added");
+            setNewTitle("");
+            setNewUrl("");
+            loadClips();
+        } catch (err) {
+            setMsg("❌ " + (err.response?.data || "Failed to add clip"));
+        }
+    }
+
+    async function deleteClip(id) {
+        try {
+            await axios.post(
+                `${urlBase}/api/mod/clips/delete`,
+                { id },
+                { withCredentials: true }
+            );
+            setMsg("✅ Clip removed");
+            loadClips();
+        } catch (err) {
+            setMsg("❌ Failed to delete clip");
+        }
+    }
+
+    function extractPlaylistId(input) {
+        if (!input) return "";
+        try {
+            const u = new URL(input);
+            const listParam = u.searchParams.get("list");
+            if (listParam) return listParam;
+        } catch { /* not a URL */ }
+        return input.trim();
+    }
+
+    async function syncPlaylist() {
+        const plId = extractPlaylistId(playlistUrl);
+        if (!plId) {
+            setMsg("⚠️ Enter a YouTube playlist URL or ID");
+            return;
+        }
+        setSyncing(true);
+        try {
+            const res = await axios.post(
+                `${urlBase}/api/mod/clips/sync-playlist`,
+                { playlist_id: plId },
+                { withCredentials: true }
+            );
+            const d = res.data;
+            setMsg(`✅ Playlist synced — ${d.added} new clips added (${d.already_existed} already existed, ${d.total_in_playlist} total in playlist)`);
+            loadClips();
+        } catch (err) {
+            setMsg("❌ " + (err.response?.data || "Failed to sync playlist"));
+        } finally {
+            setSyncing(false);
+        }
+    }
+
+    return (
+        <div>
+            <p className="text-secondary small">
+                Add YouTube or Twitch clip URLs to showcase on the home page, or sync from a YouTube playlist.
+            </p>
+
+            {/* Playlist Sync */}
+            <div className="card bg-secondary bg-opacity-10 border-secondary mb-4 p-3">
+                <h6 className="mb-2">📋 Auto-Sync from YouTube Playlist</h6>
+                <p className="text-secondary small mb-2">
+                    Paste a YouTube playlist URL to automatically import all videos as clips. No API key needed — works with any public playlist.
+                </p>
+                <div className="row g-2">
+                    <div className="col-md-8">
+                        <input
+                            className="form-control form-control-sm bg-dark text-light border-secondary"
+                            placeholder="https://www.youtube.com/playlist?list=PLxxxxxxx or playlist ID"
+                            value={playlistUrl}
+                            onChange={(e) => setPlaylistUrl(e.target.value)}
+                        />
+                    </div>
+                    <div className="col-md-4">
+                        <button
+                            className="btn btn-sm btn-primary w-100"
+                            onClick={syncPlaylist}
+                            disabled={syncing}
+                        >
+                            {syncing ? "⏳ Syncing..." : "🔄 Sync Playlist"}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Manual Add */}
+            <h6>➕ Add Individual Clip</h6>
+            <div className="row g-2 mb-3">
+                <div className="col-md-4">
+                    <input
+                        className="form-control form-control-sm bg-dark text-light border-secondary"
+                        placeholder="Title (optional)"
+                        value={newTitle}
+                        onChange={(e) => setNewTitle(e.target.value)}
+                    />
+                </div>
+                <div className="col-md-5">
+                    <input
+                        className="form-control form-control-sm bg-dark text-light border-secondary"
+                        placeholder="YouTube / Twitch clip URL"
+                        value={newUrl}
+                        onChange={(e) => setNewUrl(e.target.value)}
+                    />
+                </div>
+                <div className="col-md-3">
+                    <button className="btn btn-sm btn-success w-100" onClick={addClip}>
+                        + Add Clip
+                    </button>
+                </div>
+            </div>
+
+            {/* Clip List */}
+            {clips.length === 0 ? (
+                <p className="text-secondary">No clips yet.</p>
+            ) : (
+                <table className="table table-dark table-striped table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>URL</th>
+                            <th>Source</th>
+                            <th>Added</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {clips.map((c) => (
+                            <tr key={c.id}>
+                                <td>{c.title || <em className="text-secondary">untitled</em>}</td>
+                                <td>
+                                    <a href={c.url} target="_blank" rel="noreferrer" className="text-info small" style={{ wordBreak: "break-all" }}>
+                                        {c.url.length > 50 ? c.url.slice(0, 50) + "…" : c.url}
+                                    </a>
+                                </td>
+                                <td>
+                                    <span className={`badge ${c.source === "playlist" ? "bg-info" : "bg-secondary"}`}>
+                                        {c.source || "manual"}
+                                    </span>
+                                </td>
+                                <td className="small text-secondary">
+                                    {c.created_at ? new Date(c.created_at).toLocaleDateString() : ""}
+                                </td>
+                                <td>
+                                    <button
+                                        className="btn btn-sm btn-outline-danger"
+                                        onClick={() => deleteClip(c.id)}
+                                    >
+                                        🗑️
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
         </div>
     );
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -292,4 +293,302 @@ func handlePingTeamCaptains(s *discordgo.Session, m *discordgo.MessageCreate, ar
 	}
 
 	s.ChannelMessageSend(m.ChannelID, out)
+}
+
+/*
+====================================================
+SLASH COMMANDS — /team ping & /team captains
+====================================================
+*/
+
+func RegisterSlashHandlers(dg *discordgo.Session) {
+	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		switch i.Type {
+		case discordgo.InteractionApplicationCommand:
+			handleSlashCommand(s, i)
+		case discordgo.InteractionApplicationCommandAutocomplete:
+			handleAutocomplete(s, i)
+		}
+	})
+}
+
+func RegisterSlashCommands(dg *discordgo.Session) {
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	if guildID == "" {
+		log.Printf("⚠️ DISCORD_GUILD_ID not set — skipping slash command registration")
+		return
+	}
+
+	commands := []*discordgo.ApplicationCommand{
+		{
+			Name:        "team",
+			Description: "Team management commands",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Name:        "ping",
+					Description: "Ping all members of a team",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Name:         "team",
+							Description:  "Team name or ID",
+							Type:         discordgo.ApplicationCommandOptionString,
+							Required:     true,
+							Autocomplete: true,
+						},
+						{
+							Name:        "message",
+							Description: "Optional message to include",
+							Type:        discordgo.ApplicationCommandOptionString,
+							Required:    false,
+						},
+					},
+				},
+				{
+					Name:        "captains",
+					Description: "Ping the captain and co-captain of a team",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Name:         "team",
+							Description:  "Team name or ID",
+							Type:         discordgo.ApplicationCommandOptionString,
+							Required:     true,
+							Autocomplete: true,
+						},
+						{
+							Name:        "message",
+							Description: "Optional message to include",
+							Type:        discordgo.ApplicationCommandOptionString,
+							Required:    false,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	currentNames := map[string]bool{}
+	for _, c := range commands {
+		currentNames[c.Name] = true
+	}
+
+	botID := dg.State.User.ID
+
+	// ── Clean up stale GLOBAL commands (from old/different systems) ──
+	globalCmds, err := dg.ApplicationCommands(botID, "")
+	if err != nil {
+		log.Printf("⚠️ Could not fetch global commands for cleanup: %v", err)
+	} else {
+		for _, cmd := range globalCmds {
+			if err := dg.ApplicationCommandDelete(botID, "", cmd.ID); err != nil {
+				log.Printf("⚠️ Failed to delete stale global command /%s: %v", cmd.Name, err)
+			} else {
+				log.Printf("🧹 Deleted stale global command: /%s", cmd.Name)
+			}
+		}
+	}
+
+	// ── Fetch & clean up stale GUILD commands, then register current ones ──
+	existing, err := dg.ApplicationCommands(botID, guildID)
+	if err != nil {
+		log.Printf("⚠️ Could not fetch guild commands: %v", err)
+		return
+	}
+
+	existingByName := map[string]*discordgo.ApplicationCommand{}
+	for _, cmd := range existing {
+		existingByName[cmd.Name] = cmd
+	}
+
+	// Delete stale guild commands
+	for _, cmd := range existing {
+		if !currentNames[cmd.Name] {
+			if err := dg.ApplicationCommandDelete(botID, guildID, cmd.ID); err != nil {
+				log.Printf("⚠️ Failed to delete stale guild command /%s: %v", cmd.Name, err)
+			} else {
+				log.Printf("🧹 Deleted stale guild command: /%s", cmd.Name)
+			}
+		}
+	}
+
+	// Register/update current commands
+	for _, cmd := range commands {
+		if existingCmd, ok := existingByName[cmd.Name]; ok {
+			_, err := dg.ApplicationCommandEdit(botID, guildID, existingCmd.ID, cmd)
+			if err != nil {
+				log.Printf("❌ Failed to update /%s: %v", cmd.Name, err)
+			} else {
+				log.Printf("✅ Updated slash command: /%s", cmd.Name)
+			}
+		} else {
+			_, err := dg.ApplicationCommandCreate(botID, guildID, cmd)
+			if err != nil {
+				log.Printf("❌ Failed to register /%s: %v", cmd.Name, err)
+			} else {
+				log.Printf("✅ Registered slash command: /%s", cmd.Name)
+			}
+		}
+	}
+}
+
+func handleAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	data := i.ApplicationCommandData()
+	if len(data.Options) == 0 {
+		return
+	}
+
+	var focused *discordgo.ApplicationCommandInteractionDataOption
+	var findFocused func(opts []*discordgo.ApplicationCommandInteractionDataOption)
+	findFocused = func(opts []*discordgo.ApplicationCommandInteractionDataOption) {
+		for _, opt := range opts {
+			if opt.Focused {
+				focused = opt
+				return
+			}
+			if len(opt.Options) > 0 {
+				findFocused(opt.Options)
+			}
+		}
+	}
+	findFocused(data.Options)
+
+	if focused == nil || focused.Name != "team" {
+		return
+	}
+
+	query := strings.ToLower(strings.TrimSpace(focused.StringValue()))
+
+	var teams []Team
+	DB.Where("LOWER(name) LIKE ?", "%"+query+"%").Order("name ASC").Limit(25).Find(&teams)
+
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(teams))
+	for _, t := range teams {
+		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
+			Name:  t.Name,
+			Value: t.Name,
+		})
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionApplicationCommandAutocompleteResult,
+		Data: &discordgo.InteractionResponseData{
+			Choices: choices,
+		},
+	})
+}
+
+func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	data := i.ApplicationCommandData()
+
+	allowed, _ := canUsePrefixCommands(i.Member.User.ID)
+	if !allowed {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ Only registered Players can use ECGL commands. Register on the site first.",
+				Flags:   1 << 6,
+			},
+		})
+		return
+	}
+
+	if data.Name != "team" || len(data.Options) == 0 {
+		return
+	}
+
+	subCmd := data.Options[0]
+	var teamOpt, msgOpt *discordgo.ApplicationCommandInteractionDataOption
+	for _, opt := range subCmd.Options {
+		switch opt.Name {
+		case "team":
+			teamOpt = opt
+		case "message":
+			msgOpt = opt
+		}
+	}
+
+	if teamOpt == nil {
+		return
+	}
+
+	team, err := resolveTeam(teamOpt.StringValue())
+	if err != nil {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("❌ Team not found: **%s**", teamOpt.StringValue()),
+				Flags:   1 << 6,
+			},
+		})
+		return
+	}
+
+	message := ""
+	if msgOpt != nil {
+		message = msgOpt.StringValue()
+	}
+	requester := fmt.Sprintf("<@%s>", i.Member.User.ID)
+
+	switch subCmd.Name {
+	case "ping":
+		var members []TeamMember
+		DB.Where("team_id = ?", team.ID).Find(&members)
+
+		if len(members) == 0 {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: fmt.Sprintf("❌ **%s** has no members.", team.Name),
+					Flags:   1 << 6,
+				},
+			})
+			return
+		}
+
+		out := fmt.Sprintf("📣 **%s** — pinged by %s\n", team.Name, requester)
+		for _, tm := range members {
+			out += fmt.Sprintf("<@%d> ", tm.PlayerID)
+		}
+		if strings.TrimSpace(message) != "" {
+			out += "\n\n💬 " + message
+		}
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: out,
+			},
+		})
+
+	case "captains":
+		var captains []TeamMember
+		DB.Where("team_id = ? AND (role = 'Captain' OR role = 'Co-Captain')", team.ID).Find(&captains)
+
+		if len(captains) == 0 {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: fmt.Sprintf("❌ **%s** has no captains.", team.Name),
+					Flags:   1 << 6,
+				},
+			})
+			return
+		}
+
+		out := fmt.Sprintf("🚨 **%s captains** — %s\n", team.Name, requester)
+		for _, c := range captains {
+			out += fmt.Sprintf("<@%d> ", c.PlayerID)
+		}
+		if strings.TrimSpace(message) != "" {
+			out += "\n\n💬 " + message
+		}
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: out,
+			},
+		})
+	}
 }

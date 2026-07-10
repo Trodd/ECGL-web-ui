@@ -53,6 +53,7 @@ export default function MyTeam() {
   }, []);
 
   const [rosterLocked, setRosterLocked] = useState(false);
+  const [rosterModal, setRosterModal] = useState(null); // player object or null
 
   useEffect(() => {
     async function loadRosterLockStatus() {
@@ -771,29 +772,13 @@ export default function MyTeam() {
                 </div>
 
                 {myRole === "Captain" && m.role !== "Captain" && (
-                  <div className="d-flex gap-2 align-items-center">
-                    <select
-                      className="form-select form-select-sm bg-dark text-light"
-                      style={{ width: 160 }}
-                      defaultValue=""
-                      onChange={async (e) => {
-                        if (!e.target.value) return;
-                        await handlePromote(m.id, e.target.value);
-                        e.target.value = "";
-                      }}
-                    >
-                      <option value="" disabled>
-                        Promote…
-                      </option>
-                      <option value="Captain">Captain</option>
-                      <option value="Co-Captain">Co-Captain</option>
-                      <option value="Member">Member</option>
-                    </select>
-
-                    <button className="btn btn-danger btn-sm" onClick={() => handleKick(m.id)}>
-                      Kick
-                    </button>
-                  </div>
+                  <button
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={() => setRosterModal(m)}
+                    title="Manage player"
+                  >
+                    <E n="gear" /> Manage
+                  </button>
                 )}
               </li>
             ))
@@ -804,6 +789,85 @@ export default function MyTeam() {
           )}
         </ul>
       </div>
+
+      {/* ================= ROSTER MANAGE MODAL ================= */}
+      {rosterModal && (
+        <div className="modal d-block" tabIndex="-1" style={{ background: "rgba(0,0,0,0.6)" }} onClick={(e) => { if (e.target === e.currentTarget) setRosterModal(null); }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content bg-dark text-light border-secondary">
+              <div className="modal-header border-secondary">
+                <h5 className="modal-title">Manage Player</h5>
+                <button className="btn-close btn-close-white" onClick={() => setRosterModal(null)} />
+              </div>
+              <div className="modal-body">
+                <div className="d-flex align-items-center gap-3 mb-3">
+                  <PlayerIdentity player={rosterModal} size={40} />
+                  <div>
+                    <div className="fw-bold">{rosterModal.display_name || rosterModal.username}</div>
+                    <span className="badge bg-secondary">{rosterModal.role || "Member"}</span>
+                    {rosterModal.on_cooldown && (
+                      <span className="badge bg-warning text-dark ms-1"><E n="timer" /> Cooldown</span>
+                    )}
+                  </div>
+                </div>
+
+                <hr className="border-secondary" />
+
+                <div className="d-flex flex-column gap-2">
+                  <button
+                    className="btn btn-outline-warning btn-sm text-start"
+                    onClick={() => {
+                      if (!confirm(`Promote ${rosterModal.display_name || rosterModal.username} to Captain? You will become Co-Captain.`)) return;
+                      handlePromote(rosterModal.id, "Captain");
+                      setRosterModal(null);
+                    }}
+                  >
+                    <E n="crown" /> Promote to Captain
+                  </button>
+                  {rosterModal.role !== "Co-Captain" && (
+                    <button
+                      className="btn btn-outline-info btn-sm text-start"
+                      onClick={async () => {
+                        await handlePromote(rosterModal.id, "Co-Captain");
+                        setRosterModal(null);
+                      }}
+                    >
+                      <E n="upgrade" /> Promote to Co-Captain
+                    </button>
+                  )}
+                  {rosterModal.role !== "Member" && (
+                    <button
+                      className="btn btn-outline-secondary btn-sm text-start"
+                      onClick={async () => {
+                        await handlePromote(rosterModal.id, "Member");
+                        setRosterModal(null);
+                      }}
+                    >
+                      <E n="downgrade" /> Demote to Member
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-outline-danger btn-sm text-start"
+                    onClick={() => {
+                      if (confirm(`Kick ${rosterModal.display_name || rosterModal.username} from the team?`)) {
+                        handleKick(rosterModal.id);
+                        setRosterModal(null);
+                      }
+                    }}
+                  >
+                    <E n="door" /> Kick from Team
+                  </button>
+                </div>
+              </div>
+              <div className="modal-footer border-secondary">
+                <button className="btn btn-secondary btn-sm" onClick={() => setRosterModal(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ================= JOIN & CHALLENGE REQUESTS ================= */}
       {(myRole === "Captain" || myRole === "Co-Captain") && (

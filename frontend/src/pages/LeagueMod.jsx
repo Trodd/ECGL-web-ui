@@ -666,29 +666,6 @@ export default function LeagueMod() {
         await safePost("/api/mod/player/unban", { player_id: playerID }, `Unbanned player ${playerID}`);
     };
 
-    const handleArchiveSeason = async () => {
-        const reset = confirm("Archive current season and reset everything?");
-        await safePost("/api/mod/season/archive", { reset_after: reset }, "Archived season data");
-    };
-
-    const handleResetLeaderboard = async () => {
-        await safePost("/api/mod/leaderboard/reset", {}, "Reset leaderboards");
-    };
-
-    const resetPlayerLeaderboard = async () => {
-        try {
-            const res = await axios.post(
-                `${urlBase}/api/mod/reset_player_leaderboard`,
-                {},
-                { withCredentials: true }
-            );
-            alert(res.data.message || "Player leaderboard reset!");
-        } catch (err) {
-            console.error("Reset player leaderboard failed:", err);
-            alert("Failed to reset player leaderboard");
-        }
-    };
-
     // ===========================================================
     // RENDER
     // ===========================================================
@@ -722,10 +699,8 @@ export default function LeagueMod() {
                                 { key: "scoreTools", label: "☆ Scores" },
                                 { key: "teamTools", label: "☰ Teams" },
                                 { key: "playerTools", label: "⊘ Players" },
-                                { key: "dataTools", label: "≡ Data" },
                                 { key: "finalsManagement", label: "★ Finals" },
                                 { key: "teamHistory", label: "↻ Rename Logs" },
-                                { key: "clips", label: "▶ Clips" },
                                 { key: "console", label: "⚙ Actions" },
                             ].map((t) => (
                                 <li className="nav-item" key={t.key}>
@@ -2295,90 +2270,6 @@ export default function LeagueMod() {
                             </div>
                         )}
 
-                        {modTab === "dataTools" && (
-                            <div className="d-flex flex-wrap gap-2">
-
-                                <button
-                                    className="btn btn-outline-secondary btn-sm"
-                                    onClick={handleArchiveSeason}
-                                >
-                                    Archive Season
-                                </button>
-                                <button
-                                    className="btn btn-outline-info btn-sm"
-                                    onClick={async () => {
-                                        try {
-                                            const seasonRes = await axios.get(`${urlBase}/api/season`, { withCredentials: true });
-                                            let season = seasonRes.data?.season ?? "Preseason";
-
-                                            await safePost(
-                                                "/api/mod/player/archive-all",
-                                                { season },
-                                                `Archived all player stats for Season ${season}`
-                                            );
-                                        } catch (err) {
-                                            console.error("Archive failed:", err);
-                                            alert("❌ Failed to archive all player stats");
-                                        }
-                                    }}
-                                >
-                                    📦 Archive Player Stats (All Players)
-                                </button>
-                                <button
-                                    className="btn btn-outline-primary btn-sm"
-                                    onClick={async () => {
-                                        try {
-                                            const res = await fetch(`${urlBase}/api/tools/archive-team-stats`, {
-                                                method: "POST",
-                                                credentials: "include",
-                                            });
-
-                                            const data = await res.json();
-                                            alert(`Archived ${data.archived} teams successfully`);
-                                        } catch (err) {
-                                            alert("Failed to archive team stats");
-                                        }
-                                    }}
-                                >
-                                    📦 Archive Team Stats
-                                </button>
-
-                                <button
-                                    className="btn btn-outline-warning btn-sm"
-                                    onClick={handleResetLeaderboard}
-                                >
-                                    Reset Team Leaderboard
-                                </button>
-                                <button
-                                    className="btn btn-outline-warning"
-                                    onClick={resetPlayerLeaderboard}
-                                >
-                                    Reset Player Leaderboard
-                                </button>
-
-                                {/* 🔄  Sync Discord Roles */}
-                                <button
-                                    className="btn btn-outline-primary btn-sm"
-                                    onClick={async () => {
-                                        if (!confirm("Sync all player Discord roles?")) return;
-                                        try {
-                                            await axios.post(
-                                                `${urlBase}/api/mod/sync-roles`,
-                                                {},
-                                                { withCredentials: true }
-                                            );
-                                            alert("✅ Discord roles synced successfully!");
-                                        } catch (err) {
-                                            console.error("Sync roles failed:", err);
-                                            alert("❌ Failed to sync Discord roles");
-                                        }
-                                    }}
-                                >
-                                    🔄 Sync Roles
-                                </button>
-
-                            </div>
-                        )}
                         {modTab === "finalsManagement" && (
                             <div className="text-light">
 
@@ -2527,7 +2418,6 @@ export default function LeagueMod() {
                             </div>
                         )}
                         {modTab === "teamHistory" && <TeamRenameHistory urlBase={urlBase} />}
-                        {modTab === "clips" && <ClipsManager urlBase={urlBase} setMsg={setMsg} />}
                         {modTab === "console" && <ModAuditLogPanel urlBase={urlBase} />}
                     </div>
                 </div>
@@ -2761,199 +2651,6 @@ function ModAuditLogPanel({ urlBase }) {
                         </tbody>
                     </table>
                 </div>
-            )}
-        </div>
-    );
-}
-
-function ClipsManager({ urlBase, setMsg }) {
-    const [clips, setClips] = useState([]);
-    const [newTitle, setNewTitle] = useState("");
-    const [newUrl, setNewUrl] = useState("");
-    const [playlistUrl, setPlaylistUrl] = useState("");
-    const [syncing, setSyncing] = useState(false);
-
-    function loadClips() {
-        axios
-            .get(`${urlBase}/api/clips`, { withCredentials: true })
-            .then((res) => setClips(Array.isArray(res.data) ? res.data : []))
-            .catch(() => setClips([]));
-    }
-
-    useEffect(() => { loadClips(); }, []);
-
-    async function addClip() {
-        if (!newUrl.trim()) {
-            setMsg("⚠️ URL is required");
-            return;
-        }
-        try {
-            await axios.post(
-                `${urlBase}/api/mod/clips`,
-                { title: newTitle.trim(), url: newUrl.trim() },
-                { withCredentials: true }
-            );
-            setMsg("✅ Clip added");
-            setNewTitle("");
-            setNewUrl("");
-            loadClips();
-        } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to add clip"));
-        }
-    }
-
-    async function deleteClip(id) {
-        try {
-            await axios.post(
-                `${urlBase}/api/mod/clips/delete`,
-                { id },
-                { withCredentials: true }
-            );
-            setMsg("✅ Clip removed");
-            loadClips();
-        } catch (err) {
-            setMsg("❌ Failed to delete clip");
-        }
-    }
-
-    function extractPlaylistId(input) {
-        if (!input) return "";
-        // Handle full URLs like https://www.youtube.com/playlist?list=PLxxxxxx
-        try {
-            const u = new URL(input);
-            const listParam = u.searchParams.get("list");
-            if (listParam) return listParam;
-        } catch { /* not a URL */ }
-        // Might already be a raw playlist ID
-        return input.trim();
-    }
-
-    async function syncPlaylist() {
-        const plId = extractPlaylistId(playlistUrl);
-        if (!plId) {
-            setMsg("⚠️ Enter a YouTube playlist URL or ID");
-            return;
-        }
-        setSyncing(true);
-        try {
-            const res = await axios.post(
-                `${urlBase}/api/mod/clips/sync-playlist`,
-                { playlist_id: plId },
-                { withCredentials: true }
-            );
-            const d = res.data;
-            setMsg(`✅ Playlist synced — ${d.added} new clips added (${d.already_existed} already existed, ${d.total_in_playlist} total in playlist)`);
-            loadClips();
-        } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to sync playlist"));
-        } finally {
-            setSyncing(false);
-        }
-    }
-
-    return (
-        <div className="p-3">
-            <h5>🎬 Manage Highlight Clips</h5>
-            <p className="text-secondary small">
-                Add YouTube or Twitch clip URLs to showcase on the home page, or sync from a YouTube playlist.
-            </p>
-
-            {/* Playlist Sync */}
-            <div className="card bg-secondary bg-opacity-10 border-secondary mb-4 p-3">
-                <h6 className="mb-2">📋 Auto-Sync from YouTube Playlist</h6>
-                <p className="text-secondary small mb-2">
-                    Paste a YouTube playlist URL to automatically import all videos as clips. No API key needed — works with any public playlist.
-                </p>
-                <div className="row g-2">
-                    <div className="col-md-8">
-                        <input
-                            className="form-control form-control-sm bg-dark text-light border-secondary"
-                            placeholder="https://www.youtube.com/playlist?list=PLxxxxxxx or playlist ID"
-                            value={playlistUrl}
-                            onChange={(e) => setPlaylistUrl(e.target.value)}
-                        />
-                    </div>
-                    <div className="col-md-4">
-                        <button
-                            className="btn btn-sm btn-primary w-100"
-                            onClick={syncPlaylist}
-                            disabled={syncing}
-                        >
-                            {syncing ? "⏳ Syncing..." : "🔄 Sync Playlist"}
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Manual Add */}
-            <h6>➕ Add Individual Clip</h6>
-            <div className="row g-2 mb-3">
-                <div className="col-md-4">
-                    <input
-                        className="form-control form-control-sm bg-dark text-light border-secondary"
-                        placeholder="Title (optional)"
-                        value={newTitle}
-                        onChange={(e) => setNewTitle(e.target.value)}
-                    />
-                </div>
-                <div className="col-md-5">
-                    <input
-                        className="form-control form-control-sm bg-dark text-light border-secondary"
-                        placeholder="YouTube / Twitch clip URL"
-                        value={newUrl}
-                        onChange={(e) => setNewUrl(e.target.value)}
-                    />
-                </div>
-                <div className="col-md-3">
-                    <button className="btn btn-sm btn-success w-100" onClick={addClip}>
-                        + Add Clip
-                    </button>
-                </div>
-            </div>
-
-            {/* Clip List */}
-            {clips.length === 0 ? (
-                <p className="text-secondary">No clips yet.</p>
-            ) : (
-                <table className="table table-dark table-striped table-sm align-middle">
-                    <thead>
-                        <tr>
-                            <th>Title</th>
-                            <th>URL</th>
-                            <th>Source</th>
-                            <th>Added</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {clips.map((c) => (
-                            <tr key={c.id}>
-                                <td>{c.title || <em className="text-secondary">untitled</em>}</td>
-                                <td>
-                                    <a href={c.url} target="_blank" rel="noreferrer" className="text-info small" style={{ wordBreak: "break-all" }}>
-                                        {c.url.length > 50 ? c.url.slice(0, 50) + "…" : c.url}
-                                    </a>
-                                </td>
-                                <td>
-                                    <span className={`badge ${c.source === "playlist" ? "bg-info" : "bg-secondary"}`}>
-                                        {c.source || "manual"}
-                                    </span>
-                                </td>
-                                <td className="small text-secondary">
-                                    {c.created_at ? new Date(c.created_at).toLocaleDateString() : ""}
-                                </td>
-                                <td>
-                                    <button
-                                        className="btn btn-sm btn-outline-danger"
-                                        onClick={() => deleteClip(c.id)}
-                                    >
-                                        🗑️
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
             )}
         </div>
     );

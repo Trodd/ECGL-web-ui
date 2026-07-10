@@ -122,3 +122,22 @@ func HandleModAuditLogs(w http.ResponseWriter, r *http.Request) {
 		"limit":   limit,
 	})
 }
+
+// DELETE /api/mod/audit-logs — clears all mod audit log entries
+func HandleClearModAuditLogs(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	if err := DB.Exec("DELETE FROM mod_audit_logs").Error; err != nil {
+		log.Printf("⚠️ Failed to clear audit logs: %v", err)
+		http.Error(w, "Failed to clear audit logs", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("🧹 Mod audit logs cleared")
+	respondJSON(w, map[string]any{
+		"success": true,
+		"message": "Audit logs cleared",
+	})
+}
