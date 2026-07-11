@@ -733,6 +733,9 @@ func main() {
 	// 🔹 REGISTER SLASH COMMANDS (requires active connection)
 	RegisterSlashCommands(dg)
 
+	// 🔹 START MATCH CHANNEL SCHEDULER
+	StartMatchChannelScheduler(dg)
+
 	// 🔄 One-time sync: backfill avatars for all players from Discord
 	go syncPlayerAvatars(dg)
 

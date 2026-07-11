@@ -231,7 +231,7 @@ func DiscordRemoveRole(discordID, roleID string) error {
 
 func StartMatchChannelScheduler(session *discordgo.Session) {
 	go func() {
-		ticker := time.NewTicker(2 * time.Minute)
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 
 		for {
@@ -245,13 +245,13 @@ func processMatchChannels(s *discordgo.Session) {
 	now := time.Now().UTC()
 
 	var matches []Match
-	DB.Where("match_time IS NOT NULL").
+	DB.Where("scheduled_date IS NOT NULL").
 		Where("status = ?", "Scheduled").
 		Find(&matches)
 
 	for _, m := range matches {
 		if m.ScheduledDate == nil {
-			return
+			continue
 		}
 
 		matchTime := m.ScheduledDate.UTC()
@@ -301,6 +301,18 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 			Type: discordgo.PermissionOverwriteTypeRole,
 			Deny: discordgo.PermissionViewChannel,
 		},
+	}
+
+	// ✅ ALLOW LEAGUE MODS
+	modRoleID := os.Getenv("DISCORD_LEAGUE_MOD_ROLE_ID")
+	if modRoleID != "" {
+		overwrites = append(overwrites, &discordgo.PermissionOverwrite{
+			ID:   modRoleID,
+			Type: discordgo.PermissionOverwriteTypeRole,
+			Allow: discordgo.PermissionViewChannel |
+				discordgo.PermissionSendMessages |
+				discordgo.PermissionReadMessageHistory,
+		})
 	}
 
 	// ✅ ALLOW BOT (REQUIRED)
