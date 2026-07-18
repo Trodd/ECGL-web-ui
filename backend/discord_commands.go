@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -366,6 +367,25 @@ func RegisterSlashCommands(dg *discordgo.Session) {
 				},
 			},
 		},
+		{
+			Name:        "addsub",
+			Description: "Add a League Sub to the current match channel",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Name:        "player",
+					Description: "The League Sub to add to this channel",
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Required:    true,
+				},
+				{
+					Name:         "team",
+					Description:  "Which team the sub is playing for",
+					Type:         discordgo.ApplicationCommandOptionString,
+					Required:     true,
+					Autocomplete: true,
+				},
+			},
+		},
 	}
 
 	currentNames := map[string]bool{}
@@ -457,6 +477,32 @@ func handleAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
+	// ── /addsub team autocomplete: show the two teams in this match channel ──
+	if data.Name == "addsub" {
+		var match Match
+		if err := DB.Where("discord_channel_id = ?", i.ChannelID).First(&match).Error; err != nil {
+			return // not a match channel — no choices
+		}
+
+		var teamA, teamB Team
+		DB.First(&teamA, match.TeamAID)
+		DB.First(&teamB, match.TeamBID)
+
+		choices := []*discordgo.ApplicationCommandOptionChoice{
+			{Name: teamA.Name, Value: teamA.Name},
+			{Name: teamB.Name, Value: teamB.Name},
+		}
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionApplicationCommandAutocompleteResult,
+			Data: &discordgo.InteractionResponseData{
+				Choices: choices,
+			},
+		})
+		return
+	}
+
+	// ── /team autocomplete: search all teams ──
 	query := strings.ToLower(strings.TrimSpace(focused.StringValue()))
 
 	var teams []Team
@@ -481,6 +527,15 @@ func handleAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate) {
 func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	data := i.ApplicationCommandData()
 
+	switch data.Name {
+	case "team":
+		handleTeamSlashCommand(s, i, data)
+	case "addsub":
+		handleAddSubSlashCommand(s, i, data)
+	}
+}
+
+func handleTeamSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, data discordgo.ApplicationCommandInteractionData) {
 	allowed, _ := canUsePrefixCommands(i.Member.User.ID)
 	if !allowed {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -493,7 +548,7 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	if data.Name != "team" || len(data.Options) == 0 {
+	if len(data.Options) == 0 {
 		return
 	}
 
@@ -591,4 +646,165 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		})
 	}
+}
+
+func handleAddSubSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, data discordgo.ApplicationCommandInteractionData) {
+	// ── Must be used in a match channel ──
+	channelID := i.ChannelID
+	var match Match
+	if err := DB.Where("discord_channel_id = ?", channelID).First(&match).Error; err != nil {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ This command can only be used in a match channel.",
+				Flags:   1 << 6,
+			},
+		})
+		return
+	}
+
+	// ── Extract options ──
+	var targetUser *discordgo.User
+	var teamChoice string
+	for _, opt := range data.Options {
+		switch opt.Name {
+		case "player":
+			targetUser = opt.UserValue(s)
+		case "team":
+			teamChoice = opt.StringValue()
+		}
+	}
+
+	if targetUser == nil || teamChoice == "" {
+		return
+	}
+
+	// ── Load teams for the match ──
+	var teamA, teamB Team
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+
+	// Resolve the team name (from autocomplete) back to "a" or "b"
+	var teamSide string
+	teamName := teamChoice
+	if strings.EqualFold(teamChoice, teamA.Name) || teamChoice == strconv.FormatUint(uint64(teamA.ID), 10) {
+		teamSide = "a"
+		teamName = teamA.Name
+	} else if strings.EqualFold(teamChoice, teamB.Name) || teamChoice == strconv.FormatUint(uint64(teamB.ID), 10) {
+		teamSide = "b"
+		teamName = teamB.Name
+	} else {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("❌ **%s** is not one of the teams in this match.", teamChoice),
+				Flags:   1 << 6,
+			},
+		})
+		return
+	}
+
+	// ── Authorization: League Mod OR captain/co-captain of the chosen team ──
+	callerID := i.Member.User.ID
+	isMod := isInteractionMod(i)
+
+	if !isMod {
+		// Check if caller is captain/co-captain of the chosen team
+		chosenTeamID := match.TeamAID
+		if teamSide == "b" {
+			chosenTeamID = match.TeamBID
+		}
+
+		discordID, err := strconv.ParseInt(callerID, 10, 64)
+		if err != nil {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "❌ Could not verify your identity.",
+					Flags:   1 << 6,
+				},
+			})
+			return
+		}
+
+		var tm TeamMember
+		if err := DB.Where("player_id = ? AND team_id = ? AND role IN ?",
+			discordID, chosenTeamID, []string{"Captain", "Co-Captain"}).First(&tm).Error; err != nil {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: fmt.Sprintf("❌ You must be a Captain or Co-Captain of **%s** to add a sub for them.", teamName),
+					Flags:   1 << 6,
+				},
+			})
+			return
+		}
+	}
+
+	// ── Verify the target has the League Sub Discord role ──
+	subRoleID := os.Getenv("DISCORD_LEAGUE_SUB_ROLE_ID")
+	if subRoleID == "" {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ DISCORD_LEAGUE_SUB_ROLE_ID is not configured.",
+				Flags:   1 << 6,
+			},
+		})
+		return
+	}
+
+	member, err := s.GuildMember(os.Getenv("DISCORD_GUILD_ID"), targetUser.ID)
+	if err != nil {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("❌ Could not fetch Discord member info for <@%s>.", targetUser.ID),
+				Flags:   1 << 6,
+			},
+		})
+		return
+	}
+
+	hasSubRole := false
+	for _, roleID := range member.Roles {
+		if roleID == subRoleID {
+			hasSubRole = true
+			break
+		}
+	}
+
+	if !hasSubRole {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("❌ <@%s> does not have the League Sub role. Only League Subs can be added with this command.", targetUser.ID),
+				Flags:   1 << 6,
+			},
+		})
+		return
+	}
+
+	// ── Add the sub to text channel + only the chosen team's voice channel ──
+	if err := addSubToMatchChannels(s, &match, targetUser.ID, teamSide); err != nil {
+		log.Printf("❌ Failed to add sub %s to match %d channels: %v", targetUser.ID, match.ID, err)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("❌ Failed to add <@%s> to some channels. Check logs for details.", targetUser.ID),
+				Flags:   1 << 6,
+			},
+		})
+		return
+	}
+
+	// ── Success ──
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: fmt.Sprintf("✅ <@%s> has been added to this match channel and the **%s** voice channel.", targetUser.ID, teamName),
+		},
+	})
+
+	log.Printf("✅ League Sub %s added to match %d (team %s) by %s", targetUser.ID, match.ID, teamSide, i.Member.User.Username)
 }

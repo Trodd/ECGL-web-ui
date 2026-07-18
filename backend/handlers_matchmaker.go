@@ -90,7 +90,7 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		if err := DB.
 			Where("season = ?", currentSeason).
 			Where("CAST(week AS INTEGER) = ?", previousWeek).
-			Where("status NOT IN ?", []string{"Completed", "Forfeit", "Cancelled"}).
+			Where("status NOT IN ?", []string{"Completed", "Finished", "Forfeit", "Forfeited", "Cancelled"}).
 			Find(&oldMatches).Error; err != nil {
 			log.Printf("⚠️ Could not load previous week matches: %v", err)
 		}

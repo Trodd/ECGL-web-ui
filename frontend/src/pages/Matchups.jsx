@@ -229,11 +229,13 @@ export default function Matchups() {
                                                             Match ID: <b>{m.match_code}</b>
                                                         </span>
                                                         <span
-                                                            className={`badge ${m.status === "Completed"
+                                                            className={`badge ${m.status === "Completed" || m.status === "Finished"
                                                                 ? "bg-success"
-                                                                : m.status === "Scheduled"
-                                                                    ? "bg-warning text-dark"
-                                                                    : "bg-secondary"
+                                                                : m.status === "Forfeit" || m.status === "Forfeited"
+                                                                    ? "bg-danger"
+                                                                    : m.status === "Scheduled"
+                                                                        ? "bg-warning text-dark"
+                                                                        : "bg-secondary"
                                                                 }`}
                                                         >
                                                             {m.status}

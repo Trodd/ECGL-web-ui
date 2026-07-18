@@ -958,7 +958,7 @@ export default function MyTeam() {
           const activeMatches = (matches ?? []).filter((m) => {
             if (!m) return false;
             const status = String(m.status ?? "").trim().toLowerCase();
-            return status === "scheduled" || status === "pending schedule confirmation";
+            return status === "scheduled" || status === "pending schedule confirmation" || status === "pending confirmation";
           });
 
           if (activeMatches.length === 0) {

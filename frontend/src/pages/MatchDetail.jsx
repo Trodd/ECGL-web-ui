@@ -138,9 +138,11 @@ export default function MatchDetail() {
     const statusColor =
         match.status === "Finished" || match.status === "Completed"
             ? "text-success"
-            : match.status === "Scheduled"
-                ? "text-warning"
-                : "text-light";
+            : match.status === "Forfeit" || match.status === "Forfeited"
+                ? "text-danger"
+                : match.status === "Scheduled"
+                    ? "text-warning"
+                    : "text-light";
 
     function convertToEmbed(url) {
         if (!url) return "";
@@ -343,6 +345,54 @@ export default function MatchDetail() {
                 const validMaps = maps.filter(
                     m => !(m.team_a_score === 0 && m.team_b_score === 0)
                 );
+
+                const isForfeit = match.status === "Forfeit" || match.status === "Forfeited";
+
+                // Forfeit without map scores — show forfeit result card
+                if (!validMaps.length && isForfeit) {
+                    const forfeitWinner = match.winner_id
+                        ? (match.winner_id === teamA.id ? teamA.name : teamB.name)
+                        : null;
+                    const forfeitLoser = match.loser_id
+                        ? (match.loser_id === teamA.id ? teamA.name : teamB.name)
+                        : null;
+                    const isDoubleForfeit = !match.winner_id && !match.loser_id;
+                    const forfeitTime = match.updated_at
+                        ? new Date(match.updated_at).toLocaleString()
+                        : null;
+
+                    return (
+                        <div className="card bg-dark border-danger shadow-sm mb-3">
+                            <div className="card-body text-center">
+                                <h5 className="text-danger mb-2">
+                                    <E n="warning" className="emoji-warning" />{" "}
+                                    {isDoubleForfeit ? "Double Forfeit" : "Match Forfeited"}
+                                </h5>
+                                {isDoubleForfeit ? (
+                                    <p className="text-secondary mb-1">
+                                        Both teams forfeited — no winner.
+                                    </p>
+                                ) : (
+                                    <>
+                                        <p className="mb-1">
+                                            <span className="text-success fw-bold">
+                                                <E n="trophy" className="emoji-gold" /> Winner: {forfeitWinner}
+                                            </span>
+                                        </p>
+                                        <p className="text-secondary mb-1">
+                                            Loser: {forfeitLoser}
+                                        </p>
+                                    </>
+                                )}
+                                {forfeitTime && (
+                                    <p className="text-secondary small mb-0">
+                                        Forfeit recorded: {forfeitTime}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    );
+                }
 
                 if (!validMaps.length) {
                     return <p className="text-secondary">No map scores recorded.</p>;

@@ -816,9 +816,20 @@ a:hover {
   color: var(--text-secondary);
 }
 
+.status-pill.Scheduled {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--warning);
+}
+
 .status-pill.Completed {
   background: rgba(46, 160, 67, 0.15);
   color: var(--success);
+}
+
+.status-pill.Forfeit,
+.status-pill.Forfeited {
+  background: rgba(218, 54, 51, 0.15);
+  color: var(--danger);
 }
 
 /* ─── Team Detail / Roster ─── */

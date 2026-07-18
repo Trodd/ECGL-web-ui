@@ -955,7 +955,8 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 		finished := m.Status == "Finished" ||
 			m.Status == "Completed" ||
 			m.Status == "Cancelled" ||
-			m.Status == "Forfeit"
+			m.Status == "Forfeit" ||
+			m.Status == "Forfeited"
 
 		if seasonMatches && !finished {
 			active = append(active, m)
@@ -2860,7 +2861,7 @@ func isRosterFrozen(match Match) bool {
 	status := strings.TrimSpace(strings.ToLower(match.Status))
 
 	switch status {
-	case "completed", "finished", "forfeit", "double forfeit":
+	case "completed", "finished", "forfeit", "forfeited", "double forfeit":
 		return true
 	default:
 		return false
@@ -3753,7 +3754,7 @@ func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
 	// Assign winner/loser + finalize match
 	m.WinnerID = &req.WinnerTeamID
 	m.LoserID = &loser
-	m.Status = "Completed"
+	m.Status = "Forfeit"
 
 	// Clear map scores
 	DB.Where("match_id = ?", m.ID).Delete(&MatchScore{})
@@ -3767,6 +3768,12 @@ func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
 	snapshotTeamRoster(m.TeamAID, currentSeason)
 	snapshotTeamRoster(m.TeamBID, currentSeason)
 
+	// Freeze match rosters so the detail page shows the rosters at forfeit time
+	FreezeMatchRoster(m.ID)
+
+	// Update leaderboards — winner gains ELO + win, loser gets loss
+	updateLeaderboards(req.WinnerTeamID, loser, m.MatchCode)
+
 	// Fetch team names
 	var teamA, teamB Team
 	DB.First(&teamA, m.TeamAID)
@@ -3778,14 +3785,37 @@ func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
 		winnerTeam, loserTeam = teamB, teamA
 	}
 
-	// ⭐ MOD LOG → score log channel
-	LogScore(fmt.Sprintf(
-		"🏳️ **Match Forfeited by Mod:** %s\nWinner: **%s**\nLoser: **%s**\nForced by <@%s>",
+	// ⭐ MOD LOG → score log channel with embed matching finalized format
+	content := fmt.Sprintf(
+		"🏳️ **Match Forfeited: %s vs %s**\n%s",
+		winnerTeam.Name, loserTeam.Name,
+		getAllTeamPings(winnerTeam.ID)+"\n"+getAllTeamPings(loserTeam.ID),
+	)
+
+	subAName := "None"
+	subBName := "None"
+	if m.LeagueSubA != nil {
+		var p Player
+		DB.First(&p, *m.LeagueSubA)
+		subAName = p.DisplayName
+	}
+	if m.LeagueSubB != nil {
+		var p Player
+		DB.First(&p, *m.LeagueSubB)
+		subBName = p.DisplayName
+	}
+
+	desc := fmt.Sprintf(
+		"**%s vs %s**\n\n📘 **Match ID**\n%s\n\n🧍 **League Subs**\n• %s Sub: **%s**\n• %s Sub: **%s**\n\n🏳️ **Forfeit Winner**\n%s\n\n🛡️ **Forced by**\n<@%s>",
+		winnerTeam.Name, loserTeam.Name,
 		m.MatchCode,
+		winnerTeam.Name, subAName,
+		loserTeam.Name, subBName,
 		winnerTeam.Name,
-		loserTeam.Name,
 		actorDiscordID,
-	))
+	)
+
+	SendScoreEmbedWithPings(content, "🏳️ Match Forfeited", desc, 0xE74C3C)
 
 	respondJSON(w, map[string]any{
 		"success":    true,
@@ -3800,7 +3830,8 @@ func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
 // POST /api/mod/match/double-forfeit
 // body: { "match_id": <id> }
 func ModMatchDoubleForfeit(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireLeagueMod(w, r); !ok {
+	actorDiscordID, ok := requireLeagueMod(w, r)
+	if !ok {
 		return
 	}
 	var req struct {
@@ -3822,7 +3853,7 @@ func ModMatchDoubleForfeit(w http.ResponseWriter, r *http.Request) {
 
 	m.WinnerID = nil
 	m.LoserID = nil
-	m.Status = "Completed" // double forfeit = still finalized
+	m.Status = "Forfeit" // double forfeit = both teams forfeited
 
 	if err := DB.Save(&m).Error; err != nil {
 		modJSONErr(w, http.StatusInternalServerError, "failed to set double forfeit")
@@ -3832,6 +3863,26 @@ func ModMatchDoubleForfeit(w http.ResponseWriter, r *http.Request) {
 	// 🧩 Snapshot both rosters for historical record
 	snapshotTeamRoster(m.TeamAID, currentSeason)
 	snapshotTeamRoster(m.TeamBID, currentSeason)
+
+	// Fetch team names for Discord embed
+	var teamA, teamB Team
+	DB.First(&teamA, m.TeamAID)
+	DB.First(&teamB, m.TeamBID)
+
+	content := fmt.Sprintf(
+		"🏳️‍⚖️ **Double Forfeit: %s vs %s**\n%s",
+		teamA.Name, teamB.Name,
+		getAllTeamPings(teamA.ID)+"\n"+getAllTeamPings(teamB.ID),
+	)
+
+	desc := fmt.Sprintf(
+		"**%s vs %s**\n\n📘 **Match ID**\n%s\n\n🏳️‍⚖️ **Result**\nBoth teams forfeited — no winner.\n\n🛡️ **Forced by**\n<@%s>",
+		teamA.Name, teamB.Name,
+		m.MatchCode,
+		actorDiscordID,
+	)
+
+	SendScoreEmbedWithPings(content, "🏳️‍⚖️ Double Forfeit", desc, 0xE67E22)
 
 	log.Printf("🏳️‍⚖️ Mod applied double forfeit on match #%d between teams %d and %d", m.ID, m.TeamAID, m.TeamBID)
 
@@ -4710,7 +4761,7 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func SendScoreEmbedWithPings(content, title, description string) {
+func SendScoreEmbedWithPings(content, title, description string, color int) {
 	botToken := getEnv("DISCORD_BOT_TOKEN", "")
 	channelID := getEnv("DISCORD_LOG_CHANNEL_SCORES", "") // ⬅ CORRECT CHANNEL
 
@@ -4725,7 +4776,7 @@ func SendScoreEmbedWithPings(content, title, description string) {
 			map[string]any{
 				"title":       title,
 				"description": description,
-				"color":       0x2ECC71, // green highlight
+				"color":       color,
 			},
 		},
 	}
@@ -4761,39 +4812,6 @@ func getAllTeamPings(teamID uint) string {
 		pings += fmt.Sprintf("<@%d> ", m.PlayerID)
 	}
 	return pings
-}
-
-func applyPlayerStats(teamID uint, won bool) {
-	var members []TeamMember
-	if err := DB.Where("team_id = ?", teamID).Find(&members).Error; err != nil {
-		log.Printf("⚠️ Failed loading members for team %d: %v", teamID, err)
-		return
-	}
-
-	winPts := getEnvInt("ELO_WIN_POINTS", 25)
-	lossPts := getEnvInt("ELO_LOSS_POINTS", -25)
-
-	for _, m := range members {
-		var p Player
-		if err := DB.First(&p, m.PlayerID).Error; err != nil {
-			log.Printf("⚠️ Player %d missing: %v", m.PlayerID, err)
-			continue
-		}
-
-		p.Matches++
-
-		if won {
-			p.Wins++
-			p.Rating += winPts
-		} else {
-			p.Losses++
-			p.Rating += lossPts
-		}
-
-		p.Rating = clampRating(p.Rating)
-
-		DB.Save(&p)
-	}
 }
 
 // --- POST /api/match/confirm-score ---
@@ -4981,8 +4999,6 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 
 	if !isFinals && match.WinnerID != nil {
 		updateLeaderboards(*match.WinnerID, *match.LoserID, match.MatchCode)
-		applyPlayerStats(*match.WinnerID, true)
-		applyPlayerStats(*match.LoserID, false)
 	}
 
 	// Sub stats only if NOT finals
@@ -5089,7 +5105,7 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		winnerName,
 	)
 
-	SendScoreEmbedWithPings(content, "🏆 Final Match Result", desc)
+	SendScoreEmbedWithPings(content, "🏆 Final Match Result", desc, 0x2ECC71)
 
 	respondJSON(w, map[string]any{
 		"success": true,

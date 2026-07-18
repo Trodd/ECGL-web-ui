@@ -264,6 +264,15 @@ func processMatchChannels(s *discordgo.Session) {
 			createMatchChannel(s, &m)
 		}
 
+		// 🟢 CREATE MISSING VOICE CHANNELS (for channels created before voice support)
+		if m.DiscordChannelID != nil &&
+			(m.DiscordVoiceChannelAID == nil || m.DiscordVoiceChannelBID == nil) &&
+			now.After(matchTime.Add(-1*time.Hour)) &&
+			now.Before(matchTime.Add(2*time.Hour)) {
+
+			createMissingVoiceChannels(s, &m)
+		}
+
 		// 🔴 DELETE CHANNEL
 		if m.DiscordChannelID != nil &&
 			m.ChannelCreatedAt != nil &&
@@ -271,6 +280,121 @@ func processMatchChannels(s *discordgo.Session) {
 
 			deleteMatchChannel(s, &m)
 		}
+	}
+}
+
+// buildVoiceOverwrites creates permission overwrites for a team-specific voice channel.
+// Only that team's members, league mods, the bot, and casters can join.
+func buildVoiceOverwrites(guildID, botUserID, modRoleID, casterRoleID string, members []TeamMember) []*discordgo.PermissionOverwrite {
+	overwrites := []*discordgo.PermissionOverwrite{
+		{
+			ID:   guildID,
+			Type: discordgo.PermissionOverwriteTypeRole,
+			Deny: discordgo.PermissionViewChannel | discordgo.PermissionVoiceConnect,
+		},
+	}
+
+	if botUserID != "" {
+		overwrites = append(overwrites, &discordgo.PermissionOverwrite{
+			ID:    botUserID,
+			Type:  discordgo.PermissionOverwriteTypeMember,
+			Allow: discordgo.PermissionViewChannel | discordgo.PermissionVoiceConnect,
+		})
+	}
+
+	if modRoleID != "" {
+		overwrites = append(overwrites, &discordgo.PermissionOverwrite{
+			ID:    modRoleID,
+			Type:  discordgo.PermissionOverwriteTypeRole,
+			Allow: discordgo.PermissionViewChannel | discordgo.PermissionVoiceConnect,
+		})
+	}
+
+	if casterRoleID != "" {
+		overwrites = append(overwrites, &discordgo.PermissionOverwrite{
+			ID:    casterRoleID,
+			Type:  discordgo.PermissionOverwriteTypeRole,
+			Allow: discordgo.PermissionViewChannel | discordgo.PermissionVoiceConnect,
+		})
+	}
+
+	seen := map[int64]bool{}
+	for _, tm := range members {
+		if tm.PlayerID == 0 || seen[tm.PlayerID] {
+			continue
+		}
+		seen[tm.PlayerID] = true
+		overwrites = append(overwrites, &discordgo.PermissionOverwrite{
+			ID:    strconv.FormatInt(tm.PlayerID, 10),
+			Type:  discordgo.PermissionOverwriteTypeMember,
+			Allow: discordgo.PermissionViewChannel | discordgo.PermissionVoiceConnect,
+		})
+	}
+
+	return overwrites
+}
+
+func createMissingVoiceChannels(s *discordgo.Session, m *Match) {
+	if s == nil || m == nil {
+		return
+	}
+
+	categoryID := os.Getenv("MATCH_CHANNEL_CATEGORY_ID")
+	guildID := os.Getenv("DISCORD_GUILD_ID")
+	botUserID := os.Getenv("DISCORD_CLIENT_ID")
+	modRoleID := os.Getenv("DISCORD_LEAGUE_MOD_ROLE_ID")
+	casterRoleID := os.Getenv("DISCORD_CASTER_ROLE_ID")
+	if categoryID == "" || guildID == "" {
+		return
+	}
+
+	var teamA, teamB Team
+	if DB.First(&teamA, m.TeamAID).Error != nil || DB.First(&teamB, m.TeamBID).Error != nil {
+		return
+	}
+
+	var membersA, membersB []TeamMember
+	DB.Where("team_id = ?", m.TeamAID).Find(&membersA)
+	DB.Where("team_id = ?", m.TeamBID).Find(&membersB)
+
+	updates := map[string]any{}
+
+	if m.DiscordVoiceChannelAID == nil {
+		voiceOverwritesA := buildVoiceOverwrites(guildID, botUserID, modRoleID, casterRoleID, membersA)
+		voiceNameA := fmt.Sprintf("🔊 %s", sanitizeChannelName(teamA.Name))
+		voiceA, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
+			Name:                 voiceNameA,
+			Type:                 discordgo.ChannelTypeGuildVoice,
+			ParentID:             categoryID,
+			PermissionOverwrites: voiceOverwritesA,
+		})
+		if err != nil {
+			log.Printf("⚠️ Failed to create voice channel for team A (match %d): %v", m.ID, err)
+		} else {
+			updates["discord_voice_channel_a_id"] = voiceA.ID
+			log.Printf("✅ Created missing voice channel A for match %d: %s", m.ID, voiceA.ID)
+		}
+	}
+
+	if m.DiscordVoiceChannelBID == nil {
+		voiceOverwritesB := buildVoiceOverwrites(guildID, botUserID, modRoleID, casterRoleID, membersB)
+		voiceNameB := fmt.Sprintf("🔊 %s", sanitizeChannelName(teamB.Name))
+		voiceB, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
+			Name:                 voiceNameB,
+			Type:                 discordgo.ChannelTypeGuildVoice,
+			ParentID:             categoryID,
+			PermissionOverwrites: voiceOverwritesB,
+		})
+		if err != nil {
+			log.Printf("⚠️ Failed to create voice channel for team B (match %d): %v", m.ID, err)
+		} else {
+			updates["discord_voice_channel_b_id"] = voiceB.ID
+			log.Printf("✅ Created missing voice channel B for match %d: %s", m.ID, voiceB.ID)
+		}
+	}
+
+	if len(updates) > 0 {
+		DB.Model(m).Updates(updates)
 	}
 }
 
@@ -402,7 +526,7 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 		}
 	}
 
-	// 🔨 Create channel (team-vs-team naming)
+	// 🔨 Create text channel
 	channelName := fmt.Sprintf("%s-vs-%s", sanitizeChannelName(teamA.Name), sanitizeChannelName(teamB.Name))
 	channel, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
 		Name:                 channelName,
@@ -414,12 +538,46 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 		return
 	}
 
+	// 🔈 Create voice channel for Team A (only Team A + mods + bot)
+	casterRoleID := os.Getenv("DISCORD_CASTER_ROLE_ID")
+	voiceOverwritesA := buildVoiceOverwrites(guildID, botUserID, modRoleID, casterRoleID, membersA)
+	voiceNameA := fmt.Sprintf("🔊 %s", sanitizeChannelName(teamA.Name))
+	voiceA, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
+		Name:                 voiceNameA,
+		Type:                 discordgo.ChannelTypeGuildVoice,
+		ParentID:             categoryID,
+		PermissionOverwrites: voiceOverwritesA,
+	})
+	if err != nil {
+		log.Printf("⚠️ Failed to create voice channel for team A (match %d): %v", m.ID, err)
+	}
+
+	// 🔈 Create voice channel for Team B (only Team B + mods + bot)
+	voiceOverwritesB := buildVoiceOverwrites(guildID, botUserID, modRoleID, casterRoleID, membersB)
+	voiceNameB := fmt.Sprintf("🔊 %s", sanitizeChannelName(teamB.Name))
+	voiceB, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
+		Name:                 voiceNameB,
+		Type:                 discordgo.ChannelTypeGuildVoice,
+		ParentID:             categoryID,
+		PermissionOverwrites: voiceOverwritesB,
+	})
+	if err != nil {
+		log.Printf("⚠️ Failed to create voice channel for team B (match %d): %v", m.ID, err)
+	}
+
 	now := time.Now().UTC()
 
-	DB.Model(m).Updates(map[string]any{
+	updates := map[string]any{
 		"discord_channel_id": channel.ID,
 		"channel_created_at": now,
-	})
+	}
+	if voiceA != nil {
+		updates["discord_voice_channel_a_id"] = voiceA.ID
+	}
+	if voiceB != nil {
+		updates["discord_voice_channel_b_id"] = voiceB.ID
+	}
+	DB.Model(m).Updates(updates)
 
 	// ---- MATCH TIME FORMATTING ----
 	matchTime := "TBD"
@@ -527,6 +685,72 @@ func addCasterToExistingChannel(
 	})
 }
 
+// addSubToMatchChannels adds a league sub user to the text channel and both voice
+// channels for a given match. Called by the /addsub slash command.
+func addSubToMatchChannels(
+	s *discordgo.Session,
+	m *Match,
+	discordUserID string,
+	teamSide string, // "a" or "b" — only this team's voice channel is opened
+) error {
+	if s == nil || m == nil || discordUserID == "" {
+		return fmt.Errorf("missing parameters")
+	}
+
+	var errs []string
+
+	// ── Text channel (always) ──
+	if m.DiscordChannelID != nil && *m.DiscordChannelID != "" {
+		allow := int64(
+			discordgo.PermissionViewChannel |
+				discordgo.PermissionSendMessages |
+				discordgo.PermissionReadMessageHistory,
+		)
+		if err := s.ChannelPermissionSet(
+			*m.DiscordChannelID,
+			discordUserID,
+			discordgo.PermissionOverwriteTypeMember,
+			allow,
+			0,
+		); err != nil {
+			errs = append(errs, fmt.Sprintf("text channel: %v", err))
+		}
+	}
+
+	// ── Only the chosen team's voice channel ──
+	voiceAllow := int64(
+		discordgo.PermissionViewChannel |
+			discordgo.PermissionVoiceConnect,
+	)
+
+	if teamSide == "a" && m.DiscordVoiceChannelAID != nil && *m.DiscordVoiceChannelAID != "" {
+		if err := s.ChannelPermissionSet(
+			*m.DiscordVoiceChannelAID,
+			discordUserID,
+			discordgo.PermissionOverwriteTypeMember,
+			voiceAllow,
+			0,
+		); err != nil {
+			errs = append(errs, fmt.Sprintf("voice channel A: %v", err))
+		}
+	} else if teamSide == "b" && m.DiscordVoiceChannelBID != nil && *m.DiscordVoiceChannelBID != "" {
+		if err := s.ChannelPermissionSet(
+			*m.DiscordVoiceChannelBID,
+			discordUserID,
+			discordgo.PermissionOverwriteTypeMember,
+			voiceAllow,
+			0,
+		); err != nil {
+			errs = append(errs, fmt.Sprintf("voice channel B: %v", err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 func ensureCasterRoleOverwrite(
 	s *discordgo.Session,
 	channelID string,
@@ -603,9 +827,22 @@ func deleteMatchChannel(s *discordgo.Session, m *Match) {
 		log.Printf("⚠️ Failed to delete channel %s: %v", *m.DiscordChannelID, err)
 	}
 
+	if m.DiscordVoiceChannelAID != nil {
+		if _, err := s.ChannelDelete(*m.DiscordVoiceChannelAID); err != nil {
+			log.Printf("⚠️ Failed to delete voice channel A %s: %v", *m.DiscordVoiceChannelAID, err)
+		}
+	}
+	if m.DiscordVoiceChannelBID != nil {
+		if _, err := s.ChannelDelete(*m.DiscordVoiceChannelBID); err != nil {
+			log.Printf("⚠️ Failed to delete voice channel B %s: %v", *m.DiscordVoiceChannelBID, err)
+		}
+	}
+
 	DB.Model(m).Updates(map[string]any{
-		"discord_channel_id": nil,
-		"channel_created_at": nil,
+		"discord_channel_id":         nil,
+		"discord_voice_channel_a_id": nil,
+		"discord_voice_channel_b_id": nil,
+		"channel_created_at":         nil,
 	})
 }
 
@@ -725,10 +962,24 @@ func RegisterCloseChannelHandler(dg *discordgo.Session) {
 				log.Printf("❌ Failed to delete channel %s: %v", channelID, err)
 			}
 
+			// --- DELETE VOICE CHANNELS ---
+			if match.DiscordVoiceChannelAID != nil {
+				if _, err := s.ChannelDelete(*match.DiscordVoiceChannelAID); err != nil {
+					log.Printf("⚠️ Failed to delete voice channel A %s: %v", *match.DiscordVoiceChannelAID, err)
+				}
+			}
+			if match.DiscordVoiceChannelBID != nil {
+				if _, err := s.ChannelDelete(*match.DiscordVoiceChannelBID); err != nil {
+					log.Printf("⚠️ Failed to delete voice channel B %s: %v", *match.DiscordVoiceChannelBID, err)
+				}
+			}
+
 			// Clear DB references
 			DB.Model(&match).Updates(map[string]any{
-				"discord_channel_id": nil,
-				"channel_created_at": nil,
+				"discord_channel_id":         nil,
+				"discord_voice_channel_a_id": nil,
+				"discord_voice_channel_b_id": nil,
+				"channel_created_at":         nil,
 			})
 
 			log.Printf("✅ Match channel %s closed by mod %s", channelID, i.Member.User.Username)
