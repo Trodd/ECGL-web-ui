@@ -43,6 +43,38 @@ func pairExists(pairs [][2]uint, target [2]uint) bool {
 	return false
 }
 
+// pickBetterSchedule returns the schedule with fewer last-week repeats.
+// If tied, prefers fewer season repeats.
+func pickBetterSchedule(a, b [][]uint, recentPairs, playedPairs map[[2]uint]bool) [][]uint {
+	countRepeats := func(s [][]uint) (recent int, season int) {
+		for _, p := range s {
+			if len(p) != 2 {
+				continue
+			}
+			key := [2]uint{min(p[0], p[1]), max(p[0], p[1])}
+			if recentPairs[key] {
+				recent++
+			}
+			if playedPairs[key] {
+				season++
+			}
+		}
+		return
+	}
+	ra, sa := countRepeats(a)
+	rb, sb := countRepeats(b)
+	if ra != rb {
+		if ra < rb {
+			return a
+		}
+		return b
+	}
+	if sa < sb {
+		return a
+	}
+	return b
+}
+
 // --- POST /api/matches/generate ---
 func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireLeagueMod(w, r); !ok {
@@ -365,7 +397,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 	//  1) pairs not yet played this season
 	//  2) avoid repeating last week (if possible)
 	//  3) allow repeats only when needed to fill everyone to 2
-	buildSchedule := func(avoidRecent bool, disallowPlayed bool) ([][]uint, map[uint]int, bool) {
+	buildSchedule := func(avoidRecent bool, disallowPlayed bool, scheduleSeed int64) ([][]uint, map[uint]int, bool) {
 		adj := make(map[uint][]uint, len(teams))
 		for _, p := range allPairs {
 			a, b := p[0], p[1]
@@ -384,7 +416,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		for _, t := range teams {
 			list := adj[t.ID]
 			if len(list) > 1 {
-				shuffle(list, seed+int64(t.ID)*777)
+				shuffle(list, scheduleSeed+int64(t.ID)*777)
 				adj[t.ID] = list
 			}
 		}
@@ -402,7 +434,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 			for _, t := range teams {
 				ordered = append(ordered, t.ID)
 			}
-			shuffle(ordered, seed+int64(len(matchups))*13)
+			shuffle(ordered, scheduleSeed+int64(len(matchups))*13)
 			// bubble-ish pass to bring low counts forward (small N)
 			for i := 0; i < len(ordered); i++ {
 				for j := i + 1; j < len(ordered); j++ {
@@ -464,21 +496,47 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		return matchups, matchCount, complete
 	}
 
-	// Phase 1: strict round-robin (no repeats at all)
-	phase1, _, ok := buildSchedule(true, true)
+	// Phase 1: strict round-robin (no repeats at all) — retry with different seeds
+	phase1, _, ok := buildSchedule(true, true, seed)
 	matchupsU := phase1
-
-	// Phase 2: allow repeats if needed, but avoid last-week repeats
 	if !ok {
-		phase2, _, ok2 := buildSchedule(true, false)
-		matchupsU = phase2
-		ok = ok2
+		for attempt := int64(1); attempt < 50 && !ok; attempt++ {
+			phase1, _, ok = buildSchedule(true, true, seed+attempt*7919)
+		}
+		if ok {
+			matchupsU = phase1
+		}
 	}
 
-	// Phase 3: last resort, allow repeats including last week
+	// Phase 2: allow repeats if needed, but avoid last-week repeats — retry with different seeds
 	if !ok {
-		phase3, _, _ := buildSchedule(false, false)
+		phase2, _, ok2 := buildSchedule(true, false, seed)
+		if ok2 {
+			matchupsU = phase2
+			ok = true
+		} else {
+			for attempt := int64(1); attempt < 50 && !ok; attempt++ {
+				phase2, _, ok2 = buildSchedule(true, false, seed+attempt*7919)
+				if ok2 {
+					matchupsU = phase2
+					ok = true
+					break
+				}
+			}
+		}
+	}
+
+	// Phase 3: last resort, allow repeats including last week — retry with different seeds
+	if !ok {
+		phase3, _, _ := buildSchedule(false, false, seed)
 		matchupsU = phase3
+		for attempt := int64(1); attempt < 50; attempt++ {
+			alt, _, altOk := buildSchedule(false, false, seed+attempt*7919)
+			if altOk {
+				// Prefer the solution with fewer last-week repeats
+				matchupsU = pickBetterSchedule(matchupsU, alt, recentPairs, playedPairs)
+			}
+		}
 	}
 
 	// Convert back to [2]uint format for existing code paths
