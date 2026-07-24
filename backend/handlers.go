@@ -1932,34 +1932,80 @@ func HandleGetTeamLogo(w http.ResponseWriter, r *http.Request) {
 	teamID := uint(teamID64)
 
 	var logo TeamLogo
-	if err := DB.First(&logo, "team_id = ?", teamID).Error; err != nil {
-		http.Error(w, "logo not found", http.StatusNotFound)
-		return
-	}
-	if len(logo.Data) == 0 {
-		http.Error(w, "logo not found", http.StatusNotFound)
+	if err := DB.First(&logo, "team_id = ?", teamID).Error; err == nil && len(logo.Data) > 0 {
+		// Strong caching here causes "logo won't change" issues (browser/CDN).
+		// Use ETag + no-store so changes show immediately after upload.
+		etag := fmt.Sprintf("\"%d\"", logo.UpdatedAt.UnixNano())
+		if inm := strings.TrimSpace(r.Header.Get("If-None-Match")); inm != "" && inm == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		w.Header().Set("Content-Type", logo.ContentType)
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		w.Header().Set("Surrogate-Control", "no-store")
+		w.Header().Set("CDN-Cache-Control", "no-store")
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(logo.Data)
 		return
 	}
 
-	// Strong caching here causes "logo won't change" issues (browser/CDN).
-	// Use ETag + no-store so changes show immediately after upload.
-	etag := fmt.Sprintf("\"%d\"", logo.UpdatedAt.UnixNano())
-	if inm := strings.TrimSpace(r.Header.Get("If-None-Match")); inm != "" && inm == etag {
-		w.WriteHeader(http.StatusNotModified)
+	// No logo uploaded — generate a placeholder SVG with team initials
+	var team Team
+	if err := DB.First(&team, teamID).Error; err != nil {
+		http.Error(w, "team not found", http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set("Content-Type", logo.ContentType)
-	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
-	// Extra hints for common CDNs/proxies
-	w.Header().Set("Surrogate-Control", "no-store")
-	w.Header().Set("CDN-Cache-Control", "no-store")
+	abbr := getTeamAbbreviation(team.Name)
+	svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <rect width="200" height="200" rx="16" fill="#374151"/>
+  <text x="100" y="120" font-family="Arial, sans-serif" font-size="%d" font-weight="bold" fill="#D1D5DB" text-anchor="middle">%s</text>
+</svg>`, getLogoSVGSize(abbr), abbr)
 
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(logo.Data)
+	_, _ = w.Write([]byte(svg))
+}
+
+func getTeamAbbreviation(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "?"
+	}
+	words := strings.Fields(name)
+	if len(words) == 1 {
+		if len(words[0]) >= 2 {
+			return strings.ToUpper(words[0][:2])
+		}
+		return strings.ToUpper(words[0])
+	}
+	abbr := ""
+	for _, w := range words {
+		if len(w) > 0 {
+			abbr += strings.ToUpper(string(w[0]))
+		}
+	}
+	if len(abbr) > 4 {
+		abbr = abbr[:4]
+	}
+	return abbr
+}
+
+func getLogoSVGSize(abbr string) int {
+	switch {
+	case len(abbr) <= 2:
+		return 72
+	case len(abbr) == 3:
+		return 56
+	default:
+		return 44
+	}
 }
 
 // --- Kick a team member (Captain only) ---
@@ -2853,6 +2899,60 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 			"casters":    casters,
 			"camera":     camera,
 			"stream_url": cast.StreamURL,
+		},
+	})
+}
+
+// GET /api/overlay/match/{id}
+// Lightweight endpoint for live stream overlays — returns team names, absolute logo URLs, and scores.
+func HandleOverlayMatch(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	matchID, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid match ID", http.StatusBadRequest)
+		return
+	}
+
+	var match Match
+	if err := DB.First(&match, matchID).Error; err != nil {
+		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
+	var teamA, teamB Team
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+
+	baseURL := strings.TrimRight(getEnv("FRONTEND_URL", "https://gigglesquad.mooo.com"), "/")
+
+	logoA := teamA.LogoURL
+	if logoA == "" {
+		logoA = fmt.Sprintf("%s/api/team/logo/%d", baseURL, teamA.ID)
+	} else if !strings.HasPrefix(logoA, "http") {
+		logoA = baseURL + logoA
+	}
+
+	logoB := teamB.LogoURL
+	if logoB == "" {
+		logoB = fmt.Sprintf("%s/api/team/logo/%d", baseURL, teamB.ID)
+	} else if !strings.HasPrefix(logoB, "http") {
+		logoB = baseURL + logoB
+	}
+
+	respondJSON(w, map[string]any{
+		"match_code": match.MatchCode,
+		"status":     match.Status,
+		"team_a": map[string]any{
+			"id":       teamA.ID,
+			"name":     teamA.Name,
+			"logo_url": logoA,
+			"score":    match.TeamAScore,
+		},
+		"team_b": map[string]any{
+			"id":       teamB.ID,
+			"name":     teamB.Name,
+			"logo_url": logoB,
+			"score":    match.TeamBScore,
 		},
 	})
 }
@@ -4939,14 +5039,17 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		discordIDStr, _ := session.Values["discord_id"].(string)
 		submitterID, _ := strconv.ParseInt(discordIDStr, 10, 64)
 
+		captainPings := getBothCaptainPings(opposingTeam.ID)
+
 		SendDiscordLog(
 			fmt.Sprintf(
-				"📝 **%s confirmed scores for Match %s**\n👥 Teams: %s vs %s\n👤 By: <@%d>\n⏳ Waiting on: %s captains",
+				"📝 **%s confirmed scores for Match %s**\n👥 Teams: %s vs %s\n👤 By: <@%d>\n⏳ Waiting on: %s captains %s",
 				confirmingTeam.Name,
 				match.MatchCode,
 				teamA.Name, teamB.Name,
 				submitterID,
 				opposingTeam.Name,
+				captainPings,
 			),
 		)
 
@@ -9151,9 +9254,11 @@ func HandleMatchPingSub(w http.ResponseWriter, r *http.Request) {
 		pings = "_No registered league subs for this team._"
 	}
 
-	// Match timestamp
+	// Match timestamp — use scheduled date if confirmed, otherwise proposed
 	ts := "Unknown time"
-	if match.ProposedDate != nil {
+	if match.ScheduledDate != nil {
+		ts = fmt.Sprintf("<t:%d:F>", match.ScheduledDate.Unix())
+	} else if match.ProposedDate != nil {
 		ts = fmt.Sprintf("<t:%d:F>", match.ProposedDate.Unix())
 	}
 

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
+import TeamLogo from "../components/TeamLogo";
 import PlayerIdentity from "../components/PlayerIdentity";
 
 export default function TeamDetail() {
@@ -26,16 +27,8 @@ export default function TeamDetail() {
   const [myTeamID, setMyTeamID] = useState(null);
   const [isCaptain, setIsCaptain] = useState(false);
   const [archive, setArchive] = useState([]);
-  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const [me, setMe] = useState(null);
   const [copiedLogo, setCopiedLogo] = useState(false);
-
-  function buildLogoSrc(logoUrl) {
-    if (!logoUrl) return "";
-    const base = String(logoUrl);
-    const absolute = base.startsWith("http://") || base.startsWith("https://");
-    return absolute ? base : `${urlBase}${base}`;
-  }
 
   useEffect(() => {
     if (!id) return;
@@ -190,7 +183,10 @@ export default function TeamDetail() {
   const canCopyLogoUrl = !!me?.is_caster || !!me?.is_mod;
 
   async function handleCopyLogoUrl() {
-    const absolute = buildLogoSrc(effectiveLogoUrl);
+    if (!effectiveLogoUrl) return;
+    const absolute = effectiveLogoUrl.startsWith("http://") || effectiveLogoUrl.startsWith("https://")
+      ? effectiveLogoUrl
+      : `${urlBase}${effectiveLogoUrl}`;
     if (!absolute) return;
 
     try {
@@ -233,15 +229,11 @@ export default function TeamDetail() {
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
           <div className="d-flex align-items-center gap-3">
-            {effectiveLogoUrl && !logoLoadFailed && (
-              <img
-                src={buildLogoSrc(effectiveLogoUrl)}
-                alt="Team logo"
-                className="rounded border border-secondary"
-                style={{ width: 80, height: 80, objectFit: "cover" }}
-                onError={() => setLogoLoadFailed(true)}
-              />
-            )}
+            <TeamLogo
+              name={team.name}
+              logoUrl={effectiveLogoUrl}
+              size={80}
+            />
 
             <div>
               <h2 className="mb-1">{team.name}</h2>
@@ -260,7 +252,7 @@ export default function TeamDetail() {
 
           {/* ⚔️ CHALLENGE CTA */}
           <div className="text-end">
-            {canCopyLogoUrl && effectiveLogoUrl ? (
+            {canCopyLogoUrl ? (
               <div className="mb-2">
                 <button
                   className="btn btn-outline-light btn-sm"

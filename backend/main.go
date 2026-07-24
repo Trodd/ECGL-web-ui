@@ -778,6 +778,7 @@ func main() {
 	r.HandleFunc("/api/match/schedule", HandleScheduleMatch).Methods("POST")
 	r.HandleFunc("/api/match/submit-score", HandleSubmitScore).Methods("POST")
 	r.HandleFunc("/api/match/confirm-coinflip", HandleConfirmCoinFlip).Methods("POST")
+	r.HandleFunc("/api/overlay/match/{id:[0-9]+}", HandleOverlayMatch).Methods("GET")
 	r.HandleFunc("/api/matches/public", HandlePublicMatches).Methods("GET")
 	r.HandleFunc("/api/settings", GetSettings).Methods("GET")
 	r.HandleFunc("/api/challenge/request", HandleChallengeRequest).Methods("POST")

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
+import TeamLogo from "../components/TeamLogo";
 
 export default function Teams() {
   const [teams, setTeams] = useState([]);
@@ -11,13 +12,6 @@ export default function Teams() {
   const [showDisbanded, setShowDisbanded] = useState(false);
   const [settings, setSettings] = useState(null);
   const urlBase = getApiUrl();
-
-  function buildLogoSrc(logoUrl) {
-    if (!logoUrl) return "";
-    const base = String(logoUrl);
-    const absolute = base.startsWith("http://") || base.startsWith("https://");
-    return absolute ? base : `${urlBase}${base}`;
-  }
 
   useEffect(() => {
     axios
@@ -125,15 +119,10 @@ export default function Teams() {
                   >
                     {/* LEFT — Team Name */}
                     <div className="d-flex align-items-center gap-2 fw-semibold text-light">
-                      <img
-                        src={buildLogoSrc(t?.logo_url || (t?.id ? `/api/team/logo/${t.id}` : ""))}
-                        alt=""
-                        className="rounded border border-secondary"
-                        style={{ width: 40, height: 40, objectFit: "cover" }}
-                        loading="lazy"
-                        onError={(e) => {
-                          e.currentTarget.style.display = "none";
-                        }}
+                      <TeamLogo
+                        name={t.name}
+                        logoUrl={t?.logo_url || (t?.id ? `/api/team/logo/${t.id}` : "")}
+                        size={40}
                       />
                       <span>{t.name}</span>
 

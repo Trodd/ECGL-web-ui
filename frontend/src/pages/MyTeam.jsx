@@ -3,6 +3,7 @@ import axios from "axios";
 import MatchCard from "../components/MatchCard";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
+import TeamLogo from "../components/TeamLogo";
 import PlayerIdentity from "../components/PlayerIdentity";
 
 export default function MyTeam() {
@@ -30,7 +31,6 @@ export default function MyTeam() {
   const [logoUploading, setLogoUploading] = useState(false);
   const [logoMsg, setLogoMsg] = useState("");
   const [logoVersion, setLogoVersion] = useState("");
-  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
 
   const urlBase = getApiUrl();
   const sectionStyle = {
@@ -150,14 +150,6 @@ export default function MyTeam() {
   const isCaptain = myRole === "Captain" || myRole === "Co-Captain";
 
   const effectiveLogoUrl = team?.logo_url || teamSettings?.logo_url || (team?.id ? `/api/team/logo/${team.id}` : "");
-
-  function buildLogoSrc(logoUrl) {
-    if (!logoUrl) return "";
-    const base = String(logoUrl);
-    const absolute = base.startsWith("http://") || base.startsWith("https://");
-    const src = absolute ? base : `${urlBase}${base}`;
-    return logoVersion ? `${src}${src.includes("?") ? "&" : "?"}v=${encodeURIComponent(String(logoVersion))}` : src;
-  }
 
   useEffect(() => {
     return () => {
@@ -398,15 +390,11 @@ export default function MyTeam() {
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
         <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
           <div className="d-flex align-items-center gap-3">
-            {effectiveLogoUrl && !logoLoadFailed && (
-              <img
-                src={buildLogoSrc(effectiveLogoUrl)}
-                alt="Team logo"
-                className="rounded border border-secondary"
-                style={{ width: 56, height: 56, objectFit: "cover" }}
-                onError={() => setLogoLoadFailed(true)}
-              />
-            )}
+            <TeamLogo
+              name={team?.name}
+              logoUrl={effectiveLogoUrl}
+              size={56}
+            />
 
             <div>
               <h2 className="mb-1"> {team?.name}</h2>
@@ -505,12 +493,11 @@ export default function MyTeam() {
                           alt="Team logo preview"
                           style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #333" }}
                         />
-                      ) : effectiveLogoUrl && !logoLoadFailed ? (
-                        <img
-                          src={buildLogoSrc(effectiveLogoUrl)}
-                          alt="Team logo"
-                          style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #333" }}
-                          onError={() => setLogoLoadFailed(true)}
+                      ) : !logoLoadFailed ? (
+                        <TeamLogo
+                          name={team?.name}
+                          logoUrl={effectiveLogoUrl}
+                          size={96}
                         />
                       ) : (
                         <div

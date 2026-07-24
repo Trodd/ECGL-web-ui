@@ -4,6 +4,7 @@ import axios from "axios";
 import CastModal from "../components/CastModal";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
+import TeamLogo from "../components/TeamLogo";
 import PlayerIdentity from "../components/PlayerIdentity";
 
 export default function MatchDetail() {
@@ -14,8 +15,6 @@ export default function MatchDetail() {
     const [players, setPlayers] = useState([]);
     const [showCastModal, setShowCastModal] = useState(false);
     const [existingCast, setExistingCast] = useState(null);
-    const [logoLoadFailedA, setLogoLoadFailedA] = useState(false);
-    const [logoLoadFailedB, setLogoLoadFailedB] = useState(false);
 
     // -----------------------------------------------------
     // LOAD ALL PLAYERS
@@ -51,15 +50,6 @@ export default function MatchDetail() {
         if (p) return p.display_name || p.username;
 
         return "Unknown";
-    }
-
-    function buildLogoSrc(url) {
-        if (!url) return "";
-        if (/^https?:\/\//i.test(url)) return url;
-
-        const base = (getApiUrl() || "").replace(/\/$/, "");
-        const path = String(url).startsWith("/") ? url : `/${url}`;
-        return `${base}${path}`;
     }
 
     // -----------------------------------------------------
@@ -257,14 +247,11 @@ export default function MatchDetail() {
                             to={`/teams/${teamA.id}`}
                             className="text-info fw-bold fs-5 text-decoration-none d-inline-flex align-items-center gap-2"
                         >
-                            {effectiveLogoUrlA && !logoLoadFailedA && (
-                                <img
-                                    src={buildLogoSrc(effectiveLogoUrlA)}
-                                    alt={`${teamA.name || "Team A"} logo`}
-                                    style={{ width: 80, height: 80, objectFit: "contain" }}
-                                    onError={() => setLogoLoadFailedA(true)}
-                                />
-                            )}
+                            <TeamLogo
+                                name={teamA.name}
+                                logoUrl={effectiveLogoUrlA}
+                                size={48}
+                            />
                             <span>{teamA.name}</span>
                         </Link>
 
@@ -274,14 +261,11 @@ export default function MatchDetail() {
                             to={`/teams/${teamB.id}`}
                             className="text-info fw-bold fs-5 text-decoration-none d-inline-flex align-items-center gap-2"
                         >
-                            {effectiveLogoUrlB && !logoLoadFailedB && (
-                                <img
-                                    src={buildLogoSrc(effectiveLogoUrlB)}
-                                    alt={`${teamB.name || "Team B"} logo`}
-                                    style={{ width: 48, height: 48, objectFit: "contain" }}
-                                    onError={() => setLogoLoadFailedB(true)}
-                                />
-                            )}
+                            <TeamLogo
+                                name={teamB.name}
+                                logoUrl={effectiveLogoUrlB}
+                                size={48}
+                            />
                             <span>{teamB.name}</span>
                         </Link>
                     </div>
