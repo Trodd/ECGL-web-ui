@@ -362,7 +362,6 @@ export default function MyTeam() {
       const newLogoVersion = res?.data?.logo_version;
       setLogoMsg("✅ Team logo updated.");
       setLogoVersion(newLogoVersion ? String(newLogoVersion) : String(Date.now()));
-      setLogoLoadFailed(false);
 
       if (newLogoUrl) {
         setData((prev) => ({
@@ -493,19 +492,12 @@ export default function MyTeam() {
                           alt="Team logo preview"
                           style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #333" }}
                         />
-                      ) : !logoLoadFailed ? (
+                      ) : (
                         <TeamLogo
                           name={team?.name}
                           logoUrl={effectiveLogoUrl}
                           size={96}
                         />
-                      ) : (
-                        <div
-                          className="d-flex justify-content-center align-items-center text-secondary"
-                          style={{ width: 96, height: 96, borderRadius: 8, border: "1px dashed #444" }}
-                        >
-                          No logo
-                        </div>
                       )}
                     </div>
 
