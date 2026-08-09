@@ -5,6 +5,7 @@ import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
 import TeamLogo from "../components/TeamLogo";
 import PlayerIdentity from "../components/PlayerIdentity";
+import TeamAvailability from "../components/TeamAvailability";
 
 export default function TeamDetail() {
   const { id } = useParams();
@@ -336,6 +337,9 @@ export default function TeamDetail() {
           <p className="text-secondary mb-0">No roster found.</p>
         )}
       </div>
+
+      {/* ================= TEAM AVAILABILITY ================= */}
+      <TeamAvailability teamId={team?.id} />
 
       {/* ================= MATCH HISTORY ================= */}
       <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">

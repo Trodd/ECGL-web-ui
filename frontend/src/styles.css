@@ -1448,6 +1448,324 @@ a:hover {
   background-color: rgba(59, 110, 165, 0.06) !important;
 }
 
+/* ─── Player Settings: Availability Calendar ─── */
+.player-settings-root {
+  max-width: 500px;
+}
+
+/* Month navigation */
+.avail-month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.avail-month-nav h4 {
+  color: var(--text-primary) !important;
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+/* Calendar grid */
+.avail-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.avail-cal-header {
+  text-align: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 6px 0;
+}
+
+.avail-cal-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 4px;
+  transition: all var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.avail-cal-cell:hover {
+  background: var(--bg-elevated);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.avail-cal-cell.other-month {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.avail-cal-cell.today {
+  border-color: var(--accent-bright);
+  box-shadow: 0 0 0 1px var(--accent-glow);
+}
+
+.avail-cal-cell.has-slots {
+  background: rgba(59, 110, 165, 0.2);
+  border-color: var(--accent);
+  color: var(--text-accent);
+  font-weight: 700;
+}
+
+.avail-cal-day {
+  line-height: 1;
+}
+
+.avail-cal-dot {
+  position: absolute;
+  bottom: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+}
+
+.avail-cal-cell.has-slots .avail-cal-dot {
+  background: #fff;
+}
+
+/* Save bar */
+.avail-save-bar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Modal */
+.avail-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+  padding: 16px;
+}
+
+.avail-modal {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  width: 100%;
+  max-width: 380px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  animation: modalSlideIn 0.2s ease-out;
+}
+
+@keyframes modalSlideIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.avail-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.avail-modal-body {
+  padding: 16px;
+}
+
+.avail-modal-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-default);
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Time picker row */
+.avail-time-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.avail-time-picker-row select {
+  flex: 1 1 0;
+  min-width: 90px;
+}
+
+.avail-time-picker-row span {
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+/* Slot chips */
+.avail-slot-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(59, 110, 165, 0.15);
+  border: 1px solid var(--border-accent);
+  border-radius: 999px;
+  padding: 4px 8px 4px 12px;
+  font-size: 0.8rem;
+  color: var(--text-accent);
+  margin-right: 6px;
+  margin-bottom: 4px;
+}
+
+.avail-slot-remove {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 2px 4px;
+  border-radius: 50%;
+  line-height: 1;
+  transition: all var(--transition-fast);
+}
+
+.avail-slot-remove:hover {
+  color: var(--danger);
+  background: rgba(218, 54, 51, 0.15);
+}
+
+/* Summary cards */
+.availability-summary {
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+}
+
+.avail-day-summary {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  height: 100%;
+}
+
+.avail-day-summary strong {
+  color: var(--text-accent);
+  font-size: 0.8rem;
+}
+
+.avail-day-summary ul li {
+  padding: 2px 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+/* ─── Team Availability Mini Calendar ─── */
+.ta-mini-cal {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  margin-bottom: 6px;
+}
+
+.ta-mini-header {
+  text-align: center;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 0;
+}
+
+.ta-mini-cell {
+  aspect-ratio: 1;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ta-mini-cell:hover:not(.other) {
+  background: var(--bg-elevated);
+  border-color: var(--accent);
+}
+
+.ta-mini-cell.other {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ta-mini-cell.has-avail {
+  background: rgba(59, 110, 165, 0.2);
+  border-color: var(--accent);
+  color: var(--text-accent);
+  font-weight: 700;
+}
+
+.ta-mini-cell.has-avail.selected {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent-bright);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.ta-detail {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+
+.ta-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.ta-detail-header strong {
+  font-size: 0.82rem;
+  color: var(--text-accent);
+}
+
+.ta-range-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(46, 160, 67, 0.1);
+  border: 1px solid rgba(46, 160, 67, 0.3);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.72rem;
+  color: var(--success);
+  margin-right: 4px;
+  margin-bottom: 4px;
+}
+
 .bg-dark.form-control,
 .bg-dark.form-select {
   color: var(--text-primary) !important;

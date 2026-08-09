@@ -10541,3 +10541,431 @@ func HandleSyncPlaylist(w http.ResponseWriter, r *http.Request) {
 		"already_existed":   len(feed.Entries) - added,
 	})
 }
+
+// --- Player Availability ---
+
+// GetPlayerAvailability returns the logged-in player's availability slots.
+func GetPlayerAvailability(w http.ResponseWriter, r *http.Request) {
+	session, ok := requireLogin(w, r)
+	if !ok {
+		return
+	}
+	discordIDStr := session.Values["discord_id"].(string)
+	discordID, _ := strconv.ParseInt(discordIDStr, 10, 64)
+
+	var slots []PlayerAvailability
+	DB.Where("player_id = ?", discordID).Order("date, start_time").Find(&slots)
+	respondJSON(w, slots)
+}
+
+// SavePlayerAvailability replaces the logged-in player's availability slots.
+func SavePlayerAvailability(w http.ResponseWriter, r *http.Request) {
+	session, ok := requireLogin(w, r)
+	if !ok {
+		return
+	}
+	discordIDStr := session.Values["discord_id"].(string)
+	discordID, _ := strconv.ParseInt(discordIDStr, 10, 64)
+
+	var slots []PlayerAvailability
+	if err := json.NewDecoder(r.Body).Decode(&slots); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate each slot
+	for i, s := range slots {
+		if s.Date == "" {
+			http.Error(w, fmt.Sprintf("Missing date at index %d", i), http.StatusBadRequest)
+			return
+		}
+		if s.StartTime == "" || s.EndTime == "" {
+			http.Error(w, fmt.Sprintf("Missing start_time or end_time at index %d", i), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Replace all slots for this player in a transaction
+	tx := DB.Begin()
+	if err := tx.Where("player_id = ?", discordID).Delete(&PlayerAvailability{}).Error; err != nil {
+		tx.Rollback()
+		http.Error(w, "Failed to clear existing availability", http.StatusInternalServerError)
+		return
+	}
+	for i := range slots {
+		slots[i].ID = 0 // ensure new rows
+		slots[i].PlayerID = discordID
+	}
+	if len(slots) > 0 {
+		if err := tx.Create(&slots).Error; err != nil {
+			tx.Rollback()
+			http.Error(w, "Failed to save availability", http.StatusInternalServerError)
+			return
+		}
+	}
+	tx.Commit()
+
+	respondJSON(w, map[string]string{"status": "ok"})
+}
+
+// GetTeamAvailability returns aggregated availability for a team.
+// Finds time slots where at least 3 players on the team are available on the same date.
+func GetTeamAvailability(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	teamID, err := strconv.Atoi(params["id"])
+	if err != nil || teamID <= 0 {
+		http.Error(w, "invalid team id", http.StatusBadRequest)
+		return
+	}
+
+	// Get all team member player IDs
+	var memberIDs []int64
+	DB.Table("team_members").Where("team_id = ?", teamID).Pluck("player_id", &memberIDs)
+	if len(memberIDs) < 3 {
+		respondJSON(w, map[string]any{"dates": []any{}, "message": "Need at least 3 players for team availability"})
+		return
+	}
+
+	// Get all availability for these members
+	var slots []PlayerAvailability
+	DB.Where("player_id IN ?", memberIDs).Order("date, start_time").Find(&slots)
+
+	if len(slots) == 0 {
+		respondJSON(w, map[string]any{"dates": []any{}})
+		return
+	}
+
+	// Group by date, then for each date compute overlapping availability
+	type dateSlot struct {
+		date  string
+		start string
+		end   string
+	}
+
+	byDate := map[string][]dateSlot{}
+	for _, s := range slots {
+		byDate[s.Date] = append(byDate[s.Date], dateSlot{s.Date, s.StartTime, s.EndTime})
+	}
+
+	type TimeRange struct {
+		Start     string `json:"start_time"`
+		End       string `json:"end_time"`
+		PlayerCnt int    `json:"player_count"`
+	}
+
+	type DateAvailability struct {
+		Date   string      `json:"date"`
+		Ranges []TimeRange `json:"ranges"`
+	}
+
+	var result []DateAvailability
+
+	for date, dateSlots := range byDate {
+		const minMinute = 6 * 60
+		const maxMinute = 26 * 60
+		const slotSize = 30
+		totalSlots := (maxMinute - minMinute) / slotSize
+
+		coverage := make([]int, totalSlots)
+
+		for _, ds := range dateSlots {
+			startParts := strings.Split(ds.start, ":")
+			endParts := strings.Split(ds.end, ":")
+			if len(startParts) != 2 || len(endParts) != 2 {
+				continue
+			}
+			sh, _ := strconv.Atoi(startParts[0])
+			sm, _ := strconv.Atoi(startParts[1])
+			eh, _ := strconv.Atoi(endParts[0])
+			em, _ := strconv.Atoi(endParts[1])
+
+			startMin := sh*60 + sm
+			endMin := eh*60 + em
+
+			if startMin < minMinute {
+				startMin = minMinute
+			}
+			if endMin > maxMinute {
+				endMin = maxMinute
+			}
+			if startMin >= endMin {
+				continue
+			}
+
+			startSlot := (startMin - minMinute) / slotSize
+			endSlot := (endMin - minMinute) / slotSize
+			for i := startSlot; i < endSlot && i < totalSlots; i++ {
+				coverage[i]++
+			}
+		}
+
+		var ranges []TimeRange
+		inRange := false
+		rangeStart := 0
+		maxCount := 0
+
+		for i := 0; i <= totalSlots; i++ {
+			count := 0
+			if i < totalSlots {
+				count = coverage[i]
+			}
+			if count >= 3 {
+				if !inRange {
+					inRange = true
+					rangeStart = i
+					maxCount = count
+				} else if count > maxCount {
+					maxCount = count
+				}
+			} else {
+				if inRange {
+					startMin := minMinute + rangeStart*slotSize
+					endMin := minMinute + i*slotSize
+					sh := startMin / 60
+					sm := startMin % 60
+					eh := endMin / 60
+					em := endMin % 60
+
+					dsh := sh % 24
+					deh := eh % 24
+
+					ranges = append(ranges, TimeRange{
+						Start:     fmt.Sprintf("%02d:%02d", dsh, sm),
+						End:       fmt.Sprintf("%02d:%02d", deh, em),
+						PlayerCnt: maxCount,
+					})
+					inRange = false
+					maxCount = 0
+				}
+			}
+		}
+
+		if len(ranges) > 0 {
+			result = append(result, DateAvailability{Date: date, Ranges: ranges})
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool { return result[i].Date < result[j].Date })
+
+	respondJSON(w, map[string]any{"dates": result})
+}
+
+// computeTeamAvailRanges returns aggregated availability (3+ players) for a team as date->ranges map.
+// computeTeamAvailRanges returns aggregated availability (3+ players) for a team as date->ranges map.
+func computeTeamAvailRanges(teamID int) map[string][]struct {
+	Start     string
+	End       string
+	PlayerCnt int
+} {
+	var memberIDs []int64
+	DB.Table("team_members").Where("team_id = ?", teamID).Pluck("player_id", &memberIDs)
+	if len(memberIDs) < 3 {
+		return nil
+	}
+
+	var slots []PlayerAvailability
+	DB.Where("player_id IN ?", memberIDs).Order("date, start_time").Find(&slots)
+	if len(slots) == 0 {
+		return nil
+	}
+
+	type ds struct {
+		date  string
+		start string
+		end   string
+	}
+	byDate := map[string][]ds{}
+	for _, s := range slots {
+		byDate[s.Date] = append(byDate[s.Date], ds{s.Date, s.StartTime, s.EndTime})
+	}
+
+	const minMinute = 6 * 60
+	const maxMinute = 26 * 60
+	const slotSize = 30
+	totalSlots := (maxMinute - minMinute) / slotSize
+
+	result := map[string][]struct {
+		Start     string
+		End       string
+		PlayerCnt int
+	}{}
+
+	for date, dateSlots := range byDate {
+		cov := make([]int, totalSlots)
+		for _, d := range dateSlots {
+			sp := strings.Split(d.start, ":")
+			ep := strings.Split(d.end, ":")
+			if len(sp) != 2 || len(ep) != 2 {
+				continue
+			}
+			sh, _ := strconv.Atoi(sp[0])
+			sm, _ := strconv.Atoi(sp[1])
+			eh, _ := strconv.Atoi(ep[0])
+			em, _ := strconv.Atoi(ep[1])
+			sm2 := sh*60 + sm
+			em2 := eh*60 + em
+			if sm2 < minMinute {
+				sm2 = minMinute
+			}
+			if em2 > maxMinute {
+				em2 = maxMinute
+			}
+			if sm2 >= em2 {
+				continue
+			}
+			ss := (sm2 - minMinute) / slotSize
+			es := (em2 - minMinute) / slotSize
+			for i := ss; i < es && i < totalSlots; i++ {
+				cov[i]++
+			}
+		}
+
+		var ranges []struct {
+			Start     string
+			End       string
+			PlayerCnt int
+		}
+		inR := false
+		rs := 0
+		mc := 0
+		for i := 0; i <= totalSlots; i++ {
+			c := 0
+			if i < totalSlots {
+				c = cov[i]
+			}
+			if c >= 3 {
+				if !inR {
+					inR = true
+					rs = i
+					mc = c
+				} else if c > mc {
+					mc = c
+				}
+			} else {
+				if inR {
+					smi := minMinute + rs*slotSize
+					emi := minMinute + i*slotSize
+					ranges = append(ranges, struct {
+						Start     string
+						End       string
+						PlayerCnt int
+					}{
+						Start:     fmt.Sprintf("%02d:%02d", (smi/60)%24, smi%60),
+						End:       fmt.Sprintf("%02d:%02d", (emi/60)%24, emi%60),
+						PlayerCnt: mc,
+					})
+					inR = false
+					mc = 0
+				}
+			}
+		}
+		if len(ranges) > 0 {
+			result[date] = ranges
+		}
+	}
+	return result
+}
+
+// GetMatchAvailability returns overlapping availability between both teams in a match.
+func GetMatchAvailability(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	matchID, err := strconv.Atoi(params["id"])
+	if err != nil || matchID <= 0 {
+		http.Error(w, "invalid match id", http.StatusBadRequest)
+		return
+	}
+
+	var match Match
+	if err := DB.First(&match, matchID).Error; err != nil {
+		http.Error(w, "match not found", http.StatusNotFound)
+		return
+	}
+
+	teamA := computeTeamAvailRanges(int(match.TeamAID))
+	teamB := computeTeamAvailRanges(int(match.TeamBID))
+
+	type OverlapRange struct {
+		Start        string `json:"start_time"`
+		End          string `json:"end_time"`
+		TeamAPlayers int    `json:"team_a_players"`
+		TeamBPlayers int    `json:"team_b_players"`
+	}
+	type DateOverlap struct {
+		Date   string         `json:"date"`
+		Ranges []OverlapRange `json:"ranges"`
+	}
+
+	if teamA == nil || teamB == nil {
+		respondJSON(w, map[string]any{
+			"dates":           []any{},
+			"team_a_has_data": teamA != nil,
+			"team_b_has_data": teamB != nil,
+			"message":         "Both teams need at least 3 players with availability set.",
+		})
+		return
+	}
+
+	allDates := map[string]bool{}
+	for d := range teamA {
+		allDates[d] = true
+	}
+	for d := range teamB {
+		allDates[d] = true
+	}
+
+	var dates []string
+	for d := range allDates {
+		if teamA[d] != nil && teamB[d] != nil {
+			dates = append(dates, d)
+		}
+	}
+	sort.Strings(dates)
+
+	var result []DateOverlap
+	for _, date := range dates {
+		var overlaps []OverlapRange
+		for _, ra := range teamA[date] {
+			for _, rb := range teamB[date] {
+				if ra.Start < rb.End && rb.Start < ra.End {
+					os := ra.Start
+					if rb.Start > os {
+						os = rb.Start
+					}
+					oe := ra.End
+					if rb.End < oe {
+						oe = rb.End
+					}
+					overlaps = append(overlaps, OverlapRange{
+						Start: os, End: oe,
+						TeamAPlayers: ra.PlayerCnt,
+						TeamBPlayers: rb.PlayerCnt,
+					})
+				}
+			}
+		}
+		if len(overlaps) > 1 {
+			sort.Slice(overlaps, func(i, j int) bool { return overlaps[i].Start < overlaps[j].Start })
+			merged := []OverlapRange{overlaps[0]}
+			for i := 1; i < len(overlaps); i++ {
+				last := &merged[len(merged)-1]
+				if overlaps[i].Start <= last.End {
+					if overlaps[i].End > last.End {
+						last.End = overlaps[i].End
+					}
+				} else {
+					merged = append(merged, overlaps[i])
+				}
+			}
+			overlaps = merged
+		}
+		if len(overlaps) > 0 {
+			result = append(result, DateOverlap{Date: date, Ranges: overlaps})
+		}
+	}
+
+	respondJSON(w, map[string]any{
+		"dates":           result,
+		"team_a_has_data": len(teamA) > 0,
+		"team_b_has_data": len(teamB) > 0,
+	})
+}

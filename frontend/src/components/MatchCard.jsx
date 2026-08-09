@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "./CustomEmoji";
+import MatchAvailability from "./MatchAvailability";
 
 export default function MatchCard({ match, team, urlBase, loadTeam, myRole, arenaModeEnabled = false }) {
     const isCaptain = myRole === "Captain" || myRole === "Co-Captain";
@@ -293,6 +294,9 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                         </>
                     )}
                 </div>
+
+                {/* Match availability hint for scheduling */}
+                <MatchAvailability matchId={match.id} compact />
 
                 {/* ================= SCORING ================= */}
                 {match.date && isCaptain && scheduleConfirmed && (

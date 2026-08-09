@@ -16,6 +16,7 @@ import Finals from "./pages/Finals";
 import RulesPage from "./pages/Rules";
 import LeagueMod from "./pages/LeagueMod";
 import LeagueSettings from "./pages/LeagueSettings";
+import PlayerSettings from "./pages/PlayerSettings";
 
 import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
@@ -535,6 +536,13 @@ function App() {
                       <button
                         type="button"
                         className="account-dropdown-item"
+                        onClick={() => { navigate("/playersettings"); setAccountDropdownOpen(false); closeMobileNav(); }}
+                      >
+                        <E n="clock" /> Player Settings
+                      </button>
+                      <button
+                        type="button"
+                        className="account-dropdown-item"
                         onClick={() => { window.location.href = `${getApiUrl()}/logout`; }}
                       >
                         <E n="door" /> Logout
@@ -716,6 +724,13 @@ function App() {
                       <button
                         type="button"
                         className="account-dropdown-item"
+                        onClick={() => { navigate("/playersettings"); setAccountDropdownOpen(false); }}
+                      >
+                        <E n="clock" /> Player Settings
+                      </button>
+                      <button
+                        type="button"
+                        className="account-dropdown-item"
                         onClick={() => { window.location.href = `${getApiUrl()}/logout`; }}
                       >
                         <E n="door" /> Logout
@@ -755,6 +770,7 @@ function App() {
                   {/* 🛠️ League Mod Route (extra protected inside component) */}
                   <Route path="/modpanel" element={<LeagueMod />} />
                   <Route path="/settings" element={<LeagueSettings />} />
+                  <Route path="/playersettings" element={<PlayerSettings />} />
                 </Routes>
               </ErrorBoundary>
             </div>

@@ -6,6 +6,7 @@ import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
 import TeamLogo from "../components/TeamLogo";
 import PlayerIdentity from "../components/PlayerIdentity";
+import MatchAvailability from "../components/MatchAvailability";
 
 export default function MatchDetail() {
     const { id } = useParams();
@@ -279,6 +280,9 @@ export default function MatchDetail() {
                     </div>
                 </div>
             </div>
+
+            {/* ================= MATCH AVAILABILITY ================= */}
+            <MatchAvailability matchId={match.id || id} />
 
             {/* ================= CAST & BROADCAST ================= */}
             {(castCasters.length > 0 || castCamera || streamURL) && (

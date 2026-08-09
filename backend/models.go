@@ -290,3 +290,14 @@ type Notification struct {
 	Read      bool      `json:"read" gorm:"default:false;index"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// --- Player Availability ---
+type PlayerAvailability struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	PlayerID  int64     `gorm:"index;not null" json:"player_id"`
+	Date      string    `json:"date"`       // "YYYY-MM-DD" format
+	StartTime string    `json:"start_time"` // "HH:MM" format (e.g., "18:00")
+	EndTime   string    `json:"end_time"`   // "HH:MM" format (e.g., "22:00")
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

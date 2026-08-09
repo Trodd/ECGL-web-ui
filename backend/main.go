@@ -872,6 +872,7 @@ func main() {
 
 	// Matches
 	api.HandleFunc("/match/schedule", HandleScheduleMatch).Methods("POST")
+	api.HandleFunc("/match/{id:[0-9]+}/availability", GetMatchAvailability).Methods("GET")
 	api.HandleFunc("/match/score", HandleSubmitScore).Methods("POST")
 	api.HandleFunc("/match/{id:[0-9]+}", HandleGetMatch).Methods("GET")
 	api.HandleFunc("/matches/team/{teamID:[0-9]+}", HandleGetTeamMatches).Methods("GET")
@@ -885,6 +886,7 @@ func main() {
 	api.HandleFunc("/myteam", GetMyTeam).Methods("GET") // ✅ session-based only
 	api.HandleFunc("/teams", GetTeams).Methods("GET")
 	api.HandleFunc("/team/{id:[0-9]+}", GetTeam).Methods("GET")
+	api.HandleFunc("/team/{id:[0-9]+}/availability", GetTeamAvailability).Methods("GET")
 	api.HandleFunc("/team/request", handleRequestJoinTeam).Methods("POST")
 	api.HandleFunc("/team/create", handleCreateTeam).Methods("POST")
 	api.HandleFunc("/team/{teamID:[0-9]+}/joinrequests", GetTeamJoinRequests).Methods("GET")
@@ -900,6 +902,8 @@ func main() {
 	api.HandleFunc("/players", GetPlayers).Methods("GET")
 	api.HandleFunc("/me", handleMe).Methods("GET")
 	api.HandleFunc("/player/{id:[0-9]+}", GetPlayerDetail).Methods("GET")
+	api.HandleFunc("/player/availability", GetPlayerAvailability).Methods("GET")
+	api.HandleFunc("/player/availability", SavePlayerAvailability).Methods("POST")
 
 	// Leaderboards
 	api.HandleFunc("/leaderboard/players", GetPlayerLeaderboard).Methods("GET")

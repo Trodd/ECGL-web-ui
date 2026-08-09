@@ -5,6 +5,7 @@ import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
 import TeamLogo from "../components/TeamLogo";
 import PlayerIdentity from "../components/PlayerIdentity";
+import TeamAvailability from "../components/TeamAvailability";
 
 export default function MyTeam() {
   const [data, setData] = useState({
@@ -768,6 +769,9 @@ export default function MyTeam() {
           )}
         </ul>
       </div>
+
+      {/* ================= TEAM AVAILABILITY ================= */}
+      <TeamAvailability teamId={team?.id} />
 
       {/* ================= ROSTER MANAGE MODAL ================= */}
       {rosterModal && (
