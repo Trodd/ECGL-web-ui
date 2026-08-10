@@ -1054,6 +1054,48 @@ export default function LeagueMod() {
                                         </button>
                                     </div>
                                 </div>
+
+                                {/* --- Ping Unscheduled Matches --- */}
+                                <div
+                                    className="p-3 mt-4 rounded"
+                                    style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
+                                >
+                                    <h6 className="text-warning mb-2">📣 Ping Unscheduled Matches (Current Week)</h6>
+                                    <p className="small text-light mb-2">
+                                        Pings each team involved in unscheduled matches for the current week.
+                                        One message per match in <code>DISCORD_LOG_CHANNEL_GENERAL</code>.
+                                    </p>
+
+                                    <button
+                                        className="btn btn-warning btn-sm"
+                                        onClick={async () => {
+                                            if (!confirm(
+                                                "This will ping EVERYONE on all unscheduled match teams in the general channel. Continue?"
+                                            )) return;
+
+                                            setMsg("📣 Sending ping...");
+
+                                            try {
+                                                const res = await axios.post(
+                                                    `${urlBase}/api/mod/matches/ping-unscheduled?season=${season || ""}`,
+                                                    {},
+                                                    { withCredentials: true }
+                                                );
+
+                                                if (res.data.created > 0) {
+                                                    setMsg(`✅ Pinged ${res.data.created} unscheduled matches in general channel!`);
+                                                } else {
+                                                    setMsg(`ℹ️ ${res.data.message || "No unscheduled matches found."}`);
+                                                }
+                                            } catch (err) {
+                                                console.error("Failed to ping unscheduled matches:", err);
+                                                setMsg("❌ Failed to send ping: " + (err.response?.data || err.message));
+                                            }
+                                        }}
+                                    >
+                                        📣 Ping All Unscheduled Matches
+                                    </button>
+                                </div>
                             </>
                         )}
                         {modTab === "matchTools" && (

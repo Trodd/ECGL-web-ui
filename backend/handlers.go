@@ -9592,6 +9592,47 @@ func HandleResetTeamChallenges(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandlePingUnscheduledMatches creates Discord channels for all unscheduled matches,
+// pinging both teams and league mods to coordinate scheduling.
+func HandlePingUnscheduledMatches(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		return
+	}
+
+	season := strings.TrimSpace(r.URL.Query().Get("season"))
+	if season == "" {
+		season = currentSeason
+	}
+
+	if discordSession == nil {
+		http.Error(w, "Discord bot is not connected", http.StatusServiceUnavailable)
+		return
+	}
+
+	count, err := PingUnscheduledMatches(discordSession, season)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if count == 0 {
+		respondJSON(w, map[string]any{
+			"success": true,
+			"created": 0,
+			"message": "No unscheduled matches found for the current week.",
+		})
+		return
+	}
+
+	LogGeneral(fmt.Sprintf("📣 Sent unscheduled match ping for %d matches (season %s)", count, season))
+
+	respondJSON(w, map[string]any{
+		"success": true,
+		"created": count,
+		"message": fmt.Sprintf("Pinged %d unscheduled matches for week %d.", count, GetGlobalCurrentWeek()),
+	})
+}
+
 func HandleArchiveTeamStats(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireLeagueMod(w, r); !ok {
 		return

@@ -726,6 +726,8 @@ func main() {
 		log.Fatalf("❌ Failed to connect to Discord: %v", err)
 	}
 
+	discordSession = dg // make available to handlers
+
 	defer dg.Close()
 
 	log.Println("🤖 Discord bot connected (prefix commands enabled)")
@@ -837,6 +839,7 @@ func main() {
 	r.HandleFunc("/api/mod/sync-roles", HandleModSyncRoles).Methods("POST")
 	r.HandleFunc("/api/mod/challenges/enable", HandleEnableGlobalChallenges).Methods("POST")
 	r.HandleFunc("/api/mod/challenges/disable", HandleDisableGlobalChallenges).Methods("POST")
+	r.HandleFunc("/api/mod/matches/ping-unscheduled", HandlePingUnscheduledMatches).Methods("POST")
 	r.HandleFunc("/api/mod/team/adjust-stats", HandleModAdjustTeamStats).Methods("POST")
 	r.HandleFunc("/api/mod/team/stats", HandleModGetTeamStats).Methods("GET")
 	r.HandleFunc("/api/mod/player/adjust-stats", HandleModAdjustPlayerStats).Methods("POST")

@@ -1128,6 +1128,78 @@ func sanitizeChannelName(name string) string {
 	return result
 }
 
+// PingUnscheduledMatches sends individual ping messages to DISCORD_LOG_CHANNEL_GENERAL
+// for each unscheduled match, pinging only the players on both teams.
+func PingUnscheduledMatches(s *discordgo.Session, season string) (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("discord session is nil")
+	}
+
+	generalChannelID := os.Getenv("DISCORD_LOG_CHANNEL_GENERAL")
+	if generalChannelID == "" {
+		return 0, fmt.Errorf("missing DISCORD_LOG_CHANNEL_GENERAL")
+	}
+
+	// Find unscheduled matches for the current week only
+	currentWeek := strconv.Itoa(GetGlobalCurrentWeek())
+	var matches []Match
+	err := DB.Where(
+		"status NOT IN (?,?,?,?,?) AND scheduled_date IS NULL AND week = ?",
+		"Finished", "Completed", "Forfeit", "Forfeited", "Cancelled", currentWeek,
+	)
+	if season != "" {
+		err = DB.Where(
+			"status NOT IN (?,?,?,?,?) AND scheduled_date IS NULL AND week = ? AND season = ?",
+			"Finished", "Completed", "Forfeit", "Forfeited", "Cancelled", currentWeek, season,
+		)
+	}
+	if err.Find(&matches).Error != nil {
+		return 0, fmt.Errorf("failed to query matches: %w", err)
+	}
+
+	if len(matches) == 0 {
+		return 0, nil
+	}
+
+	sent := 0
+	for _, m := range matches {
+		var teamA, teamB Team
+		if DB.First(&teamA, m.TeamAID).Error != nil {
+			continue
+		}
+		if DB.First(&teamB, m.TeamBID).Error != nil {
+			continue
+		}
+
+		var membersA, membersB []TeamMember
+		DB.Where("team_id = ?", m.TeamAID).Find(&membersA)
+		DB.Where("team_id = ?", m.TeamBID).Find(&membersB)
+
+		pings := []string{}
+		for _, tm := range membersA {
+			pings = append(pings, fmt.Sprintf("<@%d>", tm.PlayerID))
+		}
+		for _, tm := range membersB {
+			pings = append(pings, fmt.Sprintf("<@%d>", tm.PlayerID))
+		}
+
+		msg := fmt.Sprintf(
+			"📅 **Unscheduled match:** %s vs %s — `%s` (Week %s)\n%s",
+			teamA.Name, teamB.Name, m.MatchCode, m.Week,
+			strings.Join(pings, " "),
+		)
+
+		if _, sendErr := s.ChannelMessageSend(generalChannelID, msg); sendErr != nil {
+			log.Printf("⚠️ Failed to send ping for match %d: %v", m.ID, sendErr)
+			continue
+		}
+		sent++
+	}
+
+	log.Printf("📣 Sent %d unscheduled match pings for week %s to general channel", sent, currentWeek)
+	return sent, nil
+}
+
 // respondInteractionEphemeral sends an ephemeral message response to an interaction.
 func respondInteractionEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, msg string) {
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
