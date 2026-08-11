@@ -7,16 +7,16 @@ export default function CastModal({
     matchID,
     existingCast,
     urlBase,
-    onSaved
+    onSaved,
+    me
 }) {
     const [players, setPlayers] = useState([]);
-    const [casters, setCasters] = useState([]);
-    const [camera, setCamera] = useState("");
-
-    const [casterSearch, setCasterSearch] = useState("");
-    const [cameraSearch, setCameraSearch] = useState("");
+    const [casterSlots, setCasterSlots] = useState(["", "", ""]); // 3 caster slots
+    const [cameraSlot, setCameraSlot] = useState("");
     const [streamURL, setStreamURL] = useState("");
     const [streamError, setStreamError] = useState("");
+    const [assignOpen, setAssignOpen] = useState(null); // "caster_0", "caster_1", "caster_2", "camera"
+    const [assignSearch, setAssignSearch] = useState("");
 
     useEffect(() => {
         if (!show) return;
@@ -27,87 +27,99 @@ export default function CastModal({
                 const list = Array.isArray(res.data) ? res.data : [];
                 setPlayers(list);
 
-                // Normalize existing cast
                 const savedCasters = (existingCast?.casters || []).map(String);
-                const savedCamera = existingCast?.camera ? String(existingCast.camera) : "";
-                const savedStream = existingCast?.stream_url || "";
-
-                setCasters(savedCasters);
-                setCamera(savedCamera);
-                setStreamURL(savedStream);
+                // Fill up to 3 slots
+                const slots = ["", "", ""];
+                for (let i = 0; i < Math.min(savedCasters.length, 3); i++) {
+                    slots[i] = savedCasters[i];
+                }
+                setCasterSlots(slots);
+                setCameraSlot(existingCast?.camera ? String(existingCast.camera) : "");
+                setStreamURL(existingCast?.stream_url || "");
             })
             .catch(() => {
                 setPlayers([]);
-                setCasters([]);
-                setCamera("");
+                setCasterSlots(["", "", ""]);
+                setCameraSlot("");
                 setStreamURL("");
-            });
-    }, [show]);
-
-    // Load players ONLY when modal is open
-    useEffect(() => {
-        if (!show) return;
-
-        axios
-            .get(`${urlBase}/api/players`, { withCredentials: true })
-            .then((res) => {
-                const list = Array.isArray(res.data) ? res.data : [];
-                setPlayers(list);
-
-                // Normalize existing cast IDs (numbers → strings)
-                const savedCasters = (existingCast?.casters || []).map(String);
-                const savedCamera = existingCast?.camera ? String(existingCast.camera) : "";
-
-                setCasters(savedCasters);
-                setCamera(savedCamera);
-            })
-            .catch(() => {
-                setPlayers([]);
-                setCasters([]);
-                setCamera("");
             });
     }, [show]);
 
     if (!show) return null;
 
-    function toggleCaster(id) {
-        id = String(id);
-        setCasters((prev) =>
-            prev.includes(id)
-                ? prev.filter((x) => x !== id)
-                : [...prev, id]
-        );
+    const canClaim = me?.is_caster || me?.is_mod;
+    const myId = me?.id ? String(me.id) : "";
+
+    function claimSlot(slotKey) {
+        if (slotKey === "camera") {
+            setCameraSlot(myId);
+        } else {
+            const idx = parseInt(slotKey.split("_")[1]);
+            setCasterSlots((prev) => {
+                const next = [...prev];
+                next[idx] = myId;
+                return next;
+            });
+        }
+    }
+
+    function unclaimSlot(slotKey) {
+        if (slotKey === "camera") {
+            setCameraSlot("");
+        } else {
+            const idx = parseInt(slotKey.split("_")[1]);
+            setCasterSlots((prev) => {
+                const next = [...prev];
+                next[idx] = "";
+                return next;
+            });
+        }
+    }
+
+    function assignPlayer(slotKey, playerId) {
+        if (slotKey === "camera") {
+            setCameraSlot(String(playerId));
+        } else {
+            const idx = parseInt(slotKey.split("_")[1]);
+            setCasterSlots((prev) => {
+                const next = [...prev];
+                next[idx] = String(playerId);
+                return next;
+            });
+        }
+        setAssignOpen(null);
+        setAssignSearch("");
+    }
+
+    function getPlayerName(id) {
+        if (!id) return null;
+        const p = players.find((x) => String(x.id) === String(id));
+        return p ? (p.display_name || p.username) : "Unknown";
     }
 
     function isValidYouTube(url) {
-        if (!url) return true; // optional field
+        if (!url) return true;
         return /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/.+/.test(url);
     }
 
     async function saveCast() {
-        if (casters.length === 0) {
+        const filledCasters = casterSlots.filter(Boolean);
+        if (filledCasters.length === 0) {
             alert("Pick at least one caster.");
             return;
         }
-        if (!camera) {
+        if (!cameraSlot) {
             alert("Select a camera operator.");
             return;
         }
-
-        // YouTube URL validation
         if (!isValidYouTube(streamURL)) {
-            setStreamError("Invalid YouTube URL. Example: https://youtube.com/live/xxxx");
+            setStreamError("Invalid YouTube URL.");
             return;
         }
 
         try {
-            // Detect whether this is an edit (not a new cast)
-            const isEditing =
-                !!(existingCast?.casters?.length ||
-                    existingCast?.camera ||
-                    existingCast?.stream_url);
+            const isEditing = !!(existingCast?.casters?.length || existingCast?.camera || existingCast?.stream_url);
 
-            // Step 1 — Only create Discord channel if this is NOT an edit
             if (!isEditing) {
                 await axios.post(
                     `${urlBase}/api/match/cast/request`,
@@ -116,244 +128,192 @@ export default function CastModal({
                 );
             }
 
-            // Step 2 — Save cast + stream URL to DB
             await axios.post(
                 `${urlBase}/api/match/cast`,
                 {
                     match_id: Number(matchID),
-                    casters: casters.map(String),
-                    camera_id: camera.toString(),
+                    casters: filledCasters.map(String),
+                    camera_id: cameraSlot.toString(),
                     stream_url: streamURL.trim(),
                 },
                 { withCredentials: true }
             );
 
-            alert("🎥 Cast saved!");
             onSaved?.();
             onClose();
-
         } catch (err) {
-            console.error("❌ Failed to save cast:", err);
+            console.error("Failed to save cast:", err);
             alert(err.response?.data || "Failed to save cast.");
         }
     }
 
     async function deleteCast() {
         if (!confirm("Remove this cast assignment?")) return;
-
         try {
-            await axios.post(
-                `${urlBase}/api/match/cast/delete`,
-                { match_id: Number(matchID) },
-                { withCredentials: true }
-            );
-
-            alert("🗑 Cast removed.");
+            await axios.post(`${urlBase}/api/match/cast/delete`, { match_id: Number(matchID) }, { withCredentials: true });
             if (onSaved) onSaved();
             onClose();
         } catch (err) {
-            console.error("❌ Failed to remove cast:", err);
+            console.error("Failed to remove cast:", err);
             alert("Failed to remove cast.");
         }
     }
 
-    // CLIENT-SIDE FILTERING
-    const filteredCasters = players.filter((p) => {
+    const filteredAssign = players.filter((p) => {
+        if (!assignSearch) return true;
         const name = (p.display_name || p.username || "").toLowerCase();
-        return name.includes(casterSearch.toLowerCase());
+        return name.includes(assignSearch.toLowerCase());
     });
 
-    const filteredCameraPlayers = players.filter((p) => {
-        const name = (p.display_name || p.username || "").toLowerCase();
-        return name.includes(cameraSearch.toLowerCase());
-    });
+    function renderSlot(label, slotKey, currentValue) {
+        const playerName = getPlayerName(currentValue);
+        const isMine = currentValue && String(currentValue) === myId;
+
+        return (
+            <div className="cast-slot-row">
+                <span className="cast-slot-label">{label}</span>
+                <div className="cast-slot-value">
+                    {playerName ? (
+                        <>
+                            <span className="cast-slot-name">{playerName}</span>
+                            {(isMine || me?.is_mod) && (
+                                <button className="btn btn-outline-danger btn-sm py-0 px-2" onClick={() => unclaimSlot(slotKey)}>
+                                    ✕
+                                </button>
+                            )}
+                        </>
+                    ) : (
+                        <span className="text-muted small">Empty</span>
+                    )}
+                </div>
+                <div className="cast-slot-actions">
+                    {!playerName && canClaim && (
+                        <button className="btn btn-outline-success btn-sm py-0 px-2" onClick={() => claimSlot(slotKey)}>
+                            Claim
+                        </button>
+                    )}
+                    {(me?.is_mod || me?.is_caster) && (
+                        <div style={{ position: "relative" }}>
+                            <button
+                                className="btn btn-outline-secondary btn-sm py-0 px-2"
+                                onClick={() => setAssignOpen(assignOpen === slotKey ? null : slotKey)}
+                            >
+                                Assign
+                            </button>
+                            {assignOpen === slotKey && (
+                                <div className="cast-assign-dropdown">
+                                    <input
+                                        type="text"
+                                        className="form-control form-control-sm bg-dark text-light mb-1"
+                                        placeholder="Search..."
+                                        value={assignSearch}
+                                        onChange={(e) => setAssignSearch(e.target.value)}
+                                        autoFocus
+                                    />
+                                    <div className="cast-assign-list">
+                                        {filteredAssign.slice(0, 20).map((p) => (
+                                            <button
+                                                key={p.id}
+                                                type="button"
+                                                className="cast-assign-item"
+                                                onClick={() => assignPlayer(slotKey, p.id)}
+                                            >
+                                                {p.display_name || p.username}
+                                            </button>
+                                        ))}
+                                        {filteredAssign.length === 0 && (
+                                            <div className="text-muted small p-1">No matches</div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="cast-overlay">
-            <div className="cast-window card bg-dark border-secondary shadow-lg">
+        <div className="cast-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+            <div className="cast-window card bg-dark border-secondary shadow-lg" onClick={(e) => e.stopPropagation()}>
 
-                {/* ================= HEADER ================= */}
                 <div className="card-header d-flex justify-content-between align-items-center">
                     <h5 className="mb-0 text-info">
                         🎥 {existingCast ? "Edit Match Cast" : "Schedule Match Cast"}
                     </h5>
-
-                    <button
-                        className="btn btn-sm btn-outline-light"
-                        onClick={onClose}
-                        title="Close"
-                    >
-                        ✕
-                    </button>
+                    <button className="btn btn-sm btn-outline-light" onClick={onClose}>✕</button>
                 </div>
 
                 <div className="card-body">
-
-                    {/* ================= CASTERS ================= */}
-                    <div className="mb-4">
-                        <label className="fw-bold mb-1">🎙 Casters</label>
-
-                        <input
-                            type="text"
-                            className="form-control form-control-sm bg-dark text-light mb-2"
-                            placeholder="Search players..."
-                            value={casterSearch}
-                            onChange={(e) => setCasterSearch(e.target.value)}
-                        />
-
-                        <div className="cast-scroll">
-                            {filteredCasters.length === 0 ? (
-                                <div className="text-warning small text-center py-2">
-                                    No matching players
-                                </div>
-                            ) : (
-                                filteredCasters.map((p) => (
-                                    <label
-                                        key={p.id}
-                                        className="d-flex align-items-center gap-2 cast-row"
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            className="form-check-input"
-                                            checked={casters.includes(String(p.id))}
-                                            onChange={() => toggleCaster(p.id)}
-                                        />
-                                        <span>
-                                            {p.display_name || p.username}
-                                        </span>
-                                    </label>
-                                ))
-                            )}
-                        </div>
-
-                        {casters.length > 0 && (
-                            <div className="small text-secondary mt-1">
-                                Selected: {casters.length}
-                            </div>
-                        )}
+                    {/* Caster slots */}
+                    <div className="mb-3">
+                        <label className="fw-bold mb-2">🎙 Casters</label>
+                        {renderSlot("Caster 1", "caster_0", casterSlots[0])}
+                        {renderSlot("Caster 2", "caster_1", casterSlots[1])}
+                        {renderSlot("Caster 3", "caster_2", casterSlots[2])}
                     </div>
 
-                    {/* ================= CAMERA ================= */}
-                    <div className="mb-4">
-                        <label className="fw-bold mb-1">🎮 Camera Operator</label>
-
-                        <input
-                            type="text"
-                            className="form-control form-control-sm bg-dark text-light mb-2"
-                            placeholder="Search camera operator..."
-                            value={cameraSearch}
-                            onChange={(e) => setCameraSearch(e.target.value)}
-                        />
-
-                        <select
-                            className="form-select bg-dark text-light"
-                            value={camera}
-                            onChange={(e) => setCamera(e.target.value)}
-                        >
-                            <option value="">Select operator…</option>
-                            {filteredCameraPlayers.map((p) => (
-                                <option key={p.id} value={String(p.id)}>
-                                    {p.display_name || p.username}
-                                </option>
-                            ))}
-                        </select>
+                    {/* Camera slot */}
+                    <div className="mb-3">
+                        <label className="fw-bold mb-2">🎮 Camera Operator</label>
+                        {renderSlot("Cam Op", "camera", cameraSlot)}
                     </div>
 
-                    {/* ================= STREAM ================= */}
+                    {/* Stream URL */}
                     <div className="mb-3">
                         <label className="fw-bold mb-1">📺 YouTube Stream URL (optional)</label>
-
                         <input
                             type="text"
                             className="form-control form-control-sm bg-dark text-light"
                             placeholder="https://youtube.com/live/…"
                             value={streamURL}
-                            onChange={(e) => {
-                                setStreamURL(e.target.value);
-                                setStreamError("");
-                            }}
+                            onChange={(e) => { setStreamURL(e.target.value); setStreamError(""); }}
                         />
-
-                        {streamError && (
-                            <div className="text-danger small mt-1">
-                                {streamError}
-                            </div>
-                        )}
+                        {streamError && <div className="text-danger small mt-1">{streamError}</div>}
                     </div>
                 </div>
 
-                {/* ================= FOOTER ================= */}
                 <div className="card-footer d-flex justify-content-between align-items-center">
-
                     {existingCast ? (
-                        <button
-                            className="btn btn-outline-danger btn-sm"
-                            onClick={deleteCast}
-                        >
-                            🗑 Remove Cast
-                        </button>
-                    ) : (
-                        <span />
-                    )}
-
+                        <button className="btn btn-outline-danger btn-sm" onClick={deleteCast}>🗑 Remove Cast</button>
+                    ) : <span />}
                     <div className="d-flex gap-2">
-                        <button
-                            className="btn btn-success btn-sm"
-                            onClick={saveCast}
-                        >
-                            💾 Save
-                        </button>
-
-                        <button
-                            className="btn btn-secondary btn-sm"
-                            onClick={onClose}
-                        >
-                            Cancel
-                        </button>
+                        <button className="btn btn-success btn-sm" onClick={saveCast}>💾 Save</button>
+                        <button className="btn btn-secondary btn-sm" onClick={onClose}>Cancel</button>
                     </div>
                 </div>
             </div>
 
             <style>{`
             .cast-overlay {
-                position: fixed;
-                inset: 0;
-                background: rgba(0,0,0,0.6);
-                backdrop-filter: blur(4px);
-                z-index: 5000;
-                display: flex;
-                align-items: center;
-                justify-content: center;
+                position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+                backdrop-filter: blur(4px); z-index: 5000;
+                display: flex; align-items: center; justify-content: center;
             }
-
-            .cast-window {
-                width: 460px;
-                max-width: 95%;
-                border-radius: 12px;
+            .cast-window { width: 460px; max-width: 95%; border-radius: 12px; }
+            .cast-slot-row {
+                display: flex; align-items: center; gap: 8px;
+                padding: 6px 8px; margin-bottom: 4px;
+                background: #151515; border: 1px solid #333; border-radius: 8px;
             }
-
-            .cast-scroll {
-                max-height: 180px;
-                overflow-y: auto;
-                border: 1px solid #333;
-                border-radius: 8px;
-                padding: 6px;
-                background: #151515;
+            .cast-slot-label { font-size: 0.78rem; color: #888; min-width: 55px; font-weight: 600; }
+            .cast-slot-value { flex: 1; display: flex; align-items: center; gap: 6px; }
+            .cast-slot-name { font-weight: 600; font-size: 0.85rem; }
+            .cast-slot-actions { display: flex; gap: 4px; }
+            .cast-assign-dropdown {
+                position: absolute; top: 100%; right: 0; z-index: 10;
+                background: #1a1a1a; border: 1px solid #444; border-radius: 8px;
+                padding: 6px; width: 200px; margin-top: 4px;
             }
-
-            .cast-row {
-                padding: 6px 8px;
-                border-radius: 6px;
+            .cast-assign-list { max-height: 160px; overflow-y: auto; }
+            .cast-assign-item {
+                display: block; width: 100%; text-align: left;
+                background: none; border: none; color: #ddd;
+                padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;
                 cursor: pointer;
             }
-
-            .cast-row:hover {
-                background: rgba(255,255,255,0.06);
-            }
-
-            .cast-row input {
-                margin-top: 0;
-            }
+            .cast-assign-item:hover { background: rgba(255,255,255,0.06); }
             `}</style>
         </div>
     );

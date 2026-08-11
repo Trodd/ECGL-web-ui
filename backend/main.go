@@ -764,6 +764,7 @@ func main() {
 	r.HandleFunc("/api/match/cast/get/{id}", HandleGetCast).Methods("GET")
 	r.HandleFunc("/api/match/cast/delete", HandleDeleteCast).Methods("POST")
 	r.HandleFunc("/api/match/cast/request", HandleRequestCast).Methods("POST")
+	r.HandleFunc("/api/match/go-live", HandleGoLive).Methods("POST")
 
 	// Auth routes
 	r.HandleFunc("/login", handleLogin).Methods("GET")

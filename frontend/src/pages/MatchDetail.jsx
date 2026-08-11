@@ -16,6 +16,7 @@ export default function MatchDetail() {
     const [players, setPlayers] = useState([]);
     const [showCastModal, setShowCastModal] = useState(false);
     const [existingCast, setExistingCast] = useState(null);
+    const [goLiveMsg, setGoLiveMsg] = useState("");
 
     // -----------------------------------------------------
     // LOAD ALL PLAYERS
@@ -215,12 +216,44 @@ export default function MatchDetail() {
                     Match Details <span className="text-secondary">#{match.id || id}</span>
                 </h3>
 
-                {me && (match.isFinals || match.scheduled_date) && (
+                {me && (me.is_caster || me.is_mod) && existingCast && (
+                    <>
+                        <button
+                            className="btn btn-info btn-sm"
+                            onClick={openCastEditor}
+                        >
+                            <E n="gamepad" /> Edit Cast
+                        </button>
+                        {existingCast?.casters?.length > 0 && existingCast?.camera && match.scheduled_date && (
+                            <button
+                                className="btn btn-danger btn-sm ms-2"
+                                onClick={async () => {
+                                    if (!confirm("Announce this match is LIVE?")) return;
+                                    setGoLiveMsg("Posting...");
+                                    try {
+                                        const res = await axios.post(
+                                            `${getApiUrl()}/api/match/go-live`,
+                                            { match_id: Number(id) },
+                                            { withCredentials: true }
+                                        );
+                                        setGoLiveMsg(res.data?.message || "Sent!");
+                                    } catch (err) {
+                                        setGoLiveMsg("Failed: " + (err.response?.data || err.message));
+                                    }
+                                }}
+                            >
+                                🔴 Go Live
+                            </button>
+                        )}
+                        {goLiveMsg && <span className="text-info small ms-2">{goLiveMsg}</span>}
+                    </>
+                )}
+                {me && (match.isFinals || match.scheduled_date) && !existingCast && (
                     <button
                         className="btn btn-info btn-sm"
                         onClick={openCastEditor}
                     >
-                        <E n="gamepad" /> {existingCast ? "Edit Cast" : "Cast Match"}
+                        <E n="gamepad" /> Cast Match
                     </button>
                 )}
             </div>
@@ -231,6 +264,7 @@ export default function MatchDetail() {
                 matchID={id}
                 existingCast={existingCast}
                 urlBase={getApiUrl()}
+                me={me}
                 onSaved={() => {
                     axios.get(`${getApiUrl()}/api/match/${id}`)
                         .then(res => setMatchData(res.data));

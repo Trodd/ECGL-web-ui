@@ -7106,6 +7106,92 @@ func HandleDeleteCast(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleGoLive checks configured Twitch/YouTube accounts for live streams
+// and announces a live cast to Discord, pinging the caster role.
+func HandleGoLive(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireLeagueMod(w, r); !ok {
+		session, _ := store.Get(r, "session")
+		discordIDStr, _ := session.Values["discord_id"].(string)
+		if discordIDStr == "" || !userHasDiscordRole(discordIDStr, os.Getenv("DISCORD_CASTER_ROLE_ID")) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+	}
+
+	var req struct {
+		MatchID uint `json:"match_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	if req.MatchID == 0 {
+		http.Error(w, "Missing match_id", http.StatusBadRequest)
+		return
+	}
+
+	var match Match
+	if err := DB.First(&match, req.MatchID).Error; err != nil {
+		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
+	var teamA, teamB Team
+	DB.First(&teamA, match.TeamAID)
+	DB.First(&teamB, match.TeamBID)
+
+	// Build stream URL from env
+	streamURL := os.Getenv("TWITCH_CHANNEL")
+	if streamURL == "" {
+		var multi CastLogMulti
+		if DB.Where("match_id = ?", req.MatchID).First(&multi).Error == nil && multi.StreamURL != "" {
+			streamURL = multi.StreamURL
+		}
+	}
+
+	msg := ""
+	if streamURL != "" {
+		msg = fmt.Sprintf("# [ECGL](%s) We are live now casting **%s** vs **%s**", streamURL, teamA.Name, teamB.Name)
+	} else {
+		msg = fmt.Sprintf("# 🔴 We are live now casting **%s** vs **%s**", teamA.Name, teamB.Name)
+	}
+
+	pingRoles := os.Getenv("DISCORD_GO_LIVE_PING_ROLES")
+	if pingRoles != "" {
+		pings := []string{}
+		for _, roleID := range strings.Split(pingRoles, ",") {
+			roleID = strings.TrimSpace(roleID)
+			if roleID != "" {
+				pings = append(pings, fmt.Sprintf("<@&%s>", roleID))
+			}
+		}
+		if len(pings) > 0 {
+			msg += "\n\n" + strings.Join(pings, " ")
+		}
+	}
+
+	channelID := os.Getenv("DISCORD_GO_LIVE_CHANNEL")
+	if channelID == "" {
+		channelID = os.Getenv("DISCORD_LOG_CHANNEL_GENERAL")
+	}
+	if channelID == "" {
+		http.Error(w, "Missing channel", http.StatusInternalServerError)
+		return
+	}
+	if discordSession == nil {
+		http.Error(w, "Discord bot not connected", http.StatusServiceUnavailable)
+		return
+	}
+
+	_, err := discordSession.ChannelMessageSend(channelID, msg)
+	if err != nil {
+		http.Error(w, "Failed to send: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]any{"success": true, "message": "Go-live announcement sent!"})
+}
+
 // POST /api/mod/team/adjust-stats
 func HandleModAdjustTeamStats(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireLeagueMod(w, r); !ok {
