@@ -1707,6 +1707,14 @@ a:hover {
   pointer-events: none;
 }
 
+.ta-month-cell.clickable {
+  cursor: pointer;
+}
+
+.ta-month-cell.clickable:hover:not(.other) {
+  border-color: var(--accent);
+}
+
 .ta-month-cell.has-overlap {
   background: rgba(59, 110, 165, 0.15);
   border-color: var(--accent);
