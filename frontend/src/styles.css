@@ -1674,15 +1674,15 @@ a:hover {
   font-size: 0.75rem;
 }
 
-/* ─── Team Availability Mini Calendar ─── */
-.ta-mini-cal {
+/* ─── Team Availability Month Grid ─── */
+.ta-month-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 3px;
   margin-bottom: 6px;
 }
 
-.ta-mini-header {
+.ta-month-header {
   text-align: center;
   font-size: 0.6rem;
   font-weight: 700;
@@ -1692,78 +1692,73 @@ a:hover {
   padding: 2px 0;
 }
 
-.ta-mini-cell {
-  aspect-ratio: 1;
+.ta-month-cell {
+  min-height: 42px;
   border: 1px solid var(--border-default);
   border-radius: 4px;
   background: var(--bg-surface);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 0.7rem;
-  font-weight: 500;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--transition-fast);
-  -webkit-tap-highlight-color: transparent;
+  padding: 2px 3px;
+  font-size: 0.6rem;
+  overflow: hidden;
 }
 
-.ta-mini-cell:hover:not(.other) {
-  background: var(--bg-elevated);
-  border-color: var(--accent);
-}
-
-.ta-mini-cell.other {
+.ta-month-cell.other {
   opacity: 0;
   pointer-events: none;
 }
 
-.ta-mini-cell.has-avail {
-  background: rgba(59, 110, 165, 0.2);
+.ta-month-cell.has-overlap {
+  background: rgba(59, 110, 165, 0.15);
   border-color: var(--accent);
-  color: var(--text-accent);
+}
+
+.ta-month-cell.has-data {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border-subtle);
+}
+
+.ta-month-day {
   font-weight: 700;
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  display: block;
+  margin-bottom: 1px;
 }
 
-.ta-mini-cell.has-avail.selected {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent-bright);
-  box-shadow: 0 0 0 2px var(--accent-glow);
-}
-
-.ta-detail {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-}
-
-.ta-detail-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.ta-detail-header strong {
-  font-size: 0.82rem;
+.ta-month-cell.has-overlap .ta-month-day {
   color: var(--text-accent);
 }
 
-.ta-range-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: rgba(46, 160, 67, 0.1);
-  border: 1px solid rgba(46, 160, 67, 0.3);
-  border-radius: 999px;
-  padding: 2px 10px;
-  font-size: 0.72rem;
+.ta-cell-overlap {
+  margin-top: 1px;
+}
+
+.ta-cell-time {
+  display: block;
   color: var(--success);
-  margin-right: 4px;
-  margin-bottom: 4px;
+  font-weight: 600;
+  font-size: 0.55rem;
+  line-height: 1.2;
+}
+
+.ta-cell-player {
+  display: inline-block;
+  background: rgba(59, 110, 165, 0.2);
+  color: var(--text-accent);
+  border-radius: 3px;
+  padding: 0 2px;
+  margin: 1px 1px 0 0;
+  font-size: 0.5rem;
+  line-height: 1.4;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ta-cell-player.dim {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-tertiary);
 }
 
 .bg-dark.form-control,

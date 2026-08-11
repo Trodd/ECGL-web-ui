@@ -10659,131 +10659,163 @@ func GetTeamAvailability(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get all team member player IDs
-	var memberIDs []int64
-	DB.Table("team_members").Where("team_id = ?", teamID).Pluck("player_id", &memberIDs)
-	if len(memberIDs) < 3 {
-		respondJSON(w, map[string]any{"dates": []any{}, "message": "Need at least 3 players for team availability"})
+	var members []TeamMember
+	DB.Where("team_id = ?", teamID).Find(&members)
+	if len(members) == 0 {
+		respondJSON(w, map[string]any{"dates": []any{}})
 		return
 	}
 
-	// Get all availability for these members
+	memberIDs := make([]int64, len(members))
+	for i, m := range members {
+		memberIDs[i] = m.PlayerID
+	}
+
+	playerMap := map[int64]string{}
+	for _, m := range members {
+		var p Player
+		if DB.First(&p, m.PlayerID).Error == nil {
+			name := p.DisplayName
+			if name == "" {
+				name = p.Username
+			}
+			playerMap[m.PlayerID] = name
+		}
+	}
+
 	var slots []PlayerAvailability
 	DB.Where("player_id IN ?", memberIDs).Order("date, start_time").Find(&slots)
-
 	if len(slots) == 0 {
 		respondJSON(w, map[string]any{"dates": []any{}})
 		return
 	}
 
-	// Group by date, then for each date compute overlapping availability
-	type dateSlot struct {
-		date  string
-		start string
-		end   string
-	}
+	const minMinute = 6 * 60
+	const maxMinute = 26 * 60
+	const slotSize = 30
+	totalSlots := (maxMinute - minMinute) / slotSize
 
-	byDate := map[string][]dateSlot{}
+	// Group by date -> player -> ranges (raw)
+	type rawRange struct {
+		Start string
+		End   string
+	}
+	byDate := map[string]map[int64][]rawRange{}
 	for _, s := range slots {
-		byDate[s.Date] = append(byDate[s.Date], dateSlot{s.Date, s.StartTime, s.EndTime})
+		if byDate[s.Date] == nil {
+			byDate[s.Date] = map[int64][]rawRange{}
+		}
+		byDate[s.Date][s.PlayerID] = append(byDate[s.Date][s.PlayerID], rawRange{s.StartTime, s.EndTime})
 	}
 
-	type TimeRange struct {
-		Start     string `json:"start_time"`
-		End       string `json:"end_time"`
-		PlayerCnt int    `json:"player_count"`
+	type Overlap struct {
+		Start   string   `json:"start_time"`
+		End     string   `json:"end_time"`
+		Players []string `json:"players"`
+	}
+	type DateEntry struct {
+		Date     string    `json:"date"`
+		Players  []string  `json:"players"`
+		Overlaps []Overlap `json:"overlaps,omitempty"`
 	}
 
-	type DateAvailability struct {
-		Date   string      `json:"date"`
-		Ranges []TimeRange `json:"ranges"`
-	}
+	var result []DateEntry
 
-	var result []DateAvailability
+	for date, playerRanges := range byDate {
+		// Build per-slot presence for overlap detection
+		slotPlayers := make([]map[int64]bool, totalSlots)
+		for i := range slotPlayers {
+			slotPlayers[i] = map[int64]bool{}
+		}
 
-	for date, dateSlots := range byDate {
-		const minMinute = 6 * 60
-		const maxMinute = 26 * 60
-		const slotSize = 30
-		totalSlots := (maxMinute - minMinute) / slotSize
-
-		coverage := make([]int, totalSlots)
-
-		for _, ds := range dateSlots {
-			startParts := strings.Split(ds.start, ":")
-			endParts := strings.Split(ds.end, ":")
-			if len(startParts) != 2 || len(endParts) != 2 {
-				continue
-			}
-			sh, _ := strconv.Atoi(startParts[0])
-			sm, _ := strconv.Atoi(startParts[1])
-			eh, _ := strconv.Atoi(endParts[0])
-			em, _ := strconv.Atoi(endParts[1])
-
-			startMin := sh*60 + sm
-			endMin := eh*60 + em
-
-			if startMin < minMinute {
-				startMin = minMinute
-			}
-			if endMin > maxMinute {
-				endMin = maxMinute
-			}
-			if startMin >= endMin {
-				continue
-			}
-
-			startSlot := (startMin - minMinute) / slotSize
-			endSlot := (endMin - minMinute) / slotSize
-			for i := startSlot; i < endSlot && i < totalSlots; i++ {
-				coverage[i]++
+		for pid, ranges := range playerRanges {
+			for _, r := range ranges {
+				sh, sm := 0, 0
+				fmt.Sscanf(r.Start, "%d:%d", &sh, &sm)
+				eh, em := 0, 0
+				fmt.Sscanf(r.End, "%d:%d", &eh, &em)
+				startMin := sh*60 + sm
+				endMin := eh*60 + em
+				if startMin < minMinute {
+					startMin = minMinute
+				}
+				if endMin > maxMinute {
+					endMin = maxMinute
+				}
+				if startMin >= endMin {
+					continue
+				}
+				startSlot := (startMin - minMinute) / slotSize
+				endSlot := (endMin - minMinute) / slotSize
+				for i := startSlot; i < endSlot && i < totalSlots; i++ {
+					slotPlayers[i][pid] = true
+				}
 			}
 		}
 
-		var ranges []TimeRange
+		// All players who have any data on this date
+		allPlayers := []string{}
+		for pid := range playerRanges {
+			if name, ok := playerMap[pid]; ok {
+				allPlayers = append(allPlayers, name)
+			}
+		}
+		sort.Strings(allPlayers)
+
+		// Find 3+ overlap ranges
+		var overlaps []Overlap
 		inRange := false
 		rangeStart := 0
-		maxCount := 0
+		rangePlayers := map[int64]bool{}
 
 		for i := 0; i <= totalSlots; i++ {
 			count := 0
+			players := map[int64]bool{}
 			if i < totalSlots {
-				count = coverage[i]
+				players = slotPlayers[i]
+				count = len(players)
 			}
 			if count >= 3 {
 				if !inRange {
 					inRange = true
 					rangeStart = i
-					maxCount = count
-				} else if count > maxCount {
-					maxCount = count
+					rangePlayers = map[int64]bool{}
+					for pid := range players {
+						rangePlayers[pid] = true
+					}
+				} else {
+					for pid := range rangePlayers {
+						if !players[pid] {
+							delete(rangePlayers, pid)
+						}
+					}
 				}
 			} else {
 				if inRange {
-					startMin := minMinute + rangeStart*slotSize
-					endMin := minMinute + i*slotSize
-					sh := startMin / 60
-					sm := startMin % 60
-					eh := endMin / 60
-					em := endMin % 60
-
-					dsh := sh % 24
-					deh := eh % 24
-
-					ranges = append(ranges, TimeRange{
-						Start:     fmt.Sprintf("%02d:%02d", dsh, sm),
-						End:       fmt.Sprintf("%02d:%02d", deh, em),
-						PlayerCnt: maxCount,
+					sm := minMinute + rangeStart*slotSize
+					em := minMinute + i*slotSize
+					pNames := []string{}
+					for pid := range rangePlayers {
+						if name, ok := playerMap[pid]; ok {
+							pNames = append(pNames, name)
+						}
+					}
+					sort.Strings(pNames)
+					overlaps = append(overlaps, Overlap{
+						Start:   fmt.Sprintf("%02d:%02d", (sm/60)%24, sm%60),
+						End:     fmt.Sprintf("%02d:%02d", (em/60)%24, em%60),
+						Players: pNames,
 					})
 					inRange = false
-					maxCount = 0
 				}
 			}
 		}
 
-		if len(ranges) > 0 {
-			result = append(result, DateAvailability{Date: date, Ranges: ranges})
-		}
+		result = append(result, DateEntry{
+			Date:     date,
+			Players:  allPlayers,
+			Overlaps: overlaps,
+		})
 	}
 
 	sort.Slice(result, func(i, j int) bool { return result[i].Date < result[j].Date })

@@ -19,9 +19,8 @@ function toDateKey(y, m, d) {
 }
 
 export default function TeamAvailability({ teamId }) {
-  const [availData, setAvailData] = useState(null); // { dates: [...] }
+  const [availData, setAvailData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState(null);
   const [viewMonth, setViewMonth] = useState(new Date().getMonth());
   const [viewYear, setViewYear] = useState(new Date().getFullYear());
 
@@ -35,24 +34,21 @@ export default function TeamAvailability({ teamId }) {
   }, [teamId]);
 
   if (loading) return null;
-  if (!availData || !availData.dates || availData.dates.length === 0) {
+
+  const dates = availData?.dates || [];
+  const datesMap = {};
+  dates.forEach((d) => { datesMap[d.date] = d; });
+
+  if (!availData || dates.length === 0) {
     return (
       <div className="card bg-dark border-secondary p-3 mb-3 shadow-sm">
         <h5 className="mb-2"><E n="calendar" /> Team Availability</h5>
         <p className="text-muted small mb-0">
-          {availData?.message || "No overlapping availability found yet. Players need to set their availability in Player Settings."}
+          No availability set yet. Players can set theirs in Player Settings (account dropdown).
         </p>
       </div>
     );
   }
-
-  // Build a set of dates that have availability
-  const availDates = new Set(availData.dates.map((d) => d.date));
-
-  // Find date entry for selectedDate
-  const selectedEntry = selectedDate
-    ? availData.dates.find((d) => d.date === selectedDate)
-    : null;
 
   const goPrevMonth = () => {
     if (viewMonth === 0) { setViewYear(viewYear - 1); setViewMonth(11); }
@@ -63,7 +59,6 @@ export default function TeamAvailability({ teamId }) {
     else setViewMonth(viewMonth + 1);
   };
 
-  // Build calendar cells
   const firstDay = new Date(viewYear, viewMonth, 1).getDay();
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   const prevMonthDays = new Date(viewYear, viewMonth, 0).getDate();
@@ -86,54 +81,49 @@ export default function TeamAvailability({ teamId }) {
 
   return (
     <div className="card bg-dark border-secondary p-3 mb-3 shadow-sm">
-      <h5 className="mb-2"><E n="calendar" /> Team Availability <small className="text-muted">(3+ players)</small></h5>
+      <h5 className="mb-2"><E n="calendar" /> Team Availability</h5>
 
-      {/* Mini calendar nav */}
       <div className="d-flex align-items-center justify-content-between mb-2">
         <button className="btn btn-outline-light btn-sm py-0 px-2" onClick={goPrevMonth}>◀</button>
         <span className="fw-semibold small">{MONTHS[viewMonth]} {viewYear}</span>
         <button className="btn btn-outline-light btn-sm py-0 px-2" onClick={goNextMonth}>▶</button>
       </div>
 
-      {/* Mini calendar grid */}
-      <div className="ta-mini-cal">
+      <div className="ta-month-grid">
         {DAY_HEADERS.map((dh) => (
-          <div key={dh} className="ta-mini-header">{dh}</div>
+          <div key={dh} className="ta-month-header">{dh}</div>
         ))}
         {cells.map((cell, i) => {
           const dateKey = toDateKey(viewYear, viewMonth, cell.day);
-          const hasAvail = !cell.isOther && availDates.has(dateKey);
-          const isSel = dateKey === selectedDate;
+          const entry = datesMap[dateKey];
+          const hasData = !cell.isOther && !!entry;
+          const hasOverlap = hasData && entry.overlaps && entry.overlaps.length > 0;
+
           return (
-            <button
+            <div
               key={i}
-              type="button"
-              className={`ta-mini-cell ${cell.isOther ? "other" : ""} ${hasAvail ? "has-avail" : ""} ${isSel ? "selected" : ""}`}
-              disabled={cell.isOther}
-              onClick={() => setSelectedDate(isSel ? null : dateKey)}
-              title={hasAvail ? dateKey : undefined}
+              className={`ta-month-cell ${cell.isOther ? "other" : ""} ${hasOverlap ? "has-overlap" : hasData ? "has-data" : ""}`}
             >
-              {cell.day}
-            </button>
+              {!cell.isOther && (
+                <>
+                  <span className="ta-month-day">{cell.day}</span>
+                  {hasOverlap && entry.overlaps.map((o, oi) => (
+                    <div key={oi} className="ta-cell-overlap">
+                      <span className="ta-cell-time">{formatTimeNice(o.start_time)}–{formatTimeNice(o.end_time)}</span>
+                      {o.players.map((p, pi) => (
+                        <span key={pi} className="ta-cell-player">{p}</span>
+                      ))}
+                    </div>
+                  ))}
+                  {hasData && !hasOverlap && entry.players.map((p, pi) => (
+                    <span key={pi} className="ta-cell-player dim">{p}</span>
+                  ))}
+                </>
+              )}
+            </div>
           );
         })}
       </div>
-
-      {/* Selected date details */}
-      {selectedEntry && (
-        <div className="ta-detail mt-2">
-          <div className="ta-detail-header">
-            <strong>{selectedDate}</strong>
-            <button className="btn-close btn-close-white btn-sm" onClick={() => setSelectedDate(null)} style={{ fontSize: '0.5rem' }} />
-          </div>
-          {selectedEntry.ranges.map((r, i) => (
-            <div key={i} className="ta-range-chip">
-              <span>{formatTimeNice(r.start_time)} – {formatTimeNice(r.end_time)}</span>
-              <span className="badge bg-secondary ms-1">{r.player_count}p</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

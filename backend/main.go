@@ -706,14 +706,9 @@ func main() {
 		log.Fatalf("❌ Discord session error: %v", err)
 	}
 
-	// REQUIRED for !commands
-	dg.Identify.Intents =
-		discordgo.IntentsGuilds |
-			discordgo.IntentsGuildMessages |
-			discordgo.IntentsMessageContent
-
-	// 🔹 REGISTER PREFIX COMMAND HANDLERS HERE
-	RegisterPrefixCommands(dg)
+	// Only Guilds intent needed — slash commands use the Interactions API,
+	// and all channel/role operations use REST. No privileged intents required.
+	dg.Identify.Intents = discordgo.IntentsGuilds
 
 	// 🔹 REGISTER SLASH COMMAND HANDLERS (commands registered after Open)
 	RegisterSlashHandlers(dg)
