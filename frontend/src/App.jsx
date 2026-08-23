@@ -34,16 +34,6 @@ function App() {
   const [loadingUser, setLoadingUser] = useState(true);
   const [notifCount, setNotifCount] = useState(0);
 
-  // Dev impersonation
-  const [impersonateId, setImpersonateId] = useState(
-    () => sessionStorage.getItem("dev_impersonate") || null
-  );
-  const updateImpersonate = (id) => {
-    if (id) sessionStorage.setItem("dev_impersonate", id);
-    else sessionStorage.removeItem("dev_impersonate");
-    setImpersonateId(id);
-  };
-
   // Pull-to-refresh
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -268,30 +258,14 @@ function App() {
   }, [pullDistance, isRefreshing]);
 
   useEffect(() => {
-    // Fetch user (session-based)
-    if (impersonateId) {
-      // When impersonating: fetch real user for dev flags, then impersonated user for view
-      Promise.all([
-        fetch(`${getApiUrl()}/api/me`, { credentials: "include" }).then(r => r.ok ? r.json() : null),
-        fetch(`${getApiUrl()}/api/me?as=${impersonateId}`, { credentials: "include" }).then(r => r.ok ? r.json() : null),
-      ])
-        .then(([realUser, impUser]) => {
-          if (impUser) {
-            impUser.is_dev = realUser?.is_dev || false;
-            impUser.is_mod = realUser?.is_mod || false;
-            impUser.dev_mode = realUser?.dev_mode || false;
-          }
-          setUser(impUser);
-        })
-        .catch(() => setUser(null))
-        .finally(() => setLoadingUser(false));
-    } else {
-      fetch(`${getApiUrl()}/api/me`, { credentials: "include" })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => setUser(data))
-        .catch(() => setUser(null))
-        .finally(() => setLoadingUser(false));
-    }
+    // Fetch user (session-based). When impersonating, the session cookie itself
+    // has been swapped server-side, so a single /api/me returns the impersonated
+    // identity plus the real_user + real dev/mod flags.
+    fetch(`${getApiUrl()}/api/me`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setUser(data))
+      .catch(() => setUser(null))
+      .finally(() => setLoadingUser(false));
 
     // Fetch season
     fetch(`${getApiUrl()}/api/season`)
@@ -310,9 +284,8 @@ function App() {
   // Poll notification count
   useEffect(() => {
     if (!user) { setNotifCount(0); return; }
-    const asQ = impersonateId ? `?as=${impersonateId}` : "";
     const fetchCount = () => {
-      fetch(`${getApiUrl()}/api/notifications/count${asQ}`, { credentials: "include" })
+      fetch(`${getApiUrl()}/api/notifications/count`, { credentials: "include" })
         .then(res => res.ok ? res.json() : null)
         .then(data => { if (data) setNotifCount(data.unread_count || 0); })
         .catch(() => { });
@@ -320,13 +293,12 @@ function App() {
     fetchCount();
     const interval = setInterval(fetchCount, 30000);
     return () => clearInterval(interval);
-  }, [user, impersonateId]);
+  }, [user]);
 
   // Clear notifications when visiting My Team
   useEffect(() => {
     if (location.pathname === "/myteam" && notifCount > 0) {
-      const asQ = impersonateId ? `?as=${impersonateId}` : "";
-      fetch(`${getApiUrl()}/api/notifications/read-all${asQ}`, { method: "POST", credentials: "include" }).catch(() => { });
+      fetch(`${getApiUrl()}/api/notifications/read-all`, { method: "POST", credentials: "include" }).catch(() => { });
       setNotifCount(0);
     }
   }, [location.pathname]);
@@ -780,10 +752,7 @@ function App() {
 
       {/* Dev impersonation toolbar */}
       {user?.is_dev && user?.dev_mode && (
-        <DevToolbar
-          impersonateId={impersonateId}
-          setImpersonateId={updateImpersonate}
-        />
+        <DevToolbar user={user} />
       )}
     </div>
   );

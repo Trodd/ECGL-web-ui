@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { getApiUrl } from "../config";
 
-export default function DevToolbar({ impersonateId, setImpersonateId }) {
+export default function DevToolbar({ user }) {
     const [players, setPlayers] = useState([]);
     const [search, setSearch] = useState("");
     const [expanded, setExpanded] = useState(false);
+    const [busy, setBusy] = useState(false);
 
     useEffect(() => {
         fetch(`${getApiUrl()}/api/players`, { credentials: "include" })
@@ -12,6 +13,45 @@ export default function DevToolbar({ impersonateId, setImpersonateId }) {
             .then((data) => setPlayers(Array.isArray(data) ? data : []))
             .catch(() => setPlayers([]));
     }, []);
+
+    const impersonating = !!user?.impersonating;
+    const realUser = user?.real_user;
+
+    function startImpersonate(id) {
+        if (busy) return;
+        setBusy(true);
+        fetch(`${getApiUrl()}/api/dev/impersonate`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ discord_id: String(id) }),
+        })
+            .then((res) => {
+                if (!res.ok) throw new Error("impersonate failed");
+                window.location.reload();
+            })
+            .catch(() => {
+                setBusy(false);
+                alert("❌ Failed to impersonate");
+            });
+    }
+
+    function stopImpersonating() {
+        if (busy) return;
+        setBusy(true);
+        fetch(`${getApiUrl()}/api/dev/stop-impersonating`, {
+            method: "POST",
+            credentials: "include",
+        })
+            .then((res) => {
+                if (!res.ok) throw new Error("stop failed");
+                window.location.reload();
+            })
+            .catch(() => {
+                setBusy(false);
+                alert("❌ Failed to stop impersonating");
+            });
+    }
 
     const filtered = search.trim()
         ? players.filter(
@@ -31,7 +71,7 @@ export default function DevToolbar({ impersonateId, setImpersonateId }) {
                 right: 12,
                 zIndex: 99999,
                 background: "rgba(30, 30, 30, 0.95)",
-                border: "2px solid #f0ad4e",
+                border: `2px solid ${impersonating ? "#e74c3c" : "#f0ad4e"}`,
                 borderRadius: 10,
                 padding: expanded ? "12px 16px" : "8px 14px",
                 color: "#fff",
@@ -41,22 +81,33 @@ export default function DevToolbar({ impersonateId, setImpersonateId }) {
             }}
         >
             <div
-                style={{ cursor: "pointer", fontWeight: 700, color: "#f0ad4e" }}
+                style={{ cursor: "pointer", fontWeight: 700, color: impersonating ? "#e74c3c" : "#f0ad4e" }}
                 onClick={() => setExpanded(!expanded)}
             >
-                🛠️ DEV {impersonateId && `(as ${impersonateId})`}
+                🛠️ DEV {impersonating && "— IMPERSONATING"}
             </div>
 
-            {impersonateId && (
-                <button
-                    className="btn btn-sm btn-warning mt-1 w-100"
-                    onClick={() => {
-                        setImpersonateId(null);
-                        window.location.reload();
-                    }}
-                >
-                    ✕ Stop Impersonating
-                </button>
+            {impersonating && (
+                <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4 }}>
+                    <div>
+                        Now acting as <strong>{user.display_name || user.username}</strong>{" "}
+                        <span style={{ opacity: 0.6 }}>@{user.username}</span>
+                    </div>
+                    {realUser && (
+                        <div style={{ opacity: 0.7 }}>
+                            Real login:{" "}
+                            <strong>{realUser.display_name || realUser.username}</strong>{" "}
+                            <span style={{ opacity: 0.6 }}>@{realUser.username}</span>
+                        </div>
+                    )}
+                    <button
+                        className="btn btn-sm btn-warning mt-1 w-100"
+                        disabled={busy}
+                        onClick={stopImpersonating}
+                    >
+                        ✕ Stop Impersonating
+                    </button>
+                </div>
             )}
 
             {expanded && (
@@ -79,12 +130,9 @@ export default function DevToolbar({ impersonateId, setImpersonateId }) {
                                     cursor: "pointer",
                                     borderRadius: 4,
                                     background:
-                                        String(p.id) === impersonateId ? "#f0ad4e33" : "transparent",
+                                        String(p.id) === String(user?.id) ? "#f0ad4e33" : "transparent",
                                 }}
-                                onClick={() => {
-                                    setImpersonateId(String(p.id));
-                                    window.location.reload();
-                                }}
+                                onClick={() => startImpersonate(p.id)}
                             >
                                 <strong>{p.display_name || p.username}</strong>{" "}
                                 <span style={{ opacity: 0.6 }}>({p.id})</span>

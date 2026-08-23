@@ -62,6 +62,9 @@ func InitDB() {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
+	// Register data-version callbacks so the frontend can detect stale state.
+	InitDataVersion()
+
 	log.Println("✅ Connected to Postgres & migrated schema")
 }
 

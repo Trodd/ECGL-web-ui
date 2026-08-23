@@ -191,45 +191,28 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// DEV MODE impersonation override
-	if os.Getenv("DEV_MODE") == "true" {
-		if overrideID := r.URL.Query().Get("as"); overrideID != "" {
-			discordIDStr = overrideID
-		}
-	}
-
 	discordID, _ := strconv.ParseInt(discordIDStr, 10, 64)
 
-	// --- ✅ Discord Role Check for League Mod (check early, before registration check) ---
-	isMod := false
-	isDev := false
-	guildID := getEnv("DISCORD_GUILD_ID", "")
-	modRoleID := getEnv("DISCORD_LEAGUE_MOD_ROLE_ID", "")
-	devRoleID := getEnv("DISCORD_DEV_ROLE_ID", "")
-	botToken := getEnv("DISCORD_BOT_TOKEN", "")
+	// --- Discord role flags for the ACTIVE identity ---
+	isMod := userHasDiscordRole(discordIDStr, os.Getenv("DISCORD_LEAGUE_MOD_ROLE_ID"))
+	isDev := userHasDiscordRole(discordIDStr, os.Getenv("DISCORD_DEV_ROLE_ID"))
+	isCaster := userHasDiscordRole(discordIDStr, os.Getenv("DISCORD_CASTER_ROLE_ID"))
 
-	if guildID != "" && botToken != "" {
-		req, _ := http.NewRequest("GET",
-			fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordIDStr),
-			nil)
-		req.Header.Set("Authorization", "Bot "+botToken)
-
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil && resp.StatusCode == 200 {
-			var member struct {
-				Roles []string `json:"roles"`
+	// --- DEV impersonation: preserve the real user's dev/mod powers so the
+	// toolbar stays visible, and expose who is really logged in. ---
+	impersonating := false
+	var realUser map[string]any
+	if v, _ := session.Values["dev_impersonating"].(bool); v {
+		if realID, _ := session.Values["dev_original_discord_id"].(string); realID != "" {
+			impersonating = true
+			isMod = userHasDiscordRole(realID, os.Getenv("DISCORD_LEAGUE_MOD_ROLE_ID"))
+			isDev = userHasDiscordRole(realID, os.Getenv("DISCORD_DEV_ROLE_ID"))
+			isCaster = userHasDiscordRole(realID, os.Getenv("DISCORD_CASTER_ROLE_ID"))
+			realUser = map[string]any{
+				"id":           realID,
+				"username":     session.Values["dev_original_username"],
+				"display_name": session.Values["dev_original_display_name"],
 			}
-			if json.NewDecoder(resp.Body).Decode(&member) == nil {
-				for _, role := range member.Roles {
-					if role == modRoleID {
-						isMod = true
-					}
-					if role == devRoleID {
-						isDev = true
-					}
-				}
-			}
-			resp.Body.Close()
 		}
 	}
 
@@ -237,12 +220,15 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	err := DB.First(&player, "id = ?", discordID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		respondJSON(w, map[string]any{
-			"registered": false,
-			"id":         discordIDStr,
-			"username":   session.Values["username"],
-			"avatar":     session.Values["avatar"],
-			"is_mod":     isMod,
-			"is_dev":     isDev,
+			"registered":    false,
+			"id":            discordIDStr,
+			"username":      session.Values["username"],
+			"avatar":        session.Values["avatar"],
+			"is_mod":        isMod,
+			"is_dev":        isDev,
+			"is_caster":     isCaster,
+			"impersonating": impersonating,
+			"real_user":     realUser,
 		})
 		return
 	}
@@ -250,56 +236,35 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	// ❌ row exists but registration cleared
 	if player.Role == "" || player.Device == "" || player.Timezone == "" {
 		respondJSON(w, map[string]any{
-			"registered": false,
-			"id":         discordIDStr,
-			"username":   session.Values["username"],
-			"avatar":     session.Values["avatar"],
-			"is_mod":     isMod,
-			"is_dev":     isDev,
+			"registered":    false,
+			"id":            discordIDStr,
+			"username":      session.Values["username"],
+			"avatar":        session.Values["avatar"],
+			"is_mod":        isMod,
+			"is_dev":        isDev,
+			"is_caster":     isCaster,
+			"impersonating": impersonating,
+			"real_user":     realUser,
 		})
 		return
 	}
 
-	casterRoleID := getEnv("DISCORD_CASTER_ROLE_ID", "")
-
-	isCaster := false
-	if guildID != "" && botToken != "" && casterRoleID != "" {
-		req, _ := http.NewRequest("GET",
-			fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordIDStr),
-			nil)
-		req.Header.Set("Authorization", "Bot "+botToken)
-
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil && resp.StatusCode == 200 {
-			var member struct {
-				Roles []string `json:"roles"`
-			}
-			if json.NewDecoder(resp.Body).Decode(&member) == nil {
-				for _, role := range member.Roles {
-					if role == casterRoleID {
-						isCaster = true
-						break
-					}
-				}
-			}
-			resp.Body.Close()
-		}
-	}
-
 	// ✅ active registered player + mod info
 	respondJSON(w, map[string]any{
-		"registered":   true,
-		"id":           discordIDStr,
-		"username":     player.Username,
-		"display_name": session.Values["display_name"],
-		"role":         player.Role,
-		"device":       player.Device,
-		"timezone":     player.Timezone,
-		"avatar":       session.Values["avatar"],
-		"is_mod":       isMod,
-		"is_dev":       isDev,
-		"is_caster":    isCaster,
-		"dev_mode":     os.Getenv("DEV_MODE") == "true",
+		"registered":    true,
+		"id":            discordIDStr,
+		"username":      player.Username,
+		"display_name":  session.Values["display_name"],
+		"role":          player.Role,
+		"device":        player.Device,
+		"timezone":      player.Timezone,
+		"avatar":        session.Values["avatar"],
+		"is_mod":        isMod,
+		"is_dev":        isDev,
+		"is_caster":     isCaster,
+		"dev_mode":      os.Getenv("DEV_MODE") == "true",
+		"impersonating": impersonating,
+		"real_user":     realUser,
 	})
 }
 
@@ -770,6 +735,10 @@ func main() {
 	r.HandleFunc("/login", handleLogin).Methods("GET")
 	r.HandleFunc("/callback", handleCallback).Methods("GET")
 	r.HandleFunc("/logout", LogoutHandler).Methods("GET")
+
+	// Dev impersonation (DEV_MODE only, guarded inside handlers)
+	r.HandleFunc("/api/dev/impersonate", handleDevImpersonate).Methods("POST")
+	r.HandleFunc("/api/dev/stop-impersonating", handleDevStopImpersonating).Methods("POST")
 	r.HandleFunc("/api/matches/generate", HandleGenerateWeeklyMatches).Methods("POST")
 	r.HandleFunc("/api/match/confirm-schedule", HandleConfirmSchedule).Methods("POST")
 	r.HandleFunc("/api/match/confirm-score", HandleConfirmScore).Methods("POST")
@@ -779,6 +748,7 @@ func main() {
 	r.HandleFunc("/api/overlay/match/{id:[0-9]+}", HandleOverlayMatch).Methods("GET")
 	r.HandleFunc("/api/matches/public", HandlePublicMatches).Methods("GET")
 	r.HandleFunc("/api/settings", GetSettings).Methods("GET")
+	r.HandleFunc("/api/version", HandleGetVersion).Methods("GET")
 	r.HandleFunc("/api/challenge/request", HandleChallengeRequest).Methods("POST")
 	r.HandleFunc("/api/challenge/respond", HandleChallengeRespond).Methods("POST")
 	r.HandleFunc("/api/team/toggle-challenges", HandleToggleChallenges).Methods("POST")

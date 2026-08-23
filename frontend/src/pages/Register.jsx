@@ -24,9 +24,6 @@ export default function Register() {
   const [isUnregistering, setIsUnregistering] = useState(false);
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
 
-  const query = new URLSearchParams(window.location.search);
-  const asParam = query.get("as") || sessionStorage.getItem("dev_impersonate");
-
   // -----------------------------------------------------
   // Load roster lock
   // -----------------------------------------------------
@@ -43,13 +40,8 @@ export default function Register() {
   useEffect(() => {
     async function loadStatus() {
       try {
-        const meURL = asParam
-          ? `${urlBase}/api/me?as=${asParam}`
-          : `${urlBase}/api/me`;
-
-        const teamURL = asParam
-          ? `${urlBase}/api/myteam?as=${asParam}`
-          : `${urlBase}/api/myteam`;
+        const meURL = `${urlBase}/api/me`;
+        const teamURL = `${urlBase}/api/myteam`;
 
         const [meRes, teamRes] = await Promise.all([
           axios.get(meURL, { withCredentials: true }),
@@ -101,9 +93,7 @@ export default function Register() {
 
       // 2️⃣ Register
       await axios.post(
-        asParam
-          ? `${urlBase}/api/register?as=${asParam}`
-          : `${urlBase}/api/register`,
+        `${urlBase}/api/register`,
         {
           username: me?.username,
           role,
@@ -115,18 +105,8 @@ export default function Register() {
 
       // 3️⃣ Refresh user + team state
       const [meRes, teamRes] = await Promise.all([
-        axios.get(
-          asParam
-            ? `${urlBase}/api/me?as=${asParam}`
-            : `${urlBase}/api/me`,
-          { withCredentials: true }
-        ),
-        axios.get(
-          asParam
-            ? `${urlBase}/api/myteam?as=${asParam}`
-            : `${urlBase}/api/myteam`,
-          { withCredentials: true }
-        ),
+        axios.get(`${urlBase}/api/me`, { withCredentials: true }),
+        axios.get(`${urlBase}/api/myteam`, { withCredentials: true }),
       ]);
 
       setMe(meRes.data);
@@ -152,9 +132,7 @@ export default function Register() {
     setIsUnregistering(true);
     try {
       await axios.post(
-        asParam
-          ? `${urlBase}/api/unregister?as=${asParam}`
-          : `${urlBase}/api/unregister`,
+        `${urlBase}/api/unregister`,
         {},
         { withCredentials: true }
       );
@@ -179,18 +157,8 @@ export default function Register() {
 
       // 🔑 refresh state
       const [meRes, teamRes] = await Promise.all([
-        axios.get(
-          asParam
-            ? `${urlBase}/api/me?as=${asParam}`
-            : `${urlBase}/api/me`,
-          { withCredentials: true }
-        ),
-        axios.get(
-          asParam
-            ? `${urlBase}/api/myteam?as=${asParam}`
-            : `${urlBase}/api/myteam`,
-          { withCredentials: true }
-        ),
+        axios.get(`${urlBase}/api/me`, { withCredentials: true }),
+        axios.get(`${urlBase}/api/myteam`, { withCredentials: true }),
       ]);
 
       setMe(meRes.data);

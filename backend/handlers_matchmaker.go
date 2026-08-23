@@ -642,6 +642,8 @@ func HandleModClearWeek(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("🗑️ Deleted %d matches for Week %s (IDs: %v)", result.RowsAffected, req.Week, ids)
 
+	bumpDataVersion()
+
 	respondJSON(w, map[string]any{
 		"success": true,
 		"deleted": result.RowsAffected,

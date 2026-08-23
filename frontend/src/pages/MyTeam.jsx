@@ -55,6 +55,7 @@ export default function MyTeam() {
 
   const [rosterLocked, setRosterLocked] = useState(false);
   const [rosterModal, setRosterModal] = useState(null); // player object or null
+  const [activeMatchModal, setActiveMatchModal] = useState(null); // match object or null
 
   useEffect(() => {
     async function loadRosterLockStatus() {
@@ -104,14 +105,7 @@ export default function MyTeam() {
   async function loadTeam() {
     try {
       setLoading(true);
-      // 🧩 Support dev impersonation from sessionStorage or URL ?as= param
-      const query = new URLSearchParams(window.location.search);
-      const asParam = query.get("as") || sessionStorage.getItem("dev_impersonate");
-      const url = asParam
-        ? `${urlBase}/api/myteam?as=${asParam}`
-        : `${urlBase}/api/myteam`;
-
-      const res = await axios.get(url, { withCredentials: true });
+      const res = await axios.get(`${urlBase}/api/myteam`, { withCredentials: true });
 
       setData({
         team: res.data?.team || {},
@@ -852,6 +846,48 @@ export default function MyTeam() {
         </div>
       )}
 
+      {/* ================= ACTIVE MATCH MODAL ================= */}
+      {activeMatchModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: "100%",
+            background: "rgba(0,0,0,0.6)",
+            overflowY: "scroll",
+            WebkitOverflowScrolling: "touch",
+            overscrollBehavior: "contain",
+            padding: "24px 12px 40px",
+            zIndex: 3000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setActiveMatchModal(null); }}
+        >
+          <div style={{ maxWidth: "1100px", margin: "0 auto" }}>
+            <div className="d-flex justify-content-end mb-1">
+              <button
+                className="btn btn-outline-light btn-sm"
+                onClick={() => setActiveMatchModal(null)}
+              >
+                ✕ Close
+              </button>
+            </div>
+            <div className="match-card-modal-wrap">
+              <MatchCard
+                match={activeMatchModal}
+                team={team}
+                urlBase={urlBase}
+                loadTeam={loadTeam}
+                myRole={myRole}
+                arenaModeEnabled={arenaModeEnabled}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ================= JOIN & CHALLENGE REQUESTS ================= */}
       {(myRole === "Captain" || myRole === "Co-Captain") && (
         <div className="row g-4 mb-4">
@@ -964,14 +1000,12 @@ export default function MyTeam() {
               </p>
 
               {(myRole === "Captain" || myRole === "Co-Captain") ? (
-                <MatchCard
-                  match={m}
-                  team={team}
-                  urlBase={urlBase}
-                  loadTeam={loadTeam}
-                  myRole={myRole}
-                  arenaModeEnabled={arenaModeEnabled}
-                />
+                <button
+                  className="btn btn-outline-info btn-sm"
+                  onClick={() => setActiveMatchModal(m)}
+                >
+                  <E n="pencil" /> Manage Match
+                </button>
               ) : (
                 <p className="text-secondary small mb-0">Waiting for captains…</p>
               )}

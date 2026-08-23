@@ -85,13 +85,6 @@ func requireLogin(w http.ResponseWriter, r *http.Request) (*sessions.Session, bo
 		}
 	}
 
-	// DEV MODE impersonation override — inject into session values for downstream use
-	if os.Getenv("DEV_MODE") == "true" {
-		if overrideID := r.URL.Query().Get("as"); overrideID != "" {
-			session.Values["discord_id"] = overrideID
-		}
-	}
-
 	return session, true
 }
 
@@ -808,13 +801,6 @@ func GetMatches(w http.ResponseWriter, r *http.Request) {
 func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "session")
 	discordID, _ := session.Values["discord_id"].(string)
-
-	// DEV MODE override
-	if os.Getenv("DEV_MODE") == "true" {
-		if overrideID := r.URL.Query().Get("as"); overrideID != "" {
-			discordID = overrideID
-		}
-	}
 
 	if discordID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -4933,6 +4919,12 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🚫 Block stale score confirmations if the schedule was reset.
+	if !match.TeamAScheduleConfirmed || !match.TeamBScheduleConfirmed {
+		http.Error(w, "Match schedule must be confirmed by both teams before confirming scores", http.StatusBadRequest)
+		return
+	}
+
 	// --- Load map scores (ordered for stable hashing) ---
 	var maps []MatchScore
 	DB.Where("match_id = ?", match.ID).Order("map_number ASC").Find(&maps)
@@ -5806,6 +5798,7 @@ func ModRosterLockAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	DB.Exec("UPDATE teams SET join_allowed = FALSE")
+	bumpDataVersion()
 	respondJSON(w, map[string]any{"success": true, "locked": true})
 }
 
@@ -5818,6 +5811,7 @@ func ModRosterUnlockAll(w http.ResponseWriter, r *http.Request) {
 		modJSONErr(w, http.StatusInternalServerError, "failed to disable roster lock")
 		return
 	}
+	bumpDataVersion()
 	respondJSON(w, map[string]any{"success": true, "locked": false})
 }
 
@@ -7583,12 +7577,16 @@ func ModResetMatchSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reset schedule fields
+	// Reset schedule fields (back to the same state as a freshly created match,
+	// so the match still shows under "Active Matches" on My Team)
 	updates := map[string]any{
-		"proposed_date": nil,
-		"scheduled_by":  nil,
-		"proposer_id":   nil,
-		"status":        "Pending",
+		"proposed_date":             nil,
+		"scheduled_date":            nil,
+		"proposer_id":               nil,
+		"status":                    "Scheduled",
+		"team_a_schedule_confirmed": false,
+		"team_b_schedule_confirmed": false,
+		"schedule_confirmed_at":     nil,
 	}
 
 	if err := DB.Model(&match).Updates(updates).Error; err != nil {
