@@ -2139,6 +2139,24 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A team has at most ONE Co-Captain. When promoting someone into the
+	// Co-Captain slot (or into Captain, which cascades the old Captain into
+	// that slot), demote any existing Co-Captain → Member first.
+	if req.Role == "Co-Captain" || req.Role == "Captain" {
+		var oldCoCaps []TeamMember
+		if err := DB.Where("team_id = ? AND role = ? AND player_id <> ?",
+			req.TeamID, "Co-Captain", targetID).Find(&oldCoCaps).Error; err == nil {
+			for _, oldCo := range oldCoCaps {
+				DB.Model(&TeamMember{}).
+					Where("team_id = ? AND player_id = ?", req.TeamID, oldCo.PlayerID).
+					Update("role", "Member")
+
+				// resync the demoted co-captain's Discord roles
+				defer syncDiscordRolesForPlayer(oldCo.PlayerID)
+			}
+		}
+	}
+
 	// if promoting to Captain, demote existing Captain → Co-Captain
 	if req.Role == "Captain" {
 		var oldCap TeamMember
@@ -7446,11 +7464,38 @@ func HandleModSetTeamRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce a single Captain and single Co-Captain per team.
+	if req.Role == "Co-Captain" || req.Role == "Captain" {
+		// Demote any existing Co-Captain (other than the target) → Member.
+		var oldCoCaps []TeamMember
+		if err := DB.Where("team_id = ? AND role = ? AND player_id <> ?",
+			req.TeamID, "Co-Captain", pid).Find(&oldCoCaps).Error; err == nil {
+			for _, oldCo := range oldCoCaps {
+				DB.Model(&TeamMember{}).
+					Where("team_id = ? AND player_id = ?", req.TeamID, oldCo.PlayerID).
+					Update("role", "Member")
+				defer syncDiscordRolesForPlayer(oldCo.PlayerID)
+			}
+		}
+	}
+	if req.Role == "Captain" {
+		// Demote the existing Captain (other than the target) → Co-Captain.
+		var oldCap TeamMember
+		if err := DB.Where("team_id = ? AND role = ? AND player_id <> ?",
+			req.TeamID, "Captain", pid).First(&oldCap).Error; err == nil {
+			DB.Model(&TeamMember{}).
+				Where("team_id = ? AND player_id = ?", req.TeamID, oldCap.PlayerID).
+				Update("role", "Co-Captain")
+			defer syncDiscordRolesForPlayer(oldCap.PlayerID)
+		}
+	}
+
 	// Update role
 	if err := DB.Model(&member).Update("role", req.Role).Error; err != nil {
 		http.Error(w, "Failed to update role", http.StatusInternalServerError)
 		return
 	}
+	defer syncDiscordRolesForPlayer(pid)
 
 	json.NewEncoder(w).Encode(map[string]any{
 		"success":   true,
@@ -7528,9 +7573,23 @@ func HandleModPromoteToCaptain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce a single Co-Captain: demote any existing Co-Captain (other than
+	// the target) to Member before the old captain takes that slot.
+	var oldCoCaps []TeamMember
+	if err := DB.Where("team_id = ? AND role = ? AND player_id <> ?",
+		req.TeamID, "Co-Captain", pid).Find(&oldCoCaps).Error; err == nil {
+		for _, oldCo := range oldCoCaps {
+			DB.Model(&TeamMember{}).
+				Where("team_id = ? AND player_id = ?", req.TeamID, oldCo.PlayerID).
+				Update("role", "Member")
+			defer syncDiscordRolesForPlayer(oldCo.PlayerID)
+		}
+	}
+
 	// Demote old captain → Co-Captain
 	if oldCaptain != nil {
 		DB.Model(oldCaptain).Update("role", "Co-Captain")
+		defer syncDiscordRolesForPlayer(oldCaptain.PlayerID)
 	}
 
 	// Promote target → Captain
@@ -7538,6 +7597,7 @@ func HandleModPromoteToCaptain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to promote to Captain", http.StatusInternalServerError)
 		return
 	}
+	defer syncDiscordRolesForPlayer(pid)
 
 	json.NewEncoder(w).Encode(map[string]any{
 		"success":     true,
