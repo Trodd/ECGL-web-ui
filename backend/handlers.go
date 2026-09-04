@@ -2495,6 +2495,16 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 		requestingTeam = teamB.Name
 	}
 
+	// Determine the OTHER team whose captains need to confirm the proposed time.
+	otherTeamID := match.TeamAID
+	if req.TeamID == match.TeamAID {
+		otherTeamID = match.TeamBID
+	}
+	otherTeamName := teamA.Name
+	if otherTeamID == match.TeamBID {
+		otherTeamName = teamB.Name
+	}
+
 	getCaptainPings := func(teamID uint) string {
 		var captains []TeamMember
 		DB.Where("team_id = ? AND role IN ?", teamID, []string{"Captain", "Co-Captain"}).Find(&captains)
@@ -2520,8 +2530,14 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 			mentionUserIDs = append(mentionUserIDs, fmt.Sprintf("%d", m.PlayerID))
 		}
 	}
-	addIDs(match.TeamAID)
-	addIDs(match.TeamBID)
+	// Only ping the OTHER team's captains — they're the ones who need to confirm.
+	addIDs(otherTeamID)
+
+	pingMessage := fmt.Sprintf(
+		"📣 Captains of **%s** — please review and confirm the proposed match time for your match vs **%s**.",
+		otherTeamName,
+		requestingTeam,
+	)
 
 	SendDiscordEmbedToGeneral(
 		fmt.Sprintf("📌 Match Time Request — %s", match.MatchCode),
@@ -2541,14 +2557,11 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 		),
 		"View Match",
 		fmt.Sprintf("%s/match/%d", frontendURL, match.ID),
+		pingMessage,
 		mentionUserIDs,
 	)
 
 	// 🔔 Notify the OTHER team's captains about the schedule proposal
-	otherTeamID := match.TeamAID
-	if req.TeamID == match.TeamAID {
-		otherTeamID = match.TeamBID
-	}
 	notifyTeamCaptains(otherTeamID, "schedule_proposed",
 		"Match Time Proposed",
 		fmt.Sprintf("%s proposed a time for your match", requestingTeam),

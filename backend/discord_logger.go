@@ -61,7 +61,7 @@ func SendDiscordLog(msg string) {
 	SendDiscordChannelLog(channelID, msg)
 }
 
-func SendDiscordEmbed(channelID, title, description, buttonLabel, buttonURL string, mentionUserIDs []string) {
+func SendDiscordEmbed(channelID, title, description, buttonLabel, buttonURL, contentPrefix string, mentionUserIDs []string) {
 	botToken := os.Getenv("DISCORD_BOT_TOKEN")
 
 	if channelID == "" || botToken == "" {
@@ -86,6 +86,9 @@ func SendDiscordEmbed(channelID, title, description, buttonLabel, buttonURL stri
 			mentionContent += fmt.Sprintf("<@%s> ", id)
 		}
 		mentionContent = strings.TrimSpace(mentionContent)
+		if contentPrefix != "" {
+			mentionContent = contentPrefix + "\n" + mentionContent
+		}
 		body["content"] = mentionContent
 		allowedMentions["users"] = mentionUserIDs
 		body["allowed_mentions"] = allowedMentions
@@ -130,8 +133,8 @@ func SendDiscordEmbed(channelID, title, description, buttonLabel, buttonURL stri
 	}
 }
 
-func SendDiscordEmbedToGeneral(title, description, buttonLabel, buttonURL string, mentionUserIDs []string) {
-	SendDiscordEmbed(os.Getenv("DISCORD_LOG_CHANNEL_GENERAL"), title, description, buttonLabel, buttonURL, mentionUserIDs)
+func SendDiscordEmbedToGeneral(title, description, buttonLabel, buttonURL, contentPrefix string, mentionUserIDs []string) {
+	SendDiscordEmbed(os.Getenv("DISCORD_LOG_CHANNEL_GENERAL"), title, description, buttonLabel, buttonURL, contentPrefix, mentionUserIDs)
 }
 
 // -------------------------------------------------------------------
