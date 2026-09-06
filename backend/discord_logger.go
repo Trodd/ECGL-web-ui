@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -242,6 +243,21 @@ func StartMatchChannelScheduler(session *discordgo.Session) {
 			processMatchChannels(session)
 		}
 	}()
+
+	// Periodic cleanup of duplicate/orphaned match channels (and stale DB
+	// references) — runs once shortly after startup, then every 5 minutes.
+	go func() {
+		time.Sleep(10 * time.Second)
+		cleanupOrphanMatchChannels(session)
+
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			<-ticker.C
+			cleanupOrphanMatchChannels(session)
+		}
+	}()
 }
 
 func processMatchChannels(s *discordgo.Session) {
@@ -401,10 +417,33 @@ func createMissingVoiceChannels(s *discordgo.Session, m *Match) {
 	}
 }
 
+// matchChannelMu serializes Discord channel creation for matches so two
+// racing paths (the 30s scheduler tick and the confirm handler) can never
+// create two channels for the same match.
+var matchChannelMu sync.Mutex
+
 func createMatchChannel(s *discordgo.Session, m *Match) {
 	if s == nil || m == nil || m.ScheduledDate == nil {
 		return
 	}
+
+	matchChannelMu.Lock()
+	defer matchChannelMu.Unlock()
+
+	// 🛡 Idempotency guard: reload fresh state and never create a second
+	// channel for the same match (e.g. after a reschedule + re-confirm, or a
+	// race between the scheduler and the confirm handler).
+	var fresh Match
+	if err := DB.First(&fresh, m.ID).Error; err != nil {
+		return
+	}
+	if fresh.DiscordChannelID != nil && *fresh.DiscordChannelID != "" {
+		return
+	}
+	if fresh.ScheduledDate == nil {
+		return
+	}
+	m = &fresh
 
 	categoryID := os.Getenv("MATCH_CHANNEL_CATEGORY_ID")
 	guildID := os.Getenv("DISCORD_GUILD_ID")
@@ -538,8 +577,10 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 		PermissionOverwrites: overwrites,
 	})
 	if err != nil {
+		log.Printf("❌ Failed to create match channel for match %d: %v", m.ID, err)
 		return
 	}
+	log.Printf("🏁 Created match channel %s (%s) for match %d", channelName, channel.ID, m.ID)
 
 	// 🔈 Create voice channel for Team A (only Team A + mods + bot)
 	casterRoleID := os.Getenv("DISCORD_CASTER_ROLE_ID")
@@ -580,7 +621,9 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 	if voiceB != nil {
 		updates["discord_voice_channel_b_id"] = voiceB.ID
 	}
-	DB.Model(m).Updates(updates)
+	if err := DB.Model(m).Updates(updates).Error; err != nil {
+		log.Printf("❌ Failed to save channel IDs for match %d: %v", m.ID, err)
+	}
 
 	// ---- MATCH TIME FORMATTING ----
 	matchTime := "TBD"
@@ -847,6 +890,117 @@ func deleteMatchChannel(s *discordgo.Session, m *Match) {
 		"discord_voice_channel_b_id": nil,
 		"channel_created_at":         nil,
 	})
+}
+
+// cleanupOrphanMatchChannels removes duplicate/orphaned match channels from
+// Discord and clears DB references that point to channels that no longer
+// exist. Runs periodically so pre-existing duplicates get cleaned up too.
+func cleanupOrphanMatchChannels(s *discordgo.Session) {
+	if s == nil {
+		return
+	}
+
+	guildID := os.Getenv("DISCORD_GUILD_ID")
+	categoryID := os.Getenv("MATCH_CHANNEL_CATEGORY_ID")
+	if guildID == "" || categoryID == "" {
+		return
+	}
+
+	// Serialize with channel creation so a brand-new channel is never mistaken
+	// for an orphan while its ID is being persisted.
+	matchChannelMu.Lock()
+	defer matchChannelMu.Unlock()
+
+	// Load every match that references a channel.
+	var matches []Match
+	DB.Where("discord_channel_id IS NOT NULL OR discord_voice_channel_a_id IS NOT NULL OR discord_voice_channel_b_id IS NOT NULL").
+		Find(&matches)
+
+	referenced := map[string]bool{}
+	for _, m := range matches {
+		if m.DiscordChannelID != nil && *m.DiscordChannelID != "" {
+			referenced[*m.DiscordChannelID] = true
+		}
+		if m.DiscordVoiceChannelAID != nil && *m.DiscordVoiceChannelAID != "" {
+			referenced[*m.DiscordVoiceChannelAID] = true
+		}
+		if m.DiscordVoiceChannelBID != nil && *m.DiscordVoiceChannelBID != "" {
+			referenced[*m.DiscordVoiceChannelBID] = true
+		}
+	}
+
+	channels, err := s.GuildChannels(guildID)
+	if err != nil {
+		log.Printf("⚠️ cleanupOrphanMatchChannels: failed to list guild channels: %v", err)
+		return
+	}
+
+	existing := map[string]bool{}
+	for _, ch := range channels {
+		existing[ch.ID] = true
+	}
+
+	// 1) Delete match-style channels in the match category that no match
+	//    references (duplicates created before the fix, or stale orphans).
+	deleted := 0
+	for _, ch := range channels {
+		if ch.ParentID != categoryID {
+			continue
+		}
+
+		isMatchChannel := false
+		switch ch.Type {
+		case discordgo.ChannelTypeGuildText:
+			isMatchChannel = strings.Contains(ch.Name, "-vs-")
+		case discordgo.ChannelTypeGuildVoice:
+			isMatchChannel = strings.HasPrefix(ch.Name, "🔊")
+		}
+		if !isMatchChannel {
+			continue
+		}
+		if referenced[ch.ID] {
+			continue
+		}
+
+		if _, err := s.ChannelDelete(ch.ID); err != nil {
+			log.Printf("⚠️ cleanupOrphanMatchChannels: failed to delete %s (%s): %v", ch.Name, ch.ID, err)
+		} else {
+			deleted++
+			log.Printf("🧹 cleanupOrphanMatchChannels: deleted orphan %s (%s)", ch.Name, ch.ID)
+		}
+	}
+
+	// 2) Clear DB references that point to channels that no longer exist in
+	//    Discord, so the match can be given a fresh channel.
+	for _, m := range matches {
+		textGone := m.DiscordChannelID != nil && *m.DiscordChannelID != "" && !existing[*m.DiscordChannelID]
+		if textGone {
+			DB.Model(&m).Updates(map[string]any{
+				"discord_channel_id":         nil,
+				"discord_voice_channel_a_id": nil,
+				"discord_voice_channel_b_id": nil,
+				"channel_created_at":         nil,
+			})
+			log.Printf("🧹 cleanupOrphanMatchChannels: cleared stale channel refs for match %d (%s)", m.ID, m.MatchCode)
+			continue
+		}
+
+		updates := map[string]any{}
+		if m.DiscordVoiceChannelAID != nil && *m.DiscordVoiceChannelAID != "" && !existing[*m.DiscordVoiceChannelAID] {
+			updates["discord_voice_channel_a_id"] = nil
+		}
+		if m.DiscordVoiceChannelBID != nil && *m.DiscordVoiceChannelBID != "" && !existing[*m.DiscordVoiceChannelBID] {
+			updates["discord_voice_channel_b_id"] = nil
+		}
+		if len(updates) > 0 {
+			DB.Model(&m).Updates(updates)
+			log.Printf("🧹 cleanupOrphanMatchChannels: cleared stale voice refs for match %d (%s)", m.ID, m.MatchCode)
+		}
+	}
+
+	if deleted > 0 {
+		log.Printf("🧹 cleanupOrphanMatchChannels: removed %d orphan channel(s)", deleted)
+	}
 }
 
 // -------------------------------------------------------------------
@@ -1216,16 +1370,29 @@ func respondInteractionEphemeral(s *discordgo.Session, i *discordgo.InteractionC
 
 // 📅 SCHEDULE CHANNEL CREATION for a specific match
 func scheduleMatchChannel(s *discordgo.Session, m *Match) {
-	if s == nil || m == nil || m.ScheduledDate == nil {
+	if s == nil || m == nil {
 		return
 	}
 
-	openAt := m.ScheduledDate.Add(-1 * time.Hour)
-	now := time.Now().UTC()
+	// Reload fresh state so a reschedule that happens before the timer fires
+	// doesn't create a channel for a stale time.
+	var fresh Match
+	if err := DB.First(&fresh, m.ID).Error; err != nil {
+		return
+	}
+	if fresh.ScheduledDate == nil {
+		return
+	}
+	if fresh.DiscordChannelID != nil && *fresh.DiscordChannelID != "" {
+		return // a channel already exists for this match
+	}
 
-	// If already past open time → create immediately
+	now := time.Now().UTC()
+	openAt := fresh.ScheduledDate.Add(-1 * time.Hour)
+
+	// If already past open time → create immediately.
 	if now.After(openAt) {
-		createMatchChannel(s, m)
+		createMatchChannel(s, &fresh)
 		return
 	}
 
@@ -1237,6 +1404,22 @@ func scheduleMatchChannel(s *discordgo.Session, m *Match) {
 
 		<-timer.C
 
-		createMatchChannel(s, m)
+		// Re-check at fire time — the schedule may have changed while waiting.
+		var ref Match
+		if err := DB.First(&ref, m.ID).Error; err != nil {
+			return
+		}
+		if ref.ScheduledDate == nil {
+			return
+		}
+		if ref.DiscordChannelID != nil && *ref.DiscordChannelID != "" {
+			return // already created
+		}
+		now2 := time.Now().UTC()
+		if now2.Before(ref.ScheduledDate.Add(-1*time.Hour)) || now2.After(ref.ScheduledDate.Add(2*time.Hour)) {
+			return // no longer within the creation window
+		}
+
+		createMatchChannel(s, &ref)
 	}()
 }

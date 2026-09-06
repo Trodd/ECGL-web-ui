@@ -2448,32 +2448,51 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 
 	// --- Update & confirm ---
 	oldScheduled := match.ScheduledDate
-	match.ScheduledDate = &date
-
 	isTeamA := req.TeamID == match.TeamAID
 	dateChanged := oldScheduled == nil || !oldScheduled.Equal(date)
 
+	// Build a targeted update set so we never clobber other columns (such as
+	// discord_channel_id) that may have been written concurrently.
+	updates := map[string]any{
+		"scheduled_date": &date,
+	}
+
+	// 🔄 If the time actually changed and a Discord channel already exists for
+	// the old time, remove it so a fresh channel is created once the new time
+	// is confirmed (prevents duplicate/stale matchup channels).
+	if dateChanged && match.DiscordChannelID != nil {
+		deleteMatchChannel(discordSession, &match)
+		updates["discord_channel_id"] = nil
+		updates["discord_voice_channel_a_id"] = nil
+		updates["discord_voice_channel_b_id"] = nil
+		updates["channel_created_at"] = nil
+	}
+
+	nowTeamAConfirmed := match.TeamAScheduleConfirmed
+	nowTeamBConfirmed := match.TeamBScheduleConfirmed
 	if isTeamA {
-		match.TeamAScheduleConfirmed = true
+		nowTeamAConfirmed = true
 		if dateChanged {
-			match.TeamBScheduleConfirmed = false
+			nowTeamBConfirmed = false
 		}
 	} else {
-		match.TeamBScheduleConfirmed = true
+		nowTeamBConfirmed = true
 		if dateChanged {
-			match.TeamAScheduleConfirmed = false
+			nowTeamAConfirmed = false
 		}
 	}
+	updates["team_a_schedule_confirmed"] = nowTeamAConfirmed
+	updates["team_b_schedule_confirmed"] = nowTeamBConfirmed
 
-	if match.TeamAScheduleConfirmed && match.TeamBScheduleConfirmed {
+	if nowTeamAConfirmed && nowTeamBConfirmed {
 		now2 := time.Now()
-		match.ScheduleConfirmedAt = &now2
-		match.Status = "Scheduled"
+		updates["schedule_confirmed_at"] = &now2
+		updates["status"] = "Scheduled"
 	} else {
-		match.Status = "Pending Schedule Confirmation"
+		updates["status"] = "Pending Schedule Confirmation"
 	}
 
-	if err := DB.Save(&match).Error; err != nil {
+	if err := DB.Model(&match).Updates(updates).Error; err != nil {
 		http.Error(w, "Failed to update match", http.StatusInternalServerError)
 		return
 	}
@@ -4613,12 +4632,34 @@ func ModForceSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parsed, _ := time.Parse(time.RFC3339, req.Date)
-	if err := DB.Model(&Match{}).Where("id = ?", req.MatchID).
-		Updates(map[string]any{
-			"scheduled_date": parsed,
-			"status":         "Scheduled",
-		}).Error; err != nil {
+	parsed, err := time.Parse(time.RFC3339, req.Date)
+	if err != nil {
+		http.Error(w, "Invalid date format", http.StatusBadRequest)
+		return
+	}
+
+	var match Match
+	if err := DB.First(&match, req.MatchID).Error; err != nil {
+		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
+	dateChanged := match.ScheduledDate == nil || !match.ScheduledDate.Equal(parsed)
+
+	// 🔄 If the time changed and a Discord channel already exists, remove the
+	// stale channel so a fresh one is created for the new time.
+	if dateChanged && match.DiscordChannelID != nil {
+		deleteMatchChannel(discordSession, &match)
+		match.DiscordChannelID = nil
+		match.DiscordVoiceChannelAID = nil
+		match.DiscordVoiceChannelBID = nil
+		match.ChannelCreatedAt = nil
+	}
+
+	if err := DB.Model(&match).Updates(map[string]any{
+		"scheduled_date": parsed,
+		"status":         "Scheduled",
+	}).Error; err != nil {
 		http.Error(w, "Failed to update match", http.StatusInternalServerError)
 		return
 	}
@@ -4707,17 +4748,21 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark schedule confirmation
+	// Mark schedule confirmation (targeted update to avoid clobbering other
+	// columns written concurrently, e.g. discord_channel_id).
+	updates := map[string]any{}
 	if match.TeamAID == req.TeamID {
 		match.TeamAScheduleConfirmed = true
+		updates["team_a_schedule_confirmed"] = true
 	} else if match.TeamBID == req.TeamID {
 		match.TeamBScheduleConfirmed = true
+		updates["team_b_schedule_confirmed"] = true
 	} else {
 		http.Error(w, "team not part of match", http.StatusForbidden)
 		return
 	}
 
-	if err := DB.Save(&match).Error; err != nil {
+	if err := DB.Model(&match).Updates(updates).Error; err != nil {
 		log.Printf("❌ Failed to save schedule confirmation for match %d: %v", match.ID, err)
 		http.Error(w, "failed to save confirmation", http.StatusInternalServerError)
 		return
@@ -4741,11 +4786,16 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 	// If both teams confirmed → finalize
 	if match.TeamAScheduleConfirmed && match.TeamBScheduleConfirmed {
 
-		// Update match
+		// Update match (targeted — do not overwrite channel fields)
 		now := time.Now()
 		match.Status = "Scheduled"
 		match.ScheduleConfirmedAt = &now
-		DB.Save(&match)
+		if err := DB.Model(&match).Updates(map[string]any{
+			"status":                "Scheduled",
+			"schedule_confirmed_at": &now,
+		}).Error; err != nil {
+			log.Printf("❌ Failed to finalize schedule for match %d: %v", match.ID, err)
+		}
 
 		// 🚀 Create Discord match channel once schedule is fully confirmed
 		botToken := getEnv("DISCORD_BOT_TOKEN", "")
@@ -7650,16 +7700,26 @@ func ModResetMatchSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🔄 Remove any existing Discord channel for the old schedule so a fresh
+	// one is created if/when the match is re-scheduled.
+	if match.DiscordChannelID != nil {
+		deleteMatchChannel(discordSession, &match)
+	}
+
 	// Reset schedule fields (back to the same state as a freshly created match,
 	// so the match still shows under "Active Matches" on My Team)
 	updates := map[string]any{
-		"proposed_date":             nil,
-		"scheduled_date":            nil,
-		"proposer_id":               nil,
-		"status":                    "Scheduled",
-		"team_a_schedule_confirmed": false,
-		"team_b_schedule_confirmed": false,
-		"schedule_confirmed_at":     nil,
+		"proposed_date":              nil,
+		"scheduled_date":             nil,
+		"proposer_id":                nil,
+		"status":                     "Scheduled",
+		"team_a_schedule_confirmed":  false,
+		"team_b_schedule_confirmed":  false,
+		"schedule_confirmed_at":      nil,
+		"discord_channel_id":         nil,
+		"discord_voice_channel_a_id": nil,
+		"discord_voice_channel_b_id": nil,
+		"channel_created_at":         nil,
 	}
 
 	if err := DB.Model(&match).Updates(updates).Error; err != nil {
@@ -7681,7 +7741,7 @@ func ModResetMatchSchedule(w http.ResponseWriter, r *http.Request) {
 
 	// Discord log
 	SendDiscordLog(fmt.Sprintf(
-		"🔄 **Schedule Reset:** Match **%s** (%s vs %s) has been reset to **Pending**.",
+		"🔄 **Schedule Reset:** Match **%s** (%s vs %s) has been reset and is no longer scheduled.",
 		match.MatchCode,
 		teamAName,
 		teamBName,
