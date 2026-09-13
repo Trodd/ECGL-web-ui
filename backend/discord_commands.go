@@ -386,6 +386,10 @@ func RegisterSlashCommands(dg *discordgo.Session) {
 				},
 			},
 		},
+		{
+			Name:        "coinflip",
+			Description: "Flip a coin for the current match (match channel only)",
+		},
 	}
 
 	currentNames := map[string]bool{}
@@ -532,6 +536,8 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		handleTeamSlashCommand(s, i, data)
 	case "addsub":
 		handleAddSubSlashCommand(s, i, data)
+	case "coinflip":
+		handleCoinFlipSlashCommand(s, i, data)
 	}
 }
 
@@ -807,4 +813,137 @@ func handleAddSubSlashCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 	})
 
 	log.Printf("✅ League Sub %s added to match %d (team %s) by %s", targetUser.ID, match.ID, teamSide, i.Member.User.Username)
+}
+
+// handleCoinFlipSlashCommand starts a coin flip for the match tied to the current
+// channel. It commits a random side BEFORE showing the Heads/Tails dropdown, so
+// the captain's choice can't influence the outcome.
+func handleCoinFlipSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, data discordgo.ApplicationCommandInteractionData) {
+	// ── Must be used in a match channel ──
+	var match Match
+	if err := DB.Where("discord_channel_id = ?", i.ChannelID).First(&match).Error; err != nil {
+		respondInteractionEphemeral(s, i, "❌ This command can only be used in your match channel. If it isn't open yet, wait until 1 hour before your match.")
+		return
+	}
+
+	// ── Determine caller's team (captains/co-captains only) ──
+	playerID, err := strconv.ParseInt(i.Member.User.ID, 10, 64)
+	if err != nil {
+		respondInteractionEphemeral(s, i, "❌ Could not verify your identity.")
+		return
+	}
+
+	var tm TeamMember
+	if err := DB.Where("player_id = ? AND team_id IN ? AND role IN ?",
+		playerID, []uint{match.TeamAID, match.TeamBID}, []string{"Captain", "Co-Captain"}).First(&tm).Error; err != nil {
+		respondInteractionEphemeral(s, i, "❌ Only the Captains or Co-Captains of the two teams can flip the coin.")
+		return
+	}
+
+	// 🎲 Commit the result FIRST, before the captain chooses.
+	if err := commitCoinFlip(match.ID); err != nil {
+		respondInteractionEphemeral(s, i, "❌ "+err.Error())
+		return
+	}
+
+	minVals := 1
+	maxVals := 1
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: fmt.Sprintf("🎲 <@%s> — the coin has been flipped in secret. Choose your call below:", i.Member.User.ID),
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.SelectMenu{
+							MenuType:    discordgo.StringSelectMenu,
+							CustomID:    fmt.Sprintf("coinflip_call_%d_%s", match.ID, i.Member.User.ID),
+							Placeholder: "Choose Heads or Tails",
+							MinValues:   &minVals,
+							MaxValues:   maxVals,
+							Options: []discordgo.SelectMenuOption{
+								{Label: "Heads", Value: "HEADS", Emoji: &discordgo.ComponentEmoji{Name: "🪙"}},
+								{Label: "Tails", Value: "TAILS", Emoji: &discordgo.ComponentEmoji{Name: "🪙"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
+// RegisterCoinFlipHandler handles the Heads/Tails select menu for /coinflip.
+// The random side was already committed before the menu was shown, so the
+// captain's selection is compared against that pre-determined result.
+func RegisterCoinFlipHandler(dg *discordgo.Session) {
+	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if i.Type != discordgo.InteractionMessageComponent {
+			return
+		}
+
+		customID := i.MessageComponentData().CustomID
+		if !strings.HasPrefix(customID, "coinflip_call_") {
+			return
+		}
+
+		// Format: coinflip_call_<matchID>_<initiatorDiscordID>
+		parts := strings.Split(strings.TrimPrefix(customID, "coinflip_call_"), "_")
+		if len(parts) != 2 {
+			respondInteractionEphemeral(s, i, "❌ Invalid coin flip request.")
+			return
+		}
+
+		matchID, err := strconv.ParseUint(parts[0], 10, 64)
+		if err != nil {
+			respondInteractionEphemeral(s, i, "❌ Invalid match ID.")
+			return
+		}
+
+		if i.Member.User.ID != parts[1] {
+			respondInteractionEphemeral(s, i, "❌ Only the captain who started this flip can make the call.")
+			return
+		}
+
+		values := i.MessageComponentData().Values
+		if len(values) == 0 {
+			respondInteractionEphemeral(s, i, "❌ You must choose Heads or Tails.")
+			return
+		}
+		call := strings.ToUpper(strings.TrimSpace(values[0]))
+
+		playerID, err := strconv.ParseInt(i.Member.User.ID, 10, 64)
+		if err != nil {
+			respondInteractionEphemeral(s, i, "❌ Could not verify your identity.")
+			return
+		}
+
+		var match Match
+		if err := DB.First(&match, uint(matchID)).Error; err != nil {
+			respondInteractionEphemeral(s, i, "❌ Match not found.")
+			return
+		}
+
+		var tm TeamMember
+		if err := DB.Where("player_id = ? AND team_id IN ? AND role IN ?",
+			playerID, []uint{match.TeamAID, match.TeamBID}, []string{"Captain", "Co-Captain"}).First(&tm).Error; err != nil {
+			respondInteractionEphemeral(s, i, "❌ Only the Captains or Co-Captains of the two teams can flip the coin.")
+			return
+		}
+
+		msg, _, err := resolveCoinFlip(match.ID, tm.TeamID, call)
+		if err != nil {
+			respondInteractionEphemeral(s, i, "❌ "+err.Error())
+			return
+		}
+
+		// Post the result publicly in the match channel for everyone to see.
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: msg,
+			},
+		})
+	})
 }

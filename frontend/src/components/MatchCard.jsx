@@ -12,9 +12,6 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
     const [scores, setScores] = useState({});
     const [msg, setMsg] = useState("");
     const [editing, setEditing] = useState(false);
-    const [coinFlipConfirmed, setCoinFlipConfirmed] = useState(false);
-    const [coinFlipResult, setCoinFlipResult] = useState(null);
-    const [coinFlipCall, setCoinFlipCall] = useState("");
 
     const isTeamA = match.team_a_id === team.id;
     const isTeamB = match.team_b_id === team.id;
@@ -305,59 +302,6 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                         <h6 className="section-title">
                             {arenaModeEnabled ? <><E n="target" /> Arena Match (Best of 3)</> : <><E n="target" /> Match Setup & Scoring</>}
                         </h6>
-
-                        {/* ================= COIN FLIP (hidden in Arena mode) ================= */}
-                        {!arenaModeEnabled && (
-                            <div className="sub-card">
-                                <label className="fw-bold mb-1 d-block"><E n="refresh" /> Coin Flip</label>
-
-                                <div className="d-flex align-items-center gap-2 flex-wrap">
-                                    <select
-                                        className="form-select bg-dark text-light"
-                                        value={coinFlipCall}
-                                        disabled={coinFlipConfirmed}
-                                        onChange={(e) => {
-                                            setCoinFlipCall(e.target.value);
-                                            setCoinFlipConfirmed(false);
-                                        }}
-                                        style={{ maxWidth: 200 }}
-                                    >
-                                        <option value="">Select…</option>
-                                        <option value="HEADS">Heads</option>
-                                        <option value="TAILS">Tails</option>
-                                    </select>
-
-                                    {!coinFlipConfirmed ? (
-                                        <button
-                                            className="btn btn-sm btn-primary"
-                                            disabled={!coinFlipCall}
-                                            onClick={async () => {
-                                                try {
-                                                    const res = await axios.post(
-                                                        `${urlBase}/api/match/confirm-coinflip`,
-                                                        {
-                                                            match_id: match.id,
-                                                            team_id: team.id,
-                                                            coin_flip_call: coinFlipCall,
-                                                        },
-                                                        { withCredentials: true }
-                                                    );
-                                                    setCoinFlipConfirmed(true);
-                                                    setCoinFlipResult(res.data?.winner || null);
-                                                    alert("🎲 Coin flip confirmed!");
-                                                } catch {
-                                                    alert("Failed to confirm coin flip.");
-                                                }
-                                            }}
-                                        >
-                                            Confirm Flip
-                                        </button>
-                                    ) : (
-                                        <span className="text-success fw-semibold">✔ Confirmed</span>
-                                    )}
-                                </div>
-                            </div>
-                        )}
 
                         {/* ================= SUBS ================= */}
                         <div className="sub-card">

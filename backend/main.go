@@ -681,6 +681,9 @@ func main() {
 	// 🔹 REGISTER BUTTON INTERACTION HANDLERS
 	RegisterCloseChannelHandler(dg)
 
+	// 🔹 REGISTER COIN FLIP SELECT MENU HANDLER
+	RegisterCoinFlipHandler(dg)
+
 	// Open Discord gateway
 	if err := dg.Open(); err != nil {
 		log.Fatalf("❌ Failed to connect to Discord: %v", err)

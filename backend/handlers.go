@@ -6268,73 +6268,79 @@ func buildMentionList(a []TeamMember, b []TeamMember) string {
 	return text
 }
 
-func HandleConfirmCoinFlip(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		MatchID      uint   `json:"match_id"`
-		TeamID       uint   `json:"team_id"`
-		CoinFlipCall string `json:"coin_flip_call"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
-		return
-	}
-
-	// Load match
+// commitCoinFlip picks the random side (HEADS/TAILS) and stores it on the match
+// BEFORE the captain makes their call, so the outcome can't be influenced by
+// the call. Only one pending flip is allowed at a time per match.
+func commitCoinFlip(matchID uint) error {
 	var match Match
-	if err := DB.First(&match, req.MatchID).Error; err != nil {
-		http.Error(w, "Match not found", http.StatusNotFound)
-		return
+	if err := DB.First(&match, matchID).Error; err != nil {
+		return fmt.Errorf("match not found")
+	}
+	if strings.TrimSpace(match.CoinFlipPendingSide) != "" {
+		return fmt.Errorf("a coin flip is already in progress")
 	}
 
-	// Load teams
+	rand.Seed(time.Now().UnixNano())
+	sides := []string{"HEADS", "TAILS"}
+	side := sides[rand.Intn(2)]
+
+	return DB.Model(&Match{}).Where("id = ?", matchID).Update("coin_flip_pending_side", side).Error
+}
+
+// resolveCoinFlip compares the captain's call against the pre-committed side,
+// saves the winner, and returns a formatted result message plus the winner name.
+func resolveCoinFlip(matchID uint, callerTeamID uint, call string) (string, string, error) {
+	var match Match
+	if err := DB.First(&match, matchID).Error; err != nil {
+		return "", "", fmt.Errorf("match not found")
+	}
+
 	var teamA, teamB Team
 	DB.First(&teamA, match.TeamAID)
 	DB.First(&teamB, match.TeamBID)
 
-	call := strings.ToUpper(strings.TrimSpace(req.CoinFlipCall))
+	call = strings.ToUpper(strings.TrimSpace(call))
 	if call != "HEADS" && call != "TAILS" {
-		http.Error(w, "Invalid coin flip call", http.StatusBadRequest)
-		return
+		return "", "", fmt.Errorf("invalid coin flip call")
 	}
 
-	// 🔥 Ensure randomness
-	rand.Seed(time.Now().UnixNano())
-	sides := []string{"HEADS", "TAILS"}
-	result := sides[rand.Intn(2)]
+	result := strings.ToUpper(strings.TrimSpace(match.CoinFlipPendingSide))
+	if result != "HEADS" && result != "TAILS" {
+		return "", "", fmt.Errorf("no pending coin flip — run /coinflip first")
+	}
 
 	// Determine winner
 	var winner string
-
 	if result == call {
-		// The caller wins
-		if req.TeamID == match.TeamAID {
+		if callerTeamID == match.TeamAID {
 			winner = "A"
 		} else {
 			winner = "B"
 		}
 	} else {
-		// The other team wins
-		if req.TeamID == match.TeamAID {
+		if callerTeamID == match.TeamAID {
 			winner = "B"
 		} else {
 			winner = "A"
 		}
 	}
 
-	// Save winner
-	match.CoinFlip = winner
-	DB.Model(&match).Update("coin_flip", winner)
+	// Save winner and clear the pending side
+	DB.Model(&match).Updates(map[string]any{
+		"coin_flip":              winner,
+		"coin_flip_pending_side": "",
+	})
 
-	// Winner readable
 	winnerName := teamA.Name
 	if winner == "B" {
 		winnerName = teamB.Name
 	}
 
-	// ==============================
-	// ⭐ Load roster + build mentions
-	// ==============================
+	callerName := teamA.Name
+	if callerTeamID == match.TeamBID {
+		callerName = teamB.Name
+	}
+
 	var rosterA []TeamMember
 	var rosterB []TeamMember
 	DB.Where("team_id = ?", match.TeamAID).Find(&rosterA)
@@ -6350,34 +6356,30 @@ func HandleConfirmCoinFlip(w http.ResponseWriter, r *http.Request) {
 		mentionsB += fmt.Sprintf("<@%d> ", p.PlayerID)
 	}
 
-	// Caller readable
-	callerName := teamA.Name
-	if req.TeamID == match.TeamBID {
-		callerName = teamB.Name
-	}
-
-	// Discord Log Message
-	LogGeneral(fmt.Sprintf(
-		"🎲 **Coin Flip Performed**\n"+
+	msg := fmt.Sprintf(
+		"🎲 **Coin Flip Result**\n"+
 			"📌 **Match:** %s (#%d)\n"+
-			"🙋 **Caller:** %s \n"+
+			"🙋 **Caller:** %s\n"+
 			"🪙 **Call:** %s\n"+
 			"🎰 **Result:** %s\n"+
 			"🏆 **Flip Winner:** %s\n\n"+
 			"**%s Team:** %s\n"+
 			"**%s Team:** %s",
-		match.MatchCode, match.ID, // match info
-		callerName,               // who called
-		call, result, winnerName, // flip outcome
-		teamA.Name, mentionsA, // team A pings
-		teamB.Name, mentionsB, // team B pings
-	))
+		match.MatchCode, match.ID,
+		callerName,
+		call, result, winnerName,
+		teamA.Name, mentionsA,
+		teamB.Name, mentionsB,
+	)
 
-	respondJSON(w, map[string]any{
-		"success": true,
-		"result":  result,
-		"winner":  winnerName,
-	})
+	return msg, winnerName, nil
+}
+
+// HandleConfirmCoinFlip is deprecated — coin flips now happen in the private
+// match channel on Discord. The web endpoint is blocked so the flip can only
+// occur there (and only once the channel has opened).
+func HandleConfirmCoinFlip(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "Coin flips are now done in your match channel on Discord (use /coinflip).", http.StatusBadRequest)
 }
 
 func HandleChallengeRequest(w http.ResponseWriter, r *http.Request) {
