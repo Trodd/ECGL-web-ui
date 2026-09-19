@@ -19,19 +19,23 @@ export default function Leaderboard() {
     }
   }, [view]);
 
-  // ✅ sort teams
-  const sortedTeams = [...teams].sort((a, b) => {
-    if (b.rating !== a.rating) return b.rating - a.rating;
-    if (b.wins !== a.wins) return b.wins - a.wins;
-    return a.losses - b.losses;
-  });
+  // ✅ hide teams with 0 games played, then sort
+  const sortedTeams = [...teams]
+    .filter(t => t.matches > 0)
+    .sort((a, b) => {
+      if (b.rating !== a.rating) return b.rating - a.rating;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      return a.losses - b.losses;
+    });
 
-  // ✅ sort players
-  const sortedPlayers = [...players].sort((a, b) => {
-    if (b.rating !== a.rating) return b.rating - a.rating;
-    if (b.wins !== a.wins) return b.wins - a.wins;
-    return a.losses - b.losses;
-  });
+  // ✅ hide players with 0 games played, then sort
+  const sortedPlayers = [...players]
+    .filter(p => p.matches > 0)
+    .sort((a, b) => {
+      if (b.rating !== a.rating) return b.rating - a.rating;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      return a.losses - b.losses;
+    });
 
   function getRankClass(division) {
     if (!division) return "rank-badge rank-unranked";

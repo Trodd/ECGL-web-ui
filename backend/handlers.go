@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -6280,9 +6280,8 @@ func commitCoinFlip(matchID uint) error {
 		return fmt.Errorf("a coin flip is already in progress")
 	}
 
-	rand.Seed(time.Now().UnixNano())
 	sides := []string{"HEADS", "TAILS"}
-	side := sides[rand.Intn(2)]
+	side := sides[rand.IntN(2)]
 
 	return DB.Model(&Match{}).Where("id = ?", matchID).Update("coin_flip_pending_side", side).Error
 }
