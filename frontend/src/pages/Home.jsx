@@ -92,6 +92,9 @@ export default function Home({ user }) {
               const ts = new Date(dateStr).getTime();
               if (isNaN(ts) || ts < now) return;
 
+              // ✅ Only show once both teams have confirmed the scheduled time
+              if (m.status !== "Scheduled") return;
+
               const hasCasters = m.cast_active === true;
 
               collected.push({
