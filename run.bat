@@ -1,4 +1,4 @@
-@echo off
+the @echo off
 title ECGL League WebUI (Single Terminal)
 echo =========================================
 echo   🚀 Starting ECGL Frontend + Backend

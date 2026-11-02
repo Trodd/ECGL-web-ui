@@ -22,6 +22,7 @@ import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import "./styles.css";
 import { getApiUrl } from "./config";
+import { LEAGUES, getLeague, setLeague } from "./league";
 import DevToolbar from "./components/DevToolbar";
 import { E } from "./components/CustomEmoji";
 
@@ -355,6 +356,26 @@ function App() {
           <p className="season-text">
             <E n="calendar" /> {season !== "" ? `Season ${season}` : "Loading..."}
           </p>
+          <div className="league-switcher d-flex justify-content-center align-items-center gap-2 mt-2">
+            <span className="text-secondary small">League:</span>
+            <select
+              className="form-select form-select-sm bg-dark text-light border-secondary"
+              style={{ width: "auto" }}
+              value={getLeague()}
+              onChange={(e) => {
+                setLeague(e.target.value);
+                // Reload so every page refetches under the selected league.
+                window.location.reload();
+              }}
+              aria-label="Select league"
+            >
+              {LEAGUES.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </header>
 
         {/* === Mobile slide-out nav === */}

@@ -42,17 +42,38 @@ func getEnvInt(key string, def int) int {
 	return n
 }
 
+// ensureSettingsRow guarantees the singleton settings row exists so the
+// roster-lock toggles always have something to update. Older databases (or
+// ones that never ran data.sql) may be missing it, which made the mod buttons
+// silently fail with a 500.
+func ensureSettingsRow() {
+	DB.Exec(`INSERT INTO settings (id, roster_locked) VALUES (1, FALSE) ON CONFLICT (id) DO NOTHING`)
+}
+
 func isRosterLocked() bool {
-	var dbLocked bool
-	if err := DB.Raw("SELECT roster_locked FROM settings WHERE id = 1").Scan(&dbLocked).Error; err == nil && dbLocked {
-		return true
+	// A manual lock/unlock from the mod panel always wins over the scheduled
+	// ROSTER_LOCK date. Without this, a ROSTER_LOCK date in the past kept
+	// rosters locked forever — even after a moderator clicked "Unlock All".
+	var s struct {
+		RosterLocked       bool
+		RosterLockOverride bool
 	}
+	if err := DB.Raw(`SELECT roster_locked, roster_lock_override FROM settings WHERE id = 1`).Scan(&s).Error; err == nil {
+		if s.RosterLockOverride {
+			return s.RosterLocked
+		}
+		if s.RosterLocked {
+			return true
+		}
+	}
+
+	// Scheduled lock date (calendar marker + auto-lock once the date arrives).
 	rl := os.Getenv("ROSTER_LOCK")
 	if rl != "" {
 		if t, err := time.Parse("2006-01-02", rl); err == nil {
 			nowLocal := time.Now().Local()
 			lockTime := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local)
-			if nowLocal.After(lockTime) || nowLocal.Format("2006-01-02") == rl {
+			if !nowLocal.Before(lockTime) {
 				return true
 			}
 		}
@@ -369,6 +390,7 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 func GetTeams(w http.ResponseWriter, r *http.Request) {
 	var teams []Team
 	if err := DB.
+		Where("league = ?", leagueFromRequest(r)).
 		Where("name NOT IN ('(No Team)', 'League Sub')").
 		Order("CASE WHEN status = 'Active' THEN 1 WHEN status = 'Inactive' THEN 2 ELSE 3 END").
 		Find(&teams).Error; err != nil {
@@ -390,7 +412,7 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 
 	// 🧱 Crash prevention: find team safely
 	var team Team
-	if err := DB.First(&team, teamID).Error; err != nil {
+	if err := DB.Where("league = ?", leagueFromRequest(r)).First(&team, teamID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			http.Error(w, "team not found", http.StatusNotFound)
 			return
@@ -554,6 +576,7 @@ func GetTeamLeaderboard(w http.ResponseWriter, r *http.Request) {
 
 	// Show all teams including disbanded
 	if err := DB.Table("teams").
+		Where("league = ?", leagueFromRequest(r)).
 		Select("id, name, status, rating, wins, losses, matches").
 		Order("rating DESC").
 		Order("wins DESC").
@@ -787,8 +810,9 @@ func GetMatches(w http.ResponseWriter, r *http.Request) {
 		FROM matches m
 		JOIN teams t1 ON m.team_a_id = t1.id
 		JOIN teams t2 ON m.team_b_id = t2.id
+		WHERE m.league = ?
 		ORDER BY m.created_at DESC
-	`).Scan(&matches).Error; err != nil {
+	`, leagueFromRequest(r)).Scan(&matches).Error; err != nil {
 		log.Printf("❌ GetMatches: query failed: %v", err)
 		http.Error(w, "Failed to load matches", http.StatusInternalServerError)
 		return
@@ -816,10 +840,14 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// find their team membership
+	// find their team membership (within the active league)
+	lg := leagueFromRequest(r)
 	var membership TeamMember
-	result := DB.Where("player_id = ?", playerID).
-		Order("team_id DESC").
+	result := DB.Table("team_members").
+		Select("team_members.*").
+		Joins("JOIN teams ON teams.id = team_members.team_id").
+		Where("team_members.player_id = ? AND teams.league = ?", playerID, lg).
+		Order("team_members.team_id DESC").
 		Limit(1).
 		Find(&membership)
 
@@ -837,20 +865,16 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
 
 	// load team
 	var team Team
-	if err := DB.First(&team, membership.TeamID).Error; err != nil {
+	if err := DB.Where("league = ?", lg).First(&team, membership.TeamID).Error; err != nil {
 		http.Error(w, "team not found", http.StatusNotFound)
 		return
 	}
 
-	// --- Current season ---
-	var currentSeason string
-	DB.Raw(`SELECT value FROM config WHERE key='current_season' LIMIT 1`).
-		Scan(&currentSeason)
-
-	if strings.TrimSpace(currentSeason) == "" {
+	// --- Current season (league-aware) ---
+	currentSeason := strings.TrimSpace(strings.Replace(seasonForLeague(lg), "Season ", "", 1))
+	if currentSeason == "" {
 		currentSeason = "0"
 	}
-	currentSeason = strings.TrimSpace(strings.Replace(currentSeason, "Season ", "", 1))
 
 	// --- Load matches ---
 	type MatchWithMaps struct {
@@ -1103,9 +1127,11 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ensure team exists
+	lg := leagueFromRequest(r)
+
+	// ensure team exists (within the active league)
 	var team Team
-	if err := DB.First(&team, req.TeamID).Error; err != nil {
+	if err := DB.Where("league = ?", lg).First(&team, req.TeamID).Error; err != nil {
 		http.Error(w, "Team not found", http.StatusNotFound)
 		return
 	}
@@ -1116,10 +1142,14 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🚫 Prevent joining if player already belongs to any team
+	// 🚫 Prevent joining another team in the SAME league (a player may be on
+	// one main team and one rookie team).
 	var membership TeamMember
-	if err := DB.Where("player_id = ?", playerID).Take(&membership).Error; err == nil {
-		http.Error(w, "You are already on a team. Leave your current team before joining another.", http.StatusForbidden)
+	if err := DB.Table("team_members").
+		Joins("JOIN teams ON teams.id = team_members.team_id").
+		Where("team_members.player_id = ? AND teams.league = ?", playerID, lg).
+		Take(&membership).Error; err == nil {
+		http.Error(w, "You are already on a team in this league. Leave it before joining another.", http.StatusForbidden)
 		return
 	}
 
@@ -1218,18 +1248,23 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🚫 Prevent creating a team if already on one
+	lg := leagueFromRequest(r)
+
+	// 🚫 Prevent creating a second team in the same league
 	var existingMembership TeamMember
-	if err := DB.Where("player_id = ?", playerID).First(&existingMembership).Error; err == nil {
-		http.Error(w, "You are already on a team. Leave your current team first.", http.StatusForbidden)
+	if err := DB.Table("team_members").
+		Joins("JOIN teams ON teams.id = team_members.team_id").
+		Where("team_members.player_id = ? AND teams.league = ?", playerID, lg).
+		First(&existingMembership).Error; err == nil {
+		http.Error(w, "You are already on a team in this league. Leave it first.", http.StatusForbidden)
 		return
 	}
 
 	// ✅ Create team with default ELO from .env
-	var ls LeagueSettings
-	DB.First(&ls, 1)
+	ls := ensureLeagueSettings(lg)
 
 	team := Team{
+		League:          lg,
 		Name:            req.Name,
 		Status:          "Active",
 		Rating:          getEnvInt("DEFAULT_TEAM_RATING", 1000),
@@ -1261,7 +1296,7 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		TeamID:     team.ID,
 		TeamName:   team.Name,
 		Role:       "Captain",
-		Season:     currentSeason,
+		Season:     seasonForLeague(lg),
 		IsTeamJoin: true,
 	})
 
@@ -1639,6 +1674,7 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 		FROM matches m
 		JOIN teams t1 ON t1.id = m.team_a_id
 		JOIN teams t2 ON t2.id = m.team_b_id
+		WHERE m.league = ?
 		ORDER BY
 			-- Season DESC
 			CASE 
@@ -1657,7 +1693,7 @@ func HandlePublicMatches(w http.ResponseWriter, r *http.Request) {
 			END ASC,
 
 			m.id DESC
-	`).Scan(&rows).Error; err != nil {
+	`, leagueFromRequest(r)).Scan(&rows).Error; err != nil {
 		log.Printf("❌ HandlePublicMatches query failed: %v", err)
 		http.Error(w, "failed to fetch matches", http.StatusInternalServerError)
 		return
@@ -4577,6 +4613,9 @@ func ModSeasonArchive(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("🗃️ Archived stats for %d players into PlayerHistory", len(playersAll))
 
+	// Raw player_stats_archive inserts bypass the GORM version callbacks.
+	bumpDataVersion(scopePlayers)
+
 	respondJSON(w, map[string]any{
 		"success": true,
 		"message": "season archived successfully",
@@ -5461,60 +5500,68 @@ func updateLeaderboards(winnerID, loserID uint, matchCode string) {
 	DB.Where("team_id = ?", winnerID).Find(&winners)
 	DB.Where("team_id = ?", loserID).Find(&losers)
 
-	// Players on placement teams don't get rating changes either
-	if !winnerInPlacement {
-		actualWinPts := eloWinPoints
-		if winnerFound && loserFound && loser.Rating > winner.Rating {
-			diff := loser.Rating - winner.Rating
-			bonus := diff * underdogBonusPer100 / 100
-			if isChallenge {
-				bonus *= challengeMultiplier
-			}
-			actualWinPts += bonus
+	// Players get rating changes only when BOTH teams are out of placement,
+	// mirroring the team leaderboard so player ratings stay in sync with team ratings.
+	ratingChanges := !winnerInPlacement && !loserInPlacement
+
+	actualWinPts := eloWinPoints
+	if ratingChanges && winnerFound && loserFound && loser.Rating > winner.Rating {
+		diff := loser.Rating - winner.Rating
+		bonus := diff * underdogBonusPer100 / 100
+		if isChallenge {
+			bonus *= challengeMultiplier
 		}
-		for _, w := range winners {
-			DB.Model(&Player{}).Where("id = ?", w.PlayerID).
-				Updates(map[string]any{
-					"wins":    gorm.Expr("wins + 1"),
-					"matches": gorm.Expr("matches + 1"),
-					"rating":  gorm.Expr("LEAST(COALESCE(rating, ?) + ?, ?)", defaultPlayerRating, actualWinPts, getEnvInt("MAX_RATING", 1300)),
-				})
-		}
-	} else {
-		for _, w := range winners {
-			DB.Model(&Player{}).Where("id = ?", w.PlayerID).
-				Updates(map[string]any{
-					"wins":    gorm.Expr("wins + 1"),
-					"matches": gorm.Expr("matches + 1"),
-				})
-		}
+		actualWinPts += bonus
 	}
 
-	if !loserInPlacement {
-		actualLossPts := eloLossPoints
-		if winnerFound && loserFound && winner.Rating > loser.Rating {
-			diff := winner.Rating - loser.Rating
-			actualLossPts += diff * underdogLossReductionPer100 / 100
+	actualLossPts := eloLossPoints
+	if ratingChanges && winnerFound && loserFound && winner.Rating > loser.Rating {
+		diff := winner.Rating - loser.Rating
+		actualLossPts += diff * underdogLossReductionPer100 / 100
+	}
+	if actualLossPts > 0 {
+		actualLossPts = 0
+	}
+
+	for _, w := range winners {
+		var p Player
+		if DB.First(&p, w.PlayerID).Error != nil {
+			continue
 		}
-		if actualLossPts > 0 {
-			actualLossPts = 0
+		p.Wins++
+		p.Matches++
+		if ratingChanges {
+			p.Rating += actualWinPts
+			p.Rating = clampRating(p.Rating)
 		}
-		for _, l := range losers {
-			DB.Model(&Player{}).Where("id = ?", l.PlayerID).
-				Updates(map[string]any{
-					"losses":  gorm.Expr("losses + 1"),
-					"matches": gorm.Expr("matches + 1"),
-					"rating":  gorm.Expr("GREATEST(COALESCE(rating, ?) + ?, ?)", defaultPlayerRating, actualLossPts, getEnvInt("MIN_RATING", 0)),
-				})
+		// Player placement completion (mirrors team placement logic)
+		if p.Matches == placementMatches {
+			p.Rating = defaultPlayerRating + (p.Wins * eloWinPoints) + ((p.Matches - p.Wins) * eloLossPoints)
+			p.Rating = clampRating(p.Rating)
+			log.Printf("🎓 Player %d (%s) completed placement: %dW/%dL → rating %d",
+				p.ID, p.DisplayName, p.Wins, p.Losses, p.Rating)
 		}
-	} else {
-		for _, l := range losers {
-			DB.Model(&Player{}).Where("id = ?", l.PlayerID).
-				Updates(map[string]any{
-					"losses":  gorm.Expr("losses + 1"),
-					"matches": gorm.Expr("matches + 1"),
-				})
+		DB.Save(&p)
+	}
+
+	for _, l := range losers {
+		var p Player
+		if DB.First(&p, l.PlayerID).Error != nil {
+			continue
 		}
+		p.Losses++
+		p.Matches++
+		if ratingChanges {
+			p.Rating += actualLossPts
+			p.Rating = clampRating(p.Rating)
+		}
+		if p.Matches == placementMatches {
+			p.Rating = defaultPlayerRating + (p.Wins * eloWinPoints) + ((p.Matches - p.Wins) * eloLossPoints)
+			p.Rating = clampRating(p.Rating)
+			log.Printf("🎓 Player %d (%s) completed placement: %dW/%dL → rating %d",
+				p.ID, p.DisplayName, p.Wins, p.Losses, p.Rating)
+		}
+		DB.Save(&p)
 	}
 }
 
@@ -5874,12 +5921,15 @@ func ModRosterLockAll(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireLeagueMod(w, r); !ok {
 		return
 	}
-	if err := DB.Exec("UPDATE settings SET roster_locked = TRUE WHERE id = 1").Error; err != nil {
+	ensureSettingsRow()
+	if err := DB.Exec("UPDATE settings SET roster_locked = TRUE, roster_lock_override = TRUE WHERE id = 1").Error; err != nil {
 		modJSONErr(w, http.StatusInternalServerError, "failed to enable roster lock")
 		return
 	}
-	DB.Exec("UPDATE teams SET join_allowed = FALSE")
-	bumpDataVersion()
+	// NOTE: we intentionally do NOT force teams.join_allowed = FALSE here.
+	// The global flag already blocks joins and team creation, and clobbering
+	// each team's own join setting made "Unlock" impossible to undo cleanly.
+	bumpDataVersion(scopeSettings, scopeTeams)
 	respondJSON(w, map[string]any{"success": true, "locked": true})
 }
 
@@ -5888,11 +5938,17 @@ func ModRosterUnlockAll(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireLeagueMod(w, r); !ok {
 		return
 	}
-	if err := DB.Exec("UPDATE settings SET roster_locked = FALSE WHERE id = 1").Error; err != nil {
+	ensureSettingsRow()
+	if err := DB.Exec("UPDATE settings SET roster_locked = FALSE, roster_lock_override = TRUE WHERE id = 1").Error; err != nil {
 		modJSONErr(w, http.StatusInternalServerError, "failed to disable roster lock")
 		return
 	}
-	bumpDataVersion()
+	// Repair teams that a previous "Lock All" force-closed (join_allowed=FALSE).
+	// Teams individually locked by a moderator stay closed.
+	if err := DB.Exec("UPDATE teams SET join_allowed = TRUE WHERE locked = FALSE").Error; err != nil {
+		log.Printf("⚠️ roster unlock: failed to restore team join settings: %v", err)
+	}
+	bumpDataVersion(scopeSettings, scopeTeams)
 	respondJSON(w, map[string]any{"success": true, "locked": false})
 }
 
@@ -7788,10 +7844,9 @@ func HandleModToggleTeamLock(w http.ResponseWriter, r *http.Request) {
 		"locked": newLockState,
 	}
 
-	// 🚫 If locking → automatically disable join requests
-	if newLockState {
-		updateData["join_allowed"] = false
-	}
+	// Locking disables join requests. Unlocking must re-enable them — before,
+	// unlocking left join_allowed=false forever, so the roster stayed closed.
+	updateData["join_allowed"] = !newLockState
 
 	// 🔥 Apply updates
 	if err := DB.Model(&Team{}).Where("id = ?", team.ID).Updates(updateData).Error; err != nil {
@@ -7808,7 +7863,7 @@ func HandleModToggleTeamLock(w http.ResponseWriter, r *http.Request) {
 		"success":      true,
 		"team_id":      team.ID,
 		"locked":       newLockState,
-		"join_allowed": updateData["join_allowed"], // always false when locked
+		"join_allowed": !newLockState,
 		"message":      fmt.Sprintf("Team is now %s", stateText),
 	})
 }
@@ -9689,6 +9744,9 @@ func HandleArchiveAllPlayers(w http.ResponseWriter, r *http.Request) {
 
 	LogGeneral(fmt.Sprintf("📦 Archived %d players (Season %s)", len(rows), season))
 
+	// Raw player_stats_archive inserts bypass the GORM version callbacks.
+	bumpDataVersion(scopePlayers)
+
 	respondJSON(w, map[string]any{
 		"success":          true,
 		"archived_players": len(rows),
@@ -10003,7 +10061,7 @@ func GetDivisionTier(rating int) (string, string) {
 	for _, div := range divisions {
 		for idx, min := range div.Tiers {
 			if rating >= min {
-				// tiers I–IV (1–4)
+				// tiers I–IV (1–4); I is the lowest, IV the highest
 				tier := []string{"IV", "III", "II", "I"}[idx]
 				return div.Name, tier
 			}

@@ -552,7 +552,7 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 // --- Get current season ---
 func HandleGetSeason(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{
-		"season": currentSeason,
+		"season": seasonForLeague(leagueFromRequest(r)),
 	})
 }
 
@@ -716,8 +716,8 @@ func main() {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-ECGL-League")
 				if r.Method == http.MethodOptions {
 					w.WriteHeader(http.StatusOK)
 					return
@@ -726,6 +726,9 @@ func main() {
 			next.ServeHTTP(w, r)
 		})
 	})
+
+	// Resolve the active league (X-ECGL-League header / ?league=) for every request.
+	r.Use(LeagueContextMiddleware)
 
 	// Cast system routes
 	r.HandleFunc("/api/match/cast", HandleSetCast).Methods("POST")

@@ -57,6 +57,9 @@ func InitDB() {
 		log.Fatal("❌ Migration failed:", err)
 	}
 
+	ensureSettingsSchema()
+	ensureLeagueSchema()
+
 	sqlDB, _ := DB.DB()
 	sqlDB.SetMaxIdleConns(10)
 	sqlDB.SetMaxOpenConns(100)
@@ -73,4 +76,24 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+// ensureSettingsSchema makes sure the singleton `settings` table used by the
+// roster-lock controls exists and has every column the handlers rely on.
+// AutoMigrate does not cover it (there is no GORM model), and the table was
+// previously only created by running data.sql by hand.
+func ensureSettingsSchema() {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS settings (
+			id INTEGER PRIMARY KEY,
+			roster_locked BOOLEAN DEFAULT FALSE
+		)`,
+		`ALTER TABLE settings ADD COLUMN IF NOT EXISTS roster_lock_override BOOLEAN DEFAULT FALSE`,
+		`INSERT INTO settings (id, roster_locked) VALUES (1, FALSE) ON CONFLICT (id) DO NOTHING`,
+	}
+	for _, s := range stmts {
+		if err := DB.Exec(s).Error; err != nil {
+			log.Printf("⚠️ ensureSettingsSchema: %v", err)
+		}
+	}
 }

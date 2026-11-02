@@ -642,7 +642,7 @@ func HandleModClearWeek(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("🗑️ Deleted %d matches for Week %s (IDs: %v)", result.RowsAffected, req.Week, ids)
 
-	bumpDataVersion()
+	bumpDataVersion(scopeMatches)
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -671,39 +671,44 @@ func HandleModAddMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lg := leagueFromRequest(r)
+
 	var aTeam, bTeam Team
-	if err := DB.Where("LOWER(name)=LOWER(?)", req.TeamA).First(&aTeam).Error; err != nil {
+	if err := DB.Where("league = ? AND LOWER(name)=LOWER(?)", lg, req.TeamA).First(&aTeam).Error; err != nil {
 		http.Error(w, "Team A not found", http.StatusBadRequest)
 		return
 	}
-	if err := DB.Where("LOWER(name)=LOWER(?)", req.TeamB).First(&bTeam).Error; err != nil {
+	if err := DB.Where("league = ? AND LOWER(name)=LOWER(?)", lg, req.TeamB).First(&bTeam).Error; err != nil {
 		http.Error(w, "Team B not found", http.StatusBadRequest)
 		return
 	}
 
-	// Find current active week (highest numeric week)
+	season := seasonForLeague(lg)
+
+	// Find current active week (highest numeric week) for this league
 	var lastMatch Match
-	DB.Where("season = ?", currentSeason).Order("CAST(week AS INTEGER) DESC").First(&lastMatch)
+	DB.Where("league = ? AND season = ?", lg, season).Order("CAST(week AS INTEGER) DESC").First(&lastMatch)
 	currentWeek := lastMatch.Week
 	if currentWeek == "" {
-		currentWeek = "1"
+		currentWeek = fmt.Sprintf("%d", leagueWeek(lg))
 	}
 
 	var count int64
 	DB.Model(&Match{}).
-		Where("season = ? AND week = ?", currentSeason, currentWeek).
+		Where("league = ? AND season = ? AND week = ?", lg, season, currentWeek).
 		Count(&count)
 
-	matchCode := fmt.Sprintf("%s-Week%s-M%03d", currentSeason, currentWeek, count+1)
+	matchCode := fmt.Sprintf("%s-Week%s-M%03d", season, currentWeek, count+1)
 	now := time.Now()
 
 	newMatch := Match{
+		League:       lg,
 		MatchCode:    matchCode,
 		TeamAID:      aTeam.ID,
 		TeamBID:      bTeam.ID,
 		ProposedDate: &now,
 		Status:       "Scheduled",
-		Season:       currentSeason,
+		Season:       season,
 		Week:         currentWeek,
 	}
 

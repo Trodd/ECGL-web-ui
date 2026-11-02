@@ -9,6 +9,7 @@ export default function LeagueMod() {
     const [me, setMe] = useState(null);
     const [loading, setLoading] = useState(true);
     const [msg, setMsg] = useState("");
+    const [rosterStatus, setRosterStatus] = useState(null);
     const [week, setWeek] = useState("");
     const [matchID, setMatchID] = useState("");
     const [teamID, setTeamID] = useState("");
@@ -226,6 +227,14 @@ export default function LeagueMod() {
                 }
             })
             .catch(() => setSeason(null));
+    }, []);
+
+    // --- Fetch global roster lock status ---
+    useEffect(() => {
+        axios
+            .get(`${urlBase}/api/mod/roster/status`, { withCredentials: true })
+            .then((res) => setRosterStatus(!!res.data?.locked))
+            .catch(() => setRosterStatus(null));
     }, []);
 
     // --- Load teams + matches (filtered by current season) ---
@@ -455,6 +464,25 @@ export default function LeagueMod() {
 
             // 🔁 Refresh team list after certain mod actions
             if (shouldReload) await loadTeams();
+        } catch (err) {
+            console.error("❌ API error:", err.response?.data || err.message);
+            setMsg("❌ Request failed — check console for details.");
+        }
+    }
+
+    // Lock / unlock every roster, then refresh the visible status.
+    async function handleRosterLock(lock) {
+        if (!confirm(lock ? "⚠️ Lock all rosters?" : "✅ Unlock all rosters and allow joins/creations?")) return;
+        try {
+            await axios.post(
+                `${urlBase}/api/mod/roster/${lock ? "lock-all" : "unlock-all"}`,
+                {},
+                { withCredentials: true }
+            );
+            setMsg(lock ? "✅ All rosters locked" : "✅ All rosters unlocked");
+            const res = await axios.get(`${urlBase}/api/mod/roster/status`, { withCredentials: true });
+            setRosterStatus(!!res.data?.locked);
+            await loadTeams();
         } catch (err) {
             console.error("❌ API error:", err.response?.data || err.message);
             setMsg("❌ Request failed — check console for details.");
@@ -1940,23 +1968,27 @@ export default function LeagueMod() {
                                     <div className="d-flex flex-wrap gap-2">
                                         <button
                                             className="btn btn-outline-warning btn-sm"
-                                            onClick={async () => {
-                                                if (!confirm("⚠️ Lock all rosters?")) return;
-                                                await safePost("/api/mod/roster/lock-all", {}, "All rosters locked");
-                                            }}
+                                            onClick={() => handleRosterLock(true)}
+                                            disabled={rosterStatus === true}
                                         >
                                             🔒 Lock All Rosters
                                         </button>
                                         <button
                                             className="btn btn-outline-success btn-sm"
-                                            onClick={async () => {
-                                                if (!confirm("✅ Unlock all rosters and allow joins/creations?")) return;
-                                                await safePost("/api/mod/roster/unlock-all", {}, "All rosters unlocked");
-                                            }}
+                                            onClick={() => handleRosterLock(false)}
+                                            disabled={rosterStatus === false}
                                         >
                                             🔓 Unlock All Rosters
                                         </button>
                                     </div>
+                                    {rosterStatus !== null && (
+                                        <p className="text-light small mt-2 mb-0">
+                                            Current status:{" "}
+                                            {rosterStatus
+                                                ? <b className="text-warning">🔒 Locked</b>
+                                                : <b className="text-success">🔓 Unlocked</b>}
+                                        </p>
+                                    )}
                                 </div>
                                 {/* === Global Challenge Controls === */}
                                 <div

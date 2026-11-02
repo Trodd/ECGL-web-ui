@@ -49,6 +49,7 @@ type TeamJoinRequest struct {
 // --- Team ---
 type Team struct {
 	ID                   uint   `gorm:"primaryKey" json:"id"`
+	League               string `json:"league" gorm:"default:'main';index"`
 	Name                 string `gorm:"unique" json:"name"`
 	LogoURL              string `json:"logo_url" gorm:"column:logo_url;default:''"`
 	Status               string `json:"status"`
@@ -84,6 +85,7 @@ type TeamMember struct {
 // --- Match ---
 type Match struct {
 	ID                     uint           `gorm:"primaryKey" json:"id"`
+	League                 string         `json:"league" gorm:"default:'main';index"`
 	MatchCode              string         `gorm:"unique" json:"match_code"`
 	TeamAID                uint           `json:"team_a_id"`
 	TeamBID                uint           `json:"team_b_id"`
@@ -169,6 +171,7 @@ type MyTeamResponse struct {
 
 type LeagueSettings struct {
 	ID                   uint       `gorm:"primaryKey"`
+	League               string     `json:"league" gorm:"default:'main';index"`
 	CurrentWeek          int        `json:"current_week"`
 	WeeklyChallengeLimit int        `json:"weekly_challenge_limit"`
 	ChallengesEnabled    bool       `json:"challenges_enabled" gorm:"default:true"`
