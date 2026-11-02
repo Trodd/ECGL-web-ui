@@ -335,8 +335,9 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Device == "quest_native" {
-		http.Error(w, "Echo Combat is only available on PC (Rift or Quest+Link)", http.StatusForbidden)
+	// Only members of the Discord server may register.
+	if req.Device == "" {
+		http.Error(w, "Please select a device", http.StatusBadRequest)
 		return
 	}
 

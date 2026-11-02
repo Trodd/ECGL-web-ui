@@ -86,7 +86,7 @@ type TeamMember struct {
 type Match struct {
 	ID                     uint           `gorm:"primaryKey" json:"id"`
 	League                 string         `json:"league" gorm:"default:'main';index"`
-	MatchCode              string         `gorm:"unique" json:"match_code"`
+	MatchCode              string         `json:"match_code"`
 	TeamAID                uint           `json:"team_a_id"`
 	TeamBID                uint           `json:"team_b_id"`
 	ProposedDate           *time.Time     `json:"proposed_date"`
@@ -232,6 +232,7 @@ type FinalsTeam struct {
 
 type TeamArchive struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
+	League    string    `json:"league" gorm:"default:'main';index"`
 	TeamID    uint      `json:"team_id"`
 	Season    string    `json:"season"`
 	Name      string    `json:"name"`
@@ -244,7 +245,8 @@ type TeamArchive struct {
 
 type FinalsArchive struct {
 	ID        uint   `gorm:"primaryKey"`
-	Season    string `gorm:"uniqueIndex"`
+	League    string `json:"league" gorm:"default:'main';index"`
+	Season    string
 	Snapshot  datatypes.JSON
 	CreatedAt time.Time
 }

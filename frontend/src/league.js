@@ -41,11 +41,36 @@ export function leagueLabel(id = current) {
   return found ? found.label : "Main League";
 }
 
+// Build a path that carries the active league (e.g. /teams?league=rookie).
+export function leagueLink(path = "/") {
+  const [base, hash] = String(path).split("#");
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}league=${current}${hash ? "#" + hash : ""}`;
+}
+
 export function initLeague() {
+  // A ?league= param in the URL wins (so league-scoped links are shareable),
+  // otherwise fall back to the stored preference.
+  let fromUrl = null;
   try {
-    current = normalize(localStorage.getItem(STORAGE_KEY) || "main");
+    fromUrl = new URLSearchParams(window.location.search).get("league");
   } catch {
-    current = "main";
+    fromUrl = null;
+  }
+
+  if (fromUrl) {
+    current = normalize(fromUrl);
+    try {
+      localStorage.setItem(STORAGE_KEY, current);
+    } catch {
+      /* ignore */
+    }
+  } else {
+    try {
+      current = normalize(localStorage.getItem(STORAGE_KEY) || "main");
+    } catch {
+      current = "main";
+    }
   }
 
   // Attach the league to every axios request.

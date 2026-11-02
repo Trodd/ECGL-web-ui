@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import DiscordRequiredModal from "../components/DiscordRequiredModal";
 import { getApiUrl } from "../config";
+import { leagueLabel } from "../league";
 import { E } from "../components/CustomEmoji";
 
 export default function Register() {
@@ -274,7 +275,7 @@ export default function Register() {
             )}
 
             {rosterLocked && !isBanned && (
-              <div className="alert alert-warning small">
+              <div className="alert ecgl-alert-warning small">
                 <E n="timer" /> Roster lock is active.
               </div>
             )}
@@ -293,7 +294,7 @@ export default function Register() {
           {!isLeagueSub && !isBanned && !rosterLocked && (
             <>
               <div className="card bg-dark border-secondary p-4 mb-4">
-                <h5><E n="team" /> Join a Team</h5>
+                <h5><E n="team" /> Join a Team <span className="badge bg-secondary ms-2">{leagueLabel()}</span></h5>
                 <input
                   className="form-control bg-dark text-light"
                   placeholder="Search team…"
@@ -321,7 +322,7 @@ export default function Register() {
               </div>
 
               <div className="card bg-dark border-secondary p-4">
-                <h5><E n="plus" /> Create a Team</h5>
+                <h5><E n="plus" /> Create a Team <span className="badge bg-secondary ms-2">{leagueLabel()}</span></h5>
                 <div className="d-flex gap-2">
                   <input
                     className="form-control bg-dark text-light"
@@ -350,14 +351,12 @@ export default function Register() {
       {modal}
       <div className="container text-muted py-5" style={{ maxWidth: 720 }}>
         <div className="card bg-dark border-secondary p-4">
-          <h3><E n="register" /> League Registration</h3>
+          <h3><E n="register" /> League Registration <span className="badge bg-secondary ms-2">{leagueLabel()}</span></h3>
 
-          <div className="alert ecgl-alert-warning small mb-3">
-            <E n="warning" className="emoji-warning" /> <strong>PCVR ONLY</strong>
+          <div className="alert ecgl-alert-success small mb-3">
+            <E n="check" className="emoji-success" /> <strong>All supported headsets can register.</strong>
             <br />
-            Quest <strong>standalone / native</strong> is <strong>NOT eligible</strong>.
-            <br />
-            SteamVR or Oculus PC is required to play.
+            PCVR (SteamVR / Oculus PC) and Quest — <strong>standalone / native</strong> or via <strong>Link/Air Link</strong>.
           </div>
 
           <form onSubmit={handleRegister} className="d-grid gap-3">
@@ -377,11 +376,9 @@ export default function Register() {
               onChange={(e) => setDevice(e.target.value)}
             >
               <option value="">Select device…</option>
-              <option value="rift">Rift</option>
+              <option value="rift">PCVR (SteamVR / Oculus PC)</option>
               <option value="quest_link">Quest + Link/AirLink</option>
-              <option value="quest_native" disabled>
-                Quest Native ✗
-              </option>
+              <option value="quest_native">Quest Native (standalone)</option>
             </select>
 
             <div>

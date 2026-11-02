@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
+import { getLeague, leagueLabel } from "../league";
 import { E } from "../components/CustomEmoji";
 
 // Helper: parse "start:end, start:end" into [{start, end}, ...]
@@ -76,7 +77,7 @@ function DateRangeList({ value, onChange }) {
     );
 }
 
-const SETTING_GROUPS = [
+const MAIN_SETTING_GROUPS = [
     {
         label: "Season & Calendar",
         keys: [
@@ -119,6 +120,28 @@ const SETTING_GROUPS = [
             { key: "FRONTEND_URL", label: "Frontend URL", type: "text" },
             { key: "TLS_HOST", label: "TLS Host", type: "text" },
             { key: "DEV_MODE", label: "Dev Mode", type: "toggle" },
+        ],
+    },
+];
+
+const ROOKIE_SETTING_GROUPS = [
+    {
+        label: "Rookie Season & Calendar",
+        keys: [
+            { key: "CURRENT_SEASON_ROOKIE", label: "Rookie Season #", type: "number" },
+            { key: "SEASON_START_ROOKIE", label: "Rookie Season Start", type: "date" },
+            { key: "SEASON_END_ROOKIE", label: "Rookie Season End", type: "date" },
+            { key: "BREAKS_ROOKIE", label: "Rookie Break Weeks", type: "dateranges" },
+            { key: "FINALS_ROOKIE", label: "Rookie Finals Periods", type: "dateranges" },
+        ],
+    },
+    {
+        label: "Rookie Veteran Rule",
+        keys: [
+            { key: "ROOKIE_VETERAN_RULE_ENABLED", label: "Enforce Veteran Rule", type: "toggle", hint: "Limit main-league veterans on rookie teams." },
+            { key: "ROOKIE_NEW_PLAYERS_PER_VETERAN", label: "New Players per Veteran", type: "number", hint: "How many new players are required for each main-league veteran." },
+            { key: "ROOKIE_VETERAN_MAX_RATING", label: "Veteran Max Rating", type: "number", hint: "Players at or below this rating are still treated as new (not veterans). 0 = ignore rating." },
+            { key: "ROOKIE_VETERAN_MAX_GAMES", label: "Veteran Max Games", type: "number", hint: "Players at or below this many matches are still treated as new. 0 = ignore games." },
         ],
     },
 ];
@@ -264,9 +287,9 @@ export default function LeagueSettings() {
 
     return (
         <div className="page-content">
-            <h2><E n="gear" /> League Settings</h2>
+            <h2><E n="gear" /> League Settings <span className="badge bg-secondary ms-2">{leagueLabel()}</span></h2>
             <p className="text-secondary mb-4">
-                Configure league parameters. Changes are saved to the server environment.
+                Configure {leagueLabel()} parameters. Changes are saved to the server environment.
             </p>
 
             {message && (
@@ -275,52 +298,61 @@ export default function LeagueSettings() {
                 </div>
             )}
 
-            {SETTING_GROUPS.map((group) => (
-                <div key={group.label} className="card mb-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
-                    <div className="card-header" style={{ background: "var(--bg-elevated)", borderBottom: "1px solid var(--border-default)" }}>
-                        <h5 className="mb-0" style={{ color: "var(--text-primary)" }}>{group.label}</h5>
-                    </div>
-                    <div className="card-body">
-                        {group.keys.map(({ key, label, type, hint }) => (
-                            <div key={key} className="row mb-3 align-items-center">
-                                <div className="col-sm-4">
-                                    <label className="form-label mb-0" style={{ color: "var(--text-secondary)" }}>
-                                        {label}
-                                    </label>
-                                    {hint && <small className="d-block" style={{ color: "var(--text-tertiary)", fontSize: "0.75rem" }}>{hint}</small>}
-                                </div>
-                                <div className="col-sm-8">
-                                    {type === "toggle" ? (
-                                        <div className="form-check form-switch">
-                                            <input
-                                                className="form-check-input"
-                                                type="checkbox"
-                                                checked={settings[key] === "true"}
-                                                onChange={(e) => handleChange(key, e.target.checked ? "true" : "false")}
-                                            />
-                                        </div>
-                                    ) : type === "dateranges" ? (
-                                        <DateRangeList
-                                            value={settings[key] || ""}
-                                            onChange={(val) => handleChange(key, val)}
-                                        />
-                                    ) : (
-                                        <input
-                                            type={type === "number" ? "number" : type === "date" ? "date" : "text"}
-                                            className="form-control form-control-sm"
-                                            style={{
-                                                background: "var(--bg-elevated)",
-                                                border: "1px solid var(--border-default)",
-                                                color: "var(--text-primary)",
-                                            }}
-                                            value={settings[key] || ""}
-                                            onChange={(e) => handleChange(key, e.target.value)}
-                                        />
-                                    )}
-                                </div>
+            {[
+                getLeague() === "rookie"
+                    ? { section: "Rookie League", groups: ROOKIE_SETTING_GROUPS }
+                    : { section: "Main League", groups: MAIN_SETTING_GROUPS },
+            ].map(({ section, groups }) => (
+                <div key={section} className="mb-2">
+                    <h4 className="mb-3 mt-4" style={{ color: "var(--text-primary)" }}>{section}</h4>
+                    {groups.map((group) => (
+                        <div key={group.label} className="card mb-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
+                            <div className="card-header" style={{ background: "var(--bg-elevated)", borderBottom: "1px solid var(--border-default)" }}>
+                                <h5 className="mb-0" style={{ color: "var(--text-primary)" }}>{group.label}</h5>
                             </div>
-                        ))}
-                    </div>
+                            <div className="card-body">
+                                {group.keys.map(({ key, label, type, hint }) => (
+                                    <div key={key} className="row mb-3 align-items-center">
+                                        <div className="col-sm-4">
+                                            <label className="form-label mb-0" style={{ color: "var(--text-secondary)" }}>
+                                                {label}
+                                            </label>
+                                            {hint && <small className="d-block" style={{ color: "var(--text-tertiary)", fontSize: "0.75rem" }}>{hint}</small>}
+                                        </div>
+                                        <div className="col-sm-8">
+                                            {type === "toggle" ? (
+                                                <div className="form-check form-switch">
+                                                    <input
+                                                        className="form-check-input"
+                                                        type="checkbox"
+                                                        checked={settings[key] === "true"}
+                                                        onChange={(e) => handleChange(key, e.target.checked ? "true" : "false")}
+                                                    />
+                                                </div>
+                                            ) : type === "dateranges" ? (
+                                                <DateRangeList
+                                                    value={settings[key] || ""}
+                                                    onChange={(val) => handleChange(key, val)}
+                                                />
+                                            ) : (
+                                                <input
+                                                    type={type === "number" ? "number" : type === "date" ? "date" : "text"}
+                                                    className="form-control form-control-sm"
+                                                    style={{
+                                                        background: "var(--bg-elevated)",
+                                                        border: "1px solid var(--border-default)",
+                                                        color: "var(--text-primary)",
+                                                    }}
+                                                    value={settings[key] || ""}
+                                                    onChange={(e) => handleChange(key, e.target.value)}
+                                                />
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
                 </div>
             ))}
 
@@ -394,9 +426,8 @@ export default function LeagueSettings() {
 
 const DEFAULT_RULES = [
     {
-        title: "⚠️ Platform Requirement Notice",
-        content: `> Echo Combat is available only through PCVR (SteamVR, Oculus PC, or Quest via Link/Air Link).
-> This league is for PCVR players only. ❌ Quest-native players are not eligible.`,
+        title: "✅ Platform Requirements",
+        content: `> All supported headsets are eligible — PCVR (SteamVR / Oculus PC) and Quest (standalone/native or via Link/Air Link).`,
     },
     {
         title: "🏁 Signups",
@@ -485,9 +516,9 @@ const DEFAULT_RULES = [
     },
     {
         title: "📋 Eligibility",
-        content: `### ⚠️ Platform
-- Must play on PCVR using SteamVR, Oculus PC, or Link/Air Link
-- ❌ Quest-native unsupported
+        content: `### ✅ Platform
+- Any supported headset: PCVR (SteamVR / Oculus PC) or Quest (standalone/native or Link/Air Link)
+- Quest-native is supported
 
 ### 👥 Team Size
 - Teams must roster 3–5 players

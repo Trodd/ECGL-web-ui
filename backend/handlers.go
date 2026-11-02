@@ -467,7 +467,7 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 			FROM player_history ph
 			JOIN players p ON p.id = ph.player_id
 			WHERE ph.team_id = ? AND ph.season = ?
-		`, teamID, currentSeason).Scan(&roster)
+		`, teamID, seasonForLeague(leagueFromRequest(r))).Scan(&roster)
 	}
 
 	// --- Apply cooldown
@@ -605,18 +605,20 @@ func GetTeamLeaderboard(w http.ResponseWriter, r *http.Request) {
 
 // --- Get Available Seasons ---
 func GetLeaderboardSeasons(w http.ResponseWriter, r *http.Request) {
-	currentSeason := os.Getenv("CURRENT_SEASON")
+	currentSeason := seasonForLeague(leagueFromRequest(r))
 	if currentSeason == "" {
 		currentSeason = "1"
 	}
 
-	// Get distinct seasons from team_archives
-	var teamSeasons []string
-	DB.Table("team_archives").Distinct().Pluck("season", &teamSeasons)
+	lg := leagueFromRequest(r)
 
-	// Also get seasons from player_stats_archive
+	// Get distinct seasons from team_archives (this league)
+	var teamSeasons []string
+	DB.Table("team_archives").Where("league = ?", lg).Distinct().Pluck("season", &teamSeasons)
+
+	// Also get seasons from player_stats_archive (this league)
 	var playerSeasons []string
-	DB.Table("player_stats_archive").Distinct().Pluck("season", &playerSeasons)
+	DB.Table("player_stats_archive").Where("league = ?", lg).Distinct().Pluck("season", &playerSeasons)
 
 	// Combine with current season and deduplicate
 	seasonMap := make(map[string]bool)
@@ -651,7 +653,7 @@ func GetLeaderboardSeasons(w http.ResponseWriter, r *http.Request) {
 // --- Historical Team Leaderboard by Season ---
 func GetTeamLeaderboardBySeason(w http.ResponseWriter, r *http.Request) {
 	season := r.URL.Query().Get("season")
-	currentSeason := os.Getenv("CURRENT_SEASON")
+	currentSeason := seasonForLeague(leagueFromRequest(r))
 	if currentSeason == "" {
 		currentSeason = "1"
 	}
@@ -676,7 +678,7 @@ func GetTeamLeaderboardBySeason(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var archives []TeamArchive
-	if err := DB.Where("season = ?", season).
+	if err := DB.Where("league = ?", leagueFromRequest(r)).Where("season = ?", season).
 		Order("rating DESC").
 		Order("wins DESC").
 		Order("losses ASC").
@@ -711,7 +713,7 @@ func GetTeamLeaderboardBySeason(w http.ResponseWriter, r *http.Request) {
 // --- Historical Player Leaderboard by Season ---
 func GetPlayerLeaderboardBySeason(w http.ResponseWriter, r *http.Request) {
 	season := r.URL.Query().Get("season")
-	currentSeason := os.Getenv("CURRENT_SEASON")
+	currentSeason := seasonForLeague(leagueFromRequest(r))
 	if currentSeason == "" {
 		currentSeason = "1"
 	}
@@ -747,6 +749,7 @@ func GetPlayerLeaderboardBySeason(w http.ResponseWriter, r *http.Request) {
 	var archives []ArchivedPlayer
 	if err := DB.Table("player_stats_archive").
 		Select("player_id, archive_rating, archive_wins, archive_losses, archive_matches").
+		Where("league = ?", leagueFromRequest(r)).
 		Where("season = ?", season).
 		Order("archive_rating DESC").
 		Order("archive_wins DESC").
@@ -1176,6 +1179,12 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🧑‍🤝‍🧑 Rookie-league composition: 1 main-league veteran per 3 new players.
+	if ok, reason := canJoinRookieTeam(team.ID, playerID); !ok {
+		http.Error(w, reason, http.StatusForbidden)
+		return
+	}
+
 	// ✅ Create new join request
 	join := TeamJoinRequest{
 		PlayerID: playerID,
@@ -1202,7 +1211,7 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		for _, c := range captains {
 			captainMentions += fmt.Sprintf(" <@%d>", c.PlayerID)
 		}
-		SendDiscordLog(fmt.Sprintf("<@%d> has requested to join **%s**%s", playerID, team.Name, captainMentions))
+		SendDiscordLog(fmt.Sprintf("<@%d> has requested to join **%s**%s", playerID, team.Name, captainMentions), lg)
 	}()
 
 	respondJSON(w, map[string]any{
@@ -1316,6 +1325,7 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 			team.Name,
 			session.Values["discord_id"].(string),
 		),
+		lg,
 	)
 
 	respondJSON(w, map[string]any{
@@ -1361,11 +1371,23 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🚫 Prevent accepting if player is already on another team
+	// 🚫 Prevent accepting if player is already on another team in the same league
 	if req.Action == "accept" {
+		var targetTeam Team
+		if err := DB.First(&targetTeam, jr.TeamID).Error; err != nil {
+			http.Error(w, "Team not found", http.StatusNotFound)
+			return
+		}
 		var existing TeamMember
-		if err := DB.Where("player_id = ?", jr.PlayerID).First(&existing).Error; err == nil {
-			http.Error(w, "Player already belongs to a team. Must leave before joining another.", http.StatusForbidden)
+		if err := DB.Table("team_members").
+			Joins("JOIN teams ON teams.id = team_members.team_id").
+			Where("team_members.player_id = ? AND teams.league = ?", jr.PlayerID, normalizeLeague(targetTeam.League)).
+			First(&existing).Error; err == nil {
+			http.Error(w, "Player already belongs to a team in this league. Must leave before joining another.", http.StatusForbidden)
+			return
+		}
+		if ok, reason := canJoinRookieTeam(jr.TeamID, int64(jr.PlayerID)); !ok {
+			http.Error(w, reason, http.StatusForbidden)
 			return
 		}
 	}
@@ -1388,7 +1410,7 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 		DB.Select("display_name, username").First(&p, jr.PlayerID)
 
 		var t Team
-		DB.Select("name").First(&t, jr.TeamID)
+		DB.Select("name, league").First(&t, jr.TeamID)
 
 		display := p.DisplayName
 		if display == "" {
@@ -1412,6 +1434,7 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 				jr.PlayerID,
 				teamName,
 			),
+			t.League,
 		)
 
 		// ✅ Log history (skip duplicates)
@@ -1578,7 +1601,7 @@ func HandleLeaveTeam(w http.ResponseWriter, r *http.Request) {
 		SendDiscordLog(fmt.Sprintf(
 			"🗑️ **Team Disbanded:** **%s (#%d)** — last member left",
 			team.Name, team.ID,
-		))
+		), team.League)
 
 		// sync leaving player (remove captain/co-captain roles)
 		syncDiscordRolesForPlayer(playerID)
@@ -1624,7 +1647,7 @@ func HandleLeaveTeam(w http.ResponseWriter, r *http.Request) {
 	SendDiscordLog(fmt.Sprintf(
 		"🚪 <@%s> has left team **%s (#%d)**",
 		discordIDStr, team.Name, team.ID,
-	))
+	), team.League)
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -2101,7 +2124,7 @@ func HandleKickMember(w http.ResponseWriter, r *http.Request) {
 			"🦶 **Player Kicked:** <@%d> removed from **%s** — team disbanded (no members left)",
 			playerID,
 			team.Name,
-		))
+		), team.League)
 
 		respondJSON(w, map[string]any{
 			"success": true,
@@ -2115,7 +2138,7 @@ func HandleKickMember(w http.ResponseWriter, r *http.Request) {
 		"🦶 **Player Kicked:** <@%d> removed from **%s**",
 		playerID,
 		team.Name,
-	))
+	), team.League)
 
 	respondJSON(w, map[string]any{"success": true, "message": "Member kicked"})
 }
@@ -2243,7 +2266,7 @@ func HandlePromoteMember(w http.ResponseWriter, r *http.Request) {
 		targetID,
 		req.Role,
 		teamName,
-	))
+	), team.League)
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -2304,6 +2327,7 @@ func HandleToggleTeamStatus(w http.ResponseWriter, r *http.Request) {
 			req.Status, // new status
 			discordID,  // who changed it
 		),
+		team.League,
 	)
 
 	respondJSON(w, map[string]any{
@@ -2370,6 +2394,7 @@ func HandleToggleTeamJoinAllowed(w http.ResponseWriter, r *http.Request) {
 			team.Name,
 			discordID,
 		),
+		team.League,
 	)
 
 	respondJSON(w, map[string]any{
@@ -2595,7 +2620,7 @@ func HandleScheduleMatch(w http.ResponseWriter, r *http.Request) {
 	)
 
 	SendDiscordEmbedToGeneral(
-		fmt.Sprintf("📌 Match Time Request — %s", match.MatchCode),
+		fmt.Sprintf("📌 %s — Match Time Request — %s", LeagueDisplayName(match.League), match.MatchCode),
 		fmt.Sprintf(
 			"🕐 **Proposed Match Time:** <t:%d:F> (<t:%d:R>)\n\n"+
 				"Requested by: **%s**\n"+
@@ -2842,7 +2867,7 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var match Match
-	if err := DB.First(&match, matchID).Error; err != nil {
+	if err := DB.Where("league = ?", leagueFromRequest(r)).First(&match, matchID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			http.Error(w, "Match not found", http.StatusNotFound)
 			return
@@ -3331,9 +3356,9 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 	DB.Raw(`
 		SELECT season, archive_rating, archive_wins, archive_losses, archive_matches, NULL AS archive_team
 		FROM player_stats_archive
-		WHERE player_id = ?
+		WHERE player_id = ? AND league = ?
 		ORDER BY season ASC
-	`, playerID).Scan(&archived)
+	`, playerID, leagueFromRequest(r)).Scan(&archived)
 
 	// --- Final Response
 	respondJSON(w, map[string]any{
@@ -3987,7 +4012,7 @@ func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
 		actorDiscordID,
 	)
 
-	SendScoreEmbedWithPings(content, "🏳️ Match Forfeited", desc, 0xE74C3C)
+	SendScoreEmbedWithPings(content, fmt.Sprintf("🏳️ %s — Match Forfeited", LeagueDisplayName(m.League)), desc, 0xE74C3C)
 
 	respondJSON(w, map[string]any{
 		"success":    true,
@@ -4054,7 +4079,7 @@ func ModMatchDoubleForfeit(w http.ResponseWriter, r *http.Request) {
 		actorDiscordID,
 	)
 
-	SendScoreEmbedWithPings(content, "🏳️‍⚖️ Double Forfeit", desc, 0xE67E22)
+	SendScoreEmbedWithPings(content, fmt.Sprintf("🏳️‍⚖️ %s — Double Forfeit", LeagueDisplayName(m.League)), desc, 0xE67E22)
 
 	log.Printf("🏳️‍⚖️ Mod applied double forfeit on match #%d between teams %d and %d", m.ID, m.TeamAID, m.TeamBID)
 
@@ -4495,9 +4520,10 @@ func ModSeasonArchive(w http.ResponseWriter, r *http.Request) {
 	DB.Find(&players)
 
 	// ------------------------------
-	// 🔥 Determine CURRENT SEASON
+	// 🔥 Determine CURRENT SEASON (league-aware)
 	// ------------------------------
-	curSeason := strings.TrimSpace(currentSeason)
+	lg := leagueFromRequest(r)
+	curSeason := strings.TrimSpace(seasonForLeague(lg))
 	curSeason = strings.ToLower(curSeason)
 
 	switch curSeason {
@@ -4608,7 +4634,7 @@ func ModSeasonArchive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, p := range playersAll {
-		archivePlayerStats(p.ID, curSeason)
+		archivePlayerStats(p.ID, curSeason, lg)
 	}
 
 	log.Printf("🗃️ Archived stats for %d players into PlayerHistory", len(playersAll))
@@ -4952,7 +4978,7 @@ func HandleConfirmSchedule(w http.ResponseWriter, r *http.Request) {
 		frontendURL := getEnv("FRONTEND_URL", "https://gigglesquad.mooo.com")
 		log.Printf("✅ Match %d fully confirmed; sending scheduled match log to Discord", match.ID)
 		SendDiscordEmbedWithPings(
-			fmt.Sprintf("📅 Match Scheduled — %s", match.MatchCode),
+			fmt.Sprintf("📅 %s — Match Scheduled — %s", LeagueDisplayName(match.League), match.MatchCode),
 			logMsg,
 			"View Match",
 			fmt.Sprintf("%s/match/%d", frontendURL, match.ID),
@@ -5110,6 +5136,7 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 					"🔄 **Score Updated:** Team %d submitted a *different* score set for Match #%d.\nNew scores saved — both teams must confirm again.",
 					req.TeamID, match.ID,
 				),
+				match.League,
 			)
 
 			respondJSON(w, map[string]any{
@@ -5163,6 +5190,7 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 				opposingTeam.Name,
 				captainPings,
 			),
+			match.League,
 		)
 
 		respondJSON(w, map[string]any{
@@ -5320,7 +5348,7 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 		winnerName,
 	)
 
-	SendScoreEmbedWithPings(content, "🏆 Final Match Result", desc, 0x2ECC71)
+	SendScoreEmbedWithPings(content, fmt.Sprintf("🏆 %s — Final Match Result", LeagueDisplayName(match.League)), desc, 0x2ECC71)
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -5855,6 +5883,7 @@ func CaptainRenameTeam(w http.ResponseWriter, r *http.Request) {
 			team.ID,
 			playerID,
 		),
+		team.League,
 	)
 
 	respondJSON(w, map[string]any{"success": true, "team": team})
@@ -6006,6 +6035,7 @@ func ModAddPlayerToTeam(w http.ResponseWriter, r *http.Request) {
 		TeamID   uint   `json:"team_id"`
 		PlayerID string `json:"player_id"`
 		Role     string `json:"role"`
+		Override bool   `json:"override"` // mods may bypass the rookie composition rule
 	}
 
 	var req Body
@@ -6027,11 +6057,29 @@ func ModAddPlayerToTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if player already on a team
-	var existing TeamMember
-	if err := DB.Where("player_id = ?", pid).First(&existing).Error; err == nil {
-		http.Error(w, "Player is already on a team", http.StatusBadRequest)
+	// Load target team
+	var team Team
+	if err := DB.First(&team, req.TeamID).Error; err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
 		return
+	}
+
+	// Check if player already on a team in the SAME league
+	var existing TeamMember
+	if err := DB.Table("team_members").
+		Joins("JOIN teams ON teams.id = team_members.team_id").
+		Where("team_members.player_id = ? AND teams.league = ?", pid, normalizeLeague(team.League)).
+		First(&existing).Error; err == nil {
+		http.Error(w, "Player is already on a team in this league", http.StatusBadRequest)
+		return
+	}
+
+	// Rookie composition rule (mods can pass override=true)
+	if !req.Override {
+		if ok, reason := canJoinRookieTeam(req.TeamID, pid); !ok {
+			http.Error(w, reason, http.StatusForbidden)
+			return
+		}
 	}
 
 	// Normalize role
@@ -7802,7 +7850,7 @@ func ModResetMatchSchedule(w http.ResponseWriter, r *http.Request) {
 		match.MatchCode,
 		teamAName,
 		teamBName,
-	))
+	), match.League)
 
 	respondJSON(w, map[string]any{
 		"success":  true,
@@ -7889,7 +7937,8 @@ type finalsBracketResponse struct {
 func HandleGetFinalsTeams(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	season := strings.TrimSpace(currentSeason)
+	lg := leagueFromRequest(r)
+	season := strings.TrimSpace(seasonForLeague(lg))
 	if season == "" {
 		season = "0"
 	}
@@ -7897,6 +7946,7 @@ func HandleGetFinalsTeams(w http.ResponseWriter, r *http.Request) {
 	var finals []FinalsTeam
 	if err := DB.
 		Where("season = ?", season).
+		Where("team_id IN (SELECT id FROM teams WHERE league = ?)", lg).
 		Where("NOT EXISTS (SELECT 1 FROM matches m WHERE m.season = finals_teams.season AND m.is_finals = true AND m.archived = true)").
 		Where("team_id != 0").
 		Order("seed ASC").
@@ -7948,16 +7998,18 @@ func HandleGetFinalsTeams(w http.ResponseWriter, r *http.Request) {
 func HandleGetFinalsBracket(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	season := strings.TrimSpace(currentSeason)
+	lg := leagueFromRequest(r)
+	season := strings.TrimSpace(seasonForLeague(lg))
 	if season == "" {
 		season = "0"
 	}
 
 	// -----------------------------------
-	// Load all active finals matches
+	// Load all active finals matches (this league)
 	// -----------------------------------
 	var matches []Match
 	if err := DB.
+		Where("league = ?", lg).
 		Where("season = ? AND is_finals = true AND archived = false", season).
 		Order("bracket ASC, bracket_round ASC, bracket_slot ASC").
 		Find(&matches).Error; err != nil {
@@ -8170,13 +8222,15 @@ func HandleModFinalsAddTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lg := leagueFromRequest(r)
+
 	var team Team
-	if err := DB.First(&team, req.TeamID).Error; err != nil {
+	if err := DB.Where("league = ?", lg).First(&team, req.TeamID).Error; err != nil {
 		modJSONErr(w, http.StatusNotFound, "Team not found")
 		return
 	}
 
-	season := strings.TrimSpace(currentSeason)
+	season := strings.TrimSpace(seasonForLeague(lg))
 	if season == "" {
 		season = "0"
 	}
@@ -8192,6 +8246,7 @@ func HandleModFinalsAddTeam(w http.ResponseWriter, r *http.Request) {
 	var maxSeed int64
 	DB.Model(&FinalsTeam{}).
 		Where("season = ?", season).
+		Where("team_id IN (SELECT id FROM teams WHERE league = ?)", lg).
 		Select("COALESCE(MAX(seed),0)").Scan(&maxSeed)
 
 	ft := FinalsTeam{
@@ -8230,7 +8285,8 @@ func HandleModFinalsRemoveTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	season := strings.TrimSpace(currentSeason)
+	lg := leagueFromRequest(r)
+	season := strings.TrimSpace(seasonForLeague(lg))
 	if season == "" {
 		season = "0"
 	}
@@ -8246,7 +8302,10 @@ func HandleModFinalsRemoveTeam(w http.ResponseWriter, r *http.Request) {
 
 	// Reseed remaining teams
 	var remaining []FinalsTeam
-	if err := DB.Where("season = ?", season).Order("seed ASC").Find(&remaining).Error; err == nil {
+	if err := DB.
+		Where("season = ?", season).
+		Where("team_id IN (SELECT id FROM teams WHERE league = ?)", lg).
+		Order("seed ASC").Find(&remaining).Error; err == nil {
 
 		for i := range remaining {
 			DB.Model(&FinalsTeam{}).
@@ -8267,13 +8326,18 @@ func HandleModFinalsGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	season := strings.TrimSpace(currentSeason)
+	lg := leagueFromRequest(r)
+	season := strings.TrimSpace(seasonForLeague(lg))
 	if season == "" {
 		season = "0"
 	}
 
 	var finalsTeams []FinalsTeam
-	if err := DB.Where("season = ?", season).Order("seed ASC").Find(&finalsTeams).Error; err != nil {
+	if err := DB.
+		Where("season = ?", season).
+		Where("team_id IN (SELECT id FROM teams WHERE league = ?)", lg).
+		Order("seed ASC").
+		Find(&finalsTeams).Error; err != nil {
 		http.Error(w, "Failed to load finals teams", http.StatusInternalServerError)
 		return
 	}
@@ -8289,6 +8353,7 @@ func HandleModFinalsGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := DB.
+		Where("league = ?", lg).
 		Where("season = ? AND is_finals = true AND archived = false", season).
 		Delete(&Match{}).Error; err != nil {
 
@@ -8297,6 +8362,7 @@ func HandleModFinalsGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, m := range matches {
+		m.League = lg
 		if err := DB.Create(&m).Error; err != nil {
 			http.Error(w, "Failed saving finals match", http.StatusInternalServerError)
 			return
@@ -8305,7 +8371,9 @@ func HandleModFinalsGenerate(w http.ResponseWriter, r *http.Request) {
 
 	// reload
 	var created []Match
-	DB.Where("season = ? AND is_finals = true AND archived = false", season).Find(&created)
+	DB.Where("league = ?", lg).
+		Where("season = ? AND is_finals = true AND archived = false", season).
+		Find(&created)
 
 	byCode := map[string]uint{}
 	for _, m := range created {
@@ -8480,7 +8548,8 @@ func HandleModFinalsReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	season := normalizeSeason(currentSeason)
+	lg := leagueFromRequest(r)
+	season := normalizeSeason(seasonForLeague(lg))
 	if season == "" {
 		season = "Preseason"
 	}
@@ -8503,6 +8572,7 @@ func HandleModFinalsReset(w http.ResponseWriter, r *http.Request) {
 	// Check if finals are archived for this season
 	var archivedCount int64
 	if err := tx.Model(&Match{}).
+		Where("league = ?", lg).
 		Where("season = ? AND is_finals = true AND archived = true", season).
 		Count(&archivedCount).Error; err != nil {
 
@@ -8512,8 +8582,11 @@ func HandleModFinalsReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Always clear finals teams for that season (safe in both modes)
-	if err := tx.Where("season = ?", season).Delete(&FinalsTeam{}).Error; err != nil {
+	// Always clear finals teams for that season (this league only)
+	if err := tx.
+		Where("season = ?", season).
+		Where("team_id IN (SELECT id FROM teams WHERE league = ?)", lg).
+		Delete(&FinalsTeam{}).Error; err != nil {
 		tx.Rollback()
 		log.Printf("❌ FinalsReset: failed to delete finals teams: %v", err)
 		http.Error(w, "Failed to reset finals teams", http.StatusInternalServerError)
@@ -8523,6 +8596,7 @@ func HandleModFinalsReset(w http.ResponseWriter, r *http.Request) {
 	// ✅ If archived, do SOFT RESET: clear bracket layout only, keep matches + scores
 	if archivedCount > 0 {
 		if err := tx.Model(&Match{}).
+			Where("league = ?", lg).
 			Where("season = ? AND is_finals = true", season).
 			Updates(map[string]any{
 				"bracket":       "",
@@ -8555,7 +8629,7 @@ func HandleModFinalsReset(w http.ResponseWriter, r *http.Request) {
 
 	// ❗ If NOT archived, do HARD RESET (your original behavior): delete finals matches + scores
 	var matches []Match
-	if err := tx.Where("season = ? AND is_finals = true", season).Find(&matches).Error; err != nil {
+	if err := tx.Where("league = ?", lg).Where("season = ? AND is_finals = true", season).Find(&matches).Error; err != nil {
 		// not fatal, but log
 		log.Printf("⚠️ FinalsReset: failed to load finals matches: %v", err)
 	} else if len(matches) > 0 {
@@ -8609,7 +8683,7 @@ func HandleModFinalsUpdateMatch(w http.ResponseWriter, r *http.Request) {
 
 	// Load by ID OR bracket metadata
 	if req.MatchID != 0 {
-		if err := DB.First(&match, req.MatchID).Error; err != nil {
+		if err := DB.Where("league = ?", leagueFromRequest(r)).First(&match, req.MatchID).Error; err != nil {
 			http.Error(w, "Match not found", http.StatusNotFound)
 			return
 		}
@@ -8786,8 +8860,7 @@ func HandleModToggleFinalsVisible(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var s LeagueSettings
-	DB.First(&s)
+	s := ensureLeagueSettings(leagueFromRequest(r))
 
 	if req.Visible != nil {
 		s.FinalsVisible = *req.Visible
@@ -8807,12 +8880,7 @@ func HandleModToggleFinalsVisible(w http.ResponseWriter, r *http.Request) {
 func HandleGetFinalsVisible(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	var s LeagueSettings
-	if err := DB.First(&s).Error; err != nil {
-		respondJSON(w, map[string]any{"visible": false, "mod_visible": false})
-		return
-	}
-
+	s := ensureLeagueSettings(leagueFromRequest(r))
 	respondJSON(w, map[string]any{"visible": s.FinalsVisible, "mod_visible": s.FinalsModVisible})
 }
 
@@ -8834,7 +8902,7 @@ func HandleModFinalsSetSeeds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	season := strings.TrimSpace(currentSeason)
+	season := strings.TrimSpace(seasonForLeague(leagueFromRequest(r)))
 	if season == "" {
 		season = "0"
 	}
@@ -8879,13 +8947,17 @@ func HandleModFinalsGenerateEmpty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	season := strings.TrimSpace(currentSeason)
+	lg := leagueFromRequest(r)
+	season := strings.TrimSpace(seasonForLeague(lg))
 	if season == "" {
 		season = "0"
 	}
 
-	// Delete existing bracket for this season
-	if err := DB.Where("season = ? AND is_finals = true AND archived = false", season).Delete(&Match{}).Error; err != nil {
+	// Delete existing bracket for this season (this league only)
+	if err := DB.
+		Where("league = ?", lg).
+		Where("season = ? AND is_finals = true AND archived = false", season).
+		Delete(&Match{}).Error; err != nil {
 		http.Error(w, "failed clearing old finals bracket", http.StatusInternalServerError)
 		return
 	}
@@ -8905,6 +8977,7 @@ func HandleModFinalsGenerateEmpty(w http.ResponseWriter, r *http.Request) {
 	}
 	create := func(bracket string, round, slot int) Match {
 		return Match{
+			League:       lg,
 			Season:       season,
 			MatchCode:    code(bracket, round, slot),
 			TeamAID:      0,
@@ -9079,7 +9152,7 @@ func HandleModFinalsAssignSlot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var m Match
-	if err := DB.First(&m, req.MatchID).Error; err != nil {
+	if err := DB.Where("league = ?", leagueFromRequest(r)).First(&m, req.MatchID).Error; err != nil {
 		http.Error(w, "match not found", http.StatusNotFound)
 		return
 	}
@@ -9131,7 +9204,7 @@ func HandleModFinalsSetWinner(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var m Match
-	if err := DB.First(&m, req.MatchID).Error; err != nil {
+	if err := DB.Where("league = ?", leagueFromRequest(r)).First(&m, req.MatchID).Error; err != nil {
 		http.Error(w, "match not found", http.StatusNotFound)
 		return
 	}
@@ -9183,7 +9256,7 @@ func HandleModFinalsSetWinner(w http.ResponseWriter, r *http.Request) {
 		teamName = t.Name
 	}
 
-	SendDiscordLog(fmt.Sprintf("🏆 **Finals Winner Set:** %s wins match #%d", teamName, req.MatchID))
+	SendDiscordLog(fmt.Sprintf("🏆 **Finals Winner Set:** %s wins match #%d", teamName, req.MatchID), m.League)
 
 	respondJSON(w, map[string]any{
 		"success": true,
@@ -9616,9 +9689,23 @@ func SendDiscordToChannel(channelID string, msg string) {
 func HandleGetSeasonCalendar(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	// Rookie-specific calendar keys fall back to the main-league values.
+	suffix := ""
+	if leagueFromRequest(r) == LeagueRookie {
+		suffix = "_ROOKIE"
+	}
+	env := func(key string) string {
+		if suffix != "" {
+			if v := os.Getenv(key + suffix); v != "" {
+				return v
+			}
+		}
+		return getEnv(key, "")
+	}
+
 	// Multiple breaks: BREAKS=start:end,start:end,...
 	var breaks []map[string]string
-	breaksEnv := getEnv("BREAKS", "")
+	breaksEnv := env("BREAKS")
 	if breaksEnv != "" {
 		for _, pair := range strings.Split(breaksEnv, ",") {
 			parts := strings.SplitN(strings.TrimSpace(pair), ":", 2)
@@ -9633,7 +9720,7 @@ func HandleGetSeasonCalendar(w http.ResponseWriter, r *http.Request) {
 
 	// Multiple finals: FINALS=start:end,start:end,...
 	var finals []map[string]string
-	finalsEnv := getEnv("FINALS", "")
+	finalsEnv := env("FINALS")
 	if finalsEnv != "" {
 		for _, pair := range strings.Split(finalsEnv, ",") {
 			parts := strings.SplitN(strings.TrimSpace(pair), ":", 2)
@@ -9647,9 +9734,9 @@ func HandleGetSeasonCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := map[string]any{
-		"season_start": getEnv("SEASON_START", ""),
-		"season_end":   getEnv("SEASON_END", ""),
-		"roster_lock":  getEnv("ROSTER_LOCK", ""),
+		"season_start": env("SEASON_START"),
+		"season_end":   env("SEASON_END"),
+		"roster_lock":  env("ROSTER_LOCK"),
 		"breaks":       breaks,
 		"finals":       finals,
 	}
@@ -9707,10 +9794,12 @@ func HandleArchiveAllPlayers(w http.ResponseWriter, r *http.Request) {
 
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	// Normalize Season
+	lg := leagueFromRequest(r)
+
+	// Normalize Season (league-aware default)
 	season := strings.TrimSpace(req.Season)
 	if season == "" {
-		season = strings.TrimSpace(currentSeason)
+		season = strings.TrimSpace(seasonForLeague(lg))
 	}
 
 	season = normalizeSeason(season)
@@ -9739,7 +9828,7 @@ func HandleArchiveAllPlayers(w http.ResponseWriter, r *http.Request) {
 
 	// --- Archive each one ---
 	for _, rrow := range rows {
-		archivePlayerStats(rrow.ID, season)
+		archivePlayerStats(rrow.ID, season, lg)
 	}
 
 	LogGeneral(fmt.Sprintf("📦 Archived %d players (Season %s)", len(rows), season))
@@ -9775,7 +9864,9 @@ func normalizeSeason(s string) string {
 	return s
 }
 
-func archivePlayerStats(playerID int64, season string) {
+func archivePlayerStats(playerID int64, season string, league string) {
+	league = normalizeLeague(league)
+
 	// Load current player stats
 	type P struct {
 		Rating  int64
@@ -9793,20 +9884,20 @@ func archivePlayerStats(playerID int64, season string) {
 		return
 	}
 
-	// Idempotent insert/update
+	// Replace this league+season snapshot atomically (no unique constraint
+	// needed, and main/rookie can both archive the same player/season).
+	DB.Exec(
+		`DELETE FROM player_stats_archive WHERE player_id = ? AND season = ? AND league = ?`,
+		playerID, season, league,
+	)
 	DB.Exec(`
 		INSERT INTO player_stats_archive
-			(player_id, season, archive_rating, archive_wins, archive_losses, archive_matches)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT (player_id, season)
-		DO UPDATE SET
-			archive_rating  = EXCLUDED.archive_rating,
-			archive_wins    = EXCLUDED.archive_wins,
-			archive_losses  = EXCLUDED.archive_losses,
-			archive_matches = EXCLUDED.archive_matches
+			(player_id, season, league, archive_rating, archive_wins, archive_losses, archive_matches)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`,
 		playerID,
 		season,
+		league,
 		p.Rating,
 		p.Wins,
 		p.Losses,
@@ -9914,16 +10005,14 @@ func HandleArchiveTeamStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// LOAD CURRENT SEASON FROM .env
-	season := os.Getenv("CURRENT_SEASON")
-	season = strings.TrimSpace(season)
-
+	lg := leagueFromRequest(r)
+	season := strings.TrimSpace(seasonForLeague(lg))
 	if season == "" {
 		season = "0"
 	}
 
 	var teams []Team
-	if err := DB.Find(&teams).Error; err != nil {
+	if err := DB.Where("league = ?", lg).Find(&teams).Error; err != nil {
 		modJSONErr(w, 500, "failed to load teams")
 		return
 	}
@@ -9935,6 +10024,7 @@ func HandleArchiveTeamStats(w http.ResponseWriter, r *http.Request) {
 		}
 
 		archive := TeamArchive{
+			League:  lg,
 			TeamID:  t.ID,
 			Name:    t.Name,
 			Season:  season,
@@ -10008,17 +10098,20 @@ func HandleImportPreseasonArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lg := leagueFromRequest(r)
+
 	count := 0
 	skipped := 0
 	for _, t := range archive.Teams {
-		// Check if already exists in team_archives for Preseason
+		// Check if already exists in team_archives for Preseason (this league)
 		var existing TeamArchive
-		if err := DB.Where("team_id = ? AND season = ?", t.ID, "Preseason").First(&existing).Error; err == nil {
+		if err := DB.Where("league = ? AND team_id = ? AND season = ?", lg, t.ID, "Preseason").First(&existing).Error; err == nil {
 			skipped++
 			continue // Already exists
 		}
 
 		ta := TeamArchive{
+			League:  lg,
 			TeamID:  t.ID,
 			Name:    t.Name,
 			Season:  "Preseason",
@@ -10169,10 +10262,11 @@ func HandleGetDiscordServerInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func BuildFinalsSnapshot(season string) (map[string]any, error) {
+func BuildFinalsSnapshot(season string, league string) (map[string]any, error) {
 	var matches []Match
 
 	if err := DB.
+		Where("league = ?", league).
 		Where("season = ? AND is_finals = true", season).
 		Order("bracket, bracket_round, bracket_slot").
 		Find(&matches).Error; err != nil {
@@ -10197,7 +10291,8 @@ func HandleArchiveFinals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	season := normalizeSeason(currentSeason)
+	lg := leagueFromRequest(r)
+	season := normalizeSeason(seasonForLeague(lg))
 
 	tx := DB.Begin()
 	if tx.Error != nil {
@@ -10205,9 +10300,10 @@ func HandleArchiveFinals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prevent double-archive
+	// Prevent double-archive (this league)
 	var count int64
 	tx.Model(&FinalsArchive{}).
+		Where("league = ?", lg).
 		Where("season = ?", season).
 		Count(&count)
 
@@ -10218,7 +10314,7 @@ func HandleArchiveFinals(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build snapshot
-	snapshot, err := BuildFinalsSnapshot(season)
+	snapshot, err := BuildFinalsSnapshot(season, lg)
 	if err != nil {
 		tx.Rollback()
 		http.Error(w, err.Error(), 400)
@@ -10228,6 +10324,7 @@ func HandleArchiveFinals(w http.ResponseWriter, r *http.Request) {
 	data, _ := json.Marshal(snapshot)
 
 	if err := tx.Create(&FinalsArchive{
+		League:   lg,
 		Season:   season,
 		Snapshot: datatypes.JSON(data),
 	}).Error; err != nil {
@@ -10236,8 +10333,9 @@ func HandleArchiveFinals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🔒 Mark finals matches archived
+	// 🔒 Mark finals matches archived (this league)
 	if err := tx.Model(&Match{}).
+		Where("league = ?", lg).
 		Where("season = ? AND is_finals = true", season).
 		Update("archived", true).Error; err != nil {
 		tx.Rollback()
@@ -10246,7 +10344,7 @@ func HandleArchiveFinals(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 🧹 THIS IS THE KEY STEP
-	if err := ClearLiveFinalsState(tx, season); err != nil {
+	if err := ClearLiveFinalsState(tx, season, lg); err != nil {
 		tx.Rollback()
 		http.Error(w, "failed to clear live finals state", 500)
 		return
@@ -10274,7 +10372,7 @@ func HandleGetFinalsArchive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var archive FinalsArchive
-	if err := DB.Where("season = ?", season).First(&archive).Error; err != nil {
+	if err := DB.Where("league = ?", leagueFromRequest(r)).Where("season = ?", season).First(&archive).Error; err != nil {
 		http.Error(w, "archive not found", http.StatusNotFound)
 		return
 	}
@@ -10283,15 +10381,18 @@ func HandleGetFinalsArchive(w http.ResponseWriter, r *http.Request) {
 	w.Write(archive.Snapshot)
 }
 
-func ClearLiveFinalsState(tx *gorm.DB, season string) error {
-	// Remove finals teams (clears finals tab team list)
-	if err := tx.Where("season = ?", season).
+func ClearLiveFinalsState(tx *gorm.DB, season string, league string) error {
+	// Remove finals teams (clears finals tab team list) for this league
+	if err := tx.
+		Where("season = ?", season).
+		Where("team_id IN (SELECT id FROM teams WHERE league = ?)", league).
 		Delete(&FinalsTeam{}).Error; err != nil {
 		return err
 	}
 
 	// Clear bracket layout ONLY (keep matches)
 	if err := tx.Model(&Match{}).
+		Where("league = ?", league).
 		Where("season = ? AND is_finals = true", season).
 		Updates(map[string]any{
 			"bracket":       "",
@@ -10544,6 +10645,15 @@ var settingsKeys = []string{
 	"MIN_TEAM_PLAYERS",
 	"MAX_TEAM_PLAYERS",
 	"CURRENT_SEASON",
+	"CURRENT_SEASON_ROOKIE",
+	"SEASON_START_ROOKIE",
+	"SEASON_END_ROOKIE",
+	"BREAKS_ROOKIE",
+	"FINALS_ROOKIE",
+	"ROOKIE_VETERAN_RULE_ENABLED",
+	"ROOKIE_NEW_PLAYERS_PER_VETERAN",
+	"ROOKIE_VETERAN_MAX_RATING",
+	"ROOKIE_VETERAN_MAX_GAMES",
 	"ARENA_MODE_ENABLED",
 	"DISCORD_INVITE_URL",
 	"FRONTEND_URL",

@@ -336,9 +336,9 @@ export default function Home({ user }) {
           </div>
 
           {/* PLATFORM NOTICE */}
-          <div className="alert alert-warning small">
-            <E n="warning" className="emoji-warning" /> PCVR ONLY — SteamVR, Oculus PC, or Quest via Link/Air Link.<br />
-            <E n="error" className="emoji-danger" /> Quest-native is not supported.
+          <div className="alert ecgl-alert-success small">
+            <E n="check" className="emoji-success" /> All supported headsets welcome — PCVR (SteamVR / Oculus PC) and Quest.<br />
+            <E n="check" className="emoji-success" /> Quest standalone / native is supported, as is Link/Air Link.
           </div>
         </div>
       </div>

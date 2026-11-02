@@ -114,10 +114,10 @@ export function StaticRules() {
         <div className="rules text-start">
 
             <hr />
-            <h2>⚠️ Platform Requirement Notice</h2>
+            <h2>✅ Platform Requirements</h2>
             <blockquote>
-                Echo Combat is available only through PCVR (SteamVR, Oculus PC, or Quest via Link/Air Link).
-                This league is for <b>PCVR players only</b>. ❌ Quest-native players are not eligible.
+                All supported headsets are eligible — PCVR (SteamVR / Oculus PC) and Quest
+                (<b>standalone / native</b> or via <b>Link/Air Link</b>).
             </blockquote>
 
             <hr />
@@ -216,8 +216,8 @@ export function StaticRules() {
             <hr />
             <h2>📋 Eligibility</h2>
             <ul>
-                <li>Must play on PCVR using SteamVR, Oculus PC, or Link/Air Link</li>
-                <li>❌ Quest-native unsupported</li>
+                <li>Any supported headset: PCVR (SteamVR / Oculus PC) or Quest (standalone/native or Link/Air Link)</li>
+                <li>✅ Quest-native is supported</li>
                 <li>Teams must roster 3–5 players, minimum 3 to compete</li>
                 <li>League Subs: max 1 per match per team, cannot join roster</li>
                 <li>Must stay under 200ms ping, wired recommended</li>

@@ -12,7 +12,6 @@ import (
 
 	"github.com/lib/pq"
 	"gorm.io/datatypes"
-	"gorm.io/gorm"
 )
 
 // --- Utility: deterministic shuffle ---
@@ -100,9 +99,12 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 1: Load all teams for name → ID lookup
+	lg := leagueFromRequest(r)
+	season := seasonForLeague(lg)
+
+	// Step 1: Load all teams for name → ID lookup (this league only)
 	var teams []Team
-	if err := DB.Find(&teams).Error; err != nil {
+	if err := DB.Where("league = ?", lg).Find(&teams).Error; err != nil {
 		http.Error(w, "Failed to load teams", http.StatusInternalServerError)
 		return
 	}
@@ -115,12 +117,13 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 
 	previousWeek := req.Week - 1
 	if req.Week > 1 {
-		log.Printf("🔍 Auto-forfeit check for Season %s Week %d", currentSeason, previousWeek)
+		log.Printf("🔍 Auto-forfeit check for Season %s Week %d", season, previousWeek)
 
-		// Find all matches from previous week that are unfinished
+		// Find all matches from previous week that are unfinished (this league only)
 		var oldMatches []Match
 		if err := DB.
-			Where("season = ?", currentSeason).
+			Where("league = ?", lg).
+			Where("season = ?", season).
 			Where("CAST(week AS INTEGER) = ?", previousWeek).
 			Where("status NOT IN ?", []string{"Completed", "Finished", "Forfeit", "Forfeited", "Cancelled"}).
 			Find(&oldMatches).Error; err != nil {
@@ -161,10 +164,11 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 
 		matchCode := pm.MatchCode
 		if matchCode == "" {
-			matchCode = fmt.Sprintf("%s-Week%d-M%03d", currentSeason, req.Week, inserted+1)
+			matchCode = fmt.Sprintf("%s-Week%d-M%03d", season, req.Week, inserted+1)
 		}
 
 		newMatch := Match{
+			League:        lg,
 			MatchCode:     matchCode,
 			TeamAID:       aID,
 			TeamBID:       bID,
@@ -172,7 +176,7 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 			ScheduledDate: nil,
 			Status:        "Scheduled",
 			ProposerID:    &systemID,
-			Season:        currentSeason,
+			Season:        season,
 			Week:          strconv.Itoa(req.Week),
 		}
 
@@ -184,23 +188,12 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// --- Step X: Update global league week + reset challenge usage ---
-	var ls LeagueSettings
+	// --- Step X: Update this league's week ---
 	now = time.Now()
-
-	if err := DB.First(&ls, 1).Error; err != nil {
-		ls = LeagueSettings{
-			ID:                   1,
-			CurrentWeek:          req.Week,
-			WeeklyChallengeLimit: 1,
-			LastMatchGeneration:  &now,
-		}
-		DB.Create(&ls)
-	} else {
-		ls.CurrentWeek = req.Week
-		ls.LastMatchGeneration = &now
-		DB.Save(&ls)
-	}
+	ls := ensureLeagueSettings(lg)
+	ls.CurrentWeek = req.Week
+	ls.LastMatchGeneration = &now
+	DB.Save(&ls)
 
 	// Clear cooldown for all players who left before this generation
 	DB.Model(&Player{}).
@@ -209,20 +202,25 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("📅 Updated LeagueSettings.CurrentWeek = %d", ls.CurrentWeek)
 
-	// Reset weekly challenges used for all teams
+	// Reset weekly challenges used for teams in this league
 	if err := DB.
-		Session(&gorm.Session{AllowGlobalUpdate: true}).
 		Model(&Team{}).
+		Where("league = ?", lg).
 		Update("weekly_challenges_used", 0).Error; err != nil {
 
 		log.Printf("⚠️ Failed to reset weekly_challenges_used: %v", err)
 	} else {
-		log.Printf("🔄 Reset weekly_challenges_used for all teams")
+		log.Printf("🔄 Reset weekly_challenges_used for league %s", lg)
 	}
 
-	// 🔔 Notify all team captains that new matchups are posted
+	// 🔔 Notify captains of teams in this league that new matchups are posted
 	var allCaptains []TeamMember
-	DB.Where("role IN ?", []string{"Captain", "Co-Captain"}).Find(&allCaptains)
+	DB.Table("team_members").
+		Select("team_members.*").
+		Joins("JOIN teams ON teams.id = team_members.team_id").
+		Where("teams.league = ?", lg).
+		Where("team_members.role IN ?", []string{"Captain", "Co-Captain"}).
+		Find(&allCaptains)
 	for _, c := range allCaptains {
 		createNotification(c.PlayerID, "matchup_posted",
 			"New Matchups Posted",
@@ -245,7 +243,10 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.TrimSpace(currentSeason) == "" {
+	lg := leagueFromRequest(r)
+	season := seasonForLeague(lg)
+
+	if strings.TrimSpace(season) == "" {
 		http.Error(w, "CURRENT_SEASON not configured", http.StatusInternalServerError)
 		return
 	}
@@ -262,7 +263,8 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 	weekPatternAny := fmt.Sprintf("%%Week%d-%%", week)
 	weekPatternDashed := fmt.Sprintf("%%-Week%d-%%", week)
 	DB.Model(&Match{}).
-		Where("season = ?", currentSeason).
+		Where("league = ?", lg).
+		Where("season = ?", season).
 		Where("COALESCE(is_finals, false) = false").
 		Where("match_code NOT ILIKE ?", "%-CHAL-%").
 		Where(`(
@@ -279,9 +281,9 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load ALL teams and filter to active + roster minimum
+	// Load this league's teams and filter to active + roster minimum
 	var allTeams []Team
-	if err := DB.Find(&allTeams).Error; err != nil {
+	if err := DB.Where("league = ?", lg).Find(&allTeams).Error; err != nil {
 		http.Error(w, "Failed to load teams", http.StatusInternalServerError)
 		return
 	}
@@ -331,7 +333,8 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 	var seasonPairs []SimpleMatch
 	DB.Table("matches").
 		Select("team_a_id, team_b_id").
-		Where("season = ?", currentSeason).
+		Where("league = ?", lg).
+		Where("season = ?", season).
 		Where("COALESCE(is_finals, false) = false").
 		Where("match_code NOT ILIKE ?", "%-CHAL-%").
 		Find(&seasonPairs)
@@ -354,7 +357,8 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		lastWeekPatternDashed := fmt.Sprintf("%%-Week%d-%%", week-1)
 		DB.Table("matches").
 			Select("team_a_id, team_b_id").
-			Where("season = ?", currentSeason).
+			Where("league = ?", lg).
+			Where("season = ?", season).
 			Where("COALESCE(is_finals, false) = false").
 			Where("match_code NOT ILIKE ?", "%-CHAL-%").
 			Where(`(
@@ -560,7 +564,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		DB.First(&teamA, m[0])
 		DB.First(&teamB, m[1])
 		results = append(results, Preview{
-			MatchCode: fmt.Sprintf("%s-Week%d-M%03d", currentSeason, week, i+1),
+			MatchCode: fmt.Sprintf("%s-Week%d-M%03d", season, week, i+1),
 			TeamA:     teamA.Name,
 			TeamB:     teamB.Name,
 		})
@@ -568,7 +572,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, map[string]any{
 		"success": true,
-		"season":  currentSeason,
+		"season":  season,
 		"week":    week,
 		"seed":    seed,
 		"matches": results,
@@ -590,7 +594,8 @@ func HandleModClearWeek(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetSeason := strings.TrimSpace(currentSeason)
+	lg := leagueFromRequest(r)
+	targetSeason := strings.TrimSpace(seasonForLeague(lg))
 	if targetSeason == "" {
 		http.Error(w, "CURRENT_SEASON not configured", http.StatusInternalServerError)
 		return
@@ -603,8 +608,8 @@ func HandleModClearWeek(w http.ResponseWriter, r *http.Request) {
 	var matches []Match
 	if err := DB.Raw(`
 		SELECT * FROM matches
-		WHERE match_code ILIKE ?
-	`, matchPattern).Scan(&matches).Error; err != nil {
+		WHERE league = ? AND match_code ILIKE ?
+	`, lg, matchPattern).Scan(&matches).Error; err != nil {
 		log.Printf("❌ DB error: %v", err)
 		http.Error(w, "failed to query matches", http.StatusInternalServerError)
 		return

@@ -22,7 +22,7 @@ import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import "./styles.css";
 import { getApiUrl } from "./config";
-import { LEAGUES, getLeague, setLeague } from "./league";
+import { LEAGUES, getLeague, setLeague, leagueLink } from "./league";
 import DevToolbar from "./components/DevToolbar";
 import { E } from "./components/CustomEmoji";
 
@@ -104,7 +104,7 @@ function App() {
   }
 
   function navigateFromMobile(path) {
-    navigate(path);
+    navigate(leagueLink(path));
     window.setTimeout(() => closeMobileNav(), 0);
   }
 
@@ -322,6 +322,35 @@ function App() {
   // Determine if Finals tab should show
   const finalsTabVisible = showFinals?.visible || (user?.is_mod && showFinals?.mod_visible);
 
+  // League selector shown at the top of the side navigation, above Home and
+  // visually separated from the page tabs.
+  function renderLeagueSwitcher() {
+    return (
+      <div className="ecgl-league-switcher px-2 py-2 border-bottom border-secondary mb-2">
+        <label className="form-label text-secondary small mb-1 d-block">League</label>
+        <select
+          className="form-select ecgl-league-select bg-dark text-light border-secondary"
+          value={getLeague()}
+          onChange={(e) => {
+            const next = e.target.value;
+            setLeague(next);
+            // Keep the league in the URL so links stay league-scoped.
+            const url = new URL(window.location.href);
+            url.searchParams.set("league", next);
+            window.location.href = url.toString();
+          }}
+          aria-label="Select league"
+        >
+          {LEAGUES.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
   return (
     <div className="app-wrapper">
       {/* Pull-to-refresh indicator - slides down from top */}
@@ -356,26 +385,6 @@ function App() {
           <p className="season-text">
             <E n="calendar" /> {season !== "" ? `Season ${season}` : "Loading..."}
           </p>
-          <div className="league-switcher d-flex justify-content-center align-items-center gap-2 mt-2">
-            <span className="text-secondary small">League:</span>
-            <select
-              className="form-select form-select-sm bg-dark text-light border-secondary"
-              style={{ width: "auto" }}
-              value={getLeague()}
-              onChange={(e) => {
-                setLeague(e.target.value);
-                // Reload so every page refetches under the selected league.
-                window.location.reload();
-              }}
-              aria-label="Select league"
-            >
-              {LEAGUES.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
-          </div>
         </header>
 
         {/* === Mobile slide-out nav === */}
@@ -397,6 +406,7 @@ function App() {
             />
           </div>
           <div className="offcanvas-body">
+            {renderLeagueSwitcher()}
             <div className="list-group list-group-flush">
               <button
                 type="button"
@@ -559,9 +569,10 @@ function App() {
         <div className="ecgl-shell">
           {/* === Desktop sidebar nav === */}
           <aside className="ecgl-side-nav d-none d-md-flex flex-column">
+            {renderLeagueSwitcher()}
             <div className="list-group list-group-flush">
               <NavLink
-                to="/"
+                to={leagueLink("/")}
                 end
                 className={({ isActive }) =>
                   `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
@@ -572,7 +583,7 @@ function App() {
               </NavLink>
 
               <NavLink
-                to="/rules"
+                to={leagueLink("/rules")}
                 className={({ isActive }) =>
                   `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
                   }`
@@ -584,7 +595,7 @@ function App() {
               {user && (
                 <>
                   <NavLink
-                    to="/register"
+                    to={leagueLink("/register")}
                     className={({ isActive }) =>
                       `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
                       }`
@@ -593,7 +604,7 @@ function App() {
                     <E n="register" /> Register
                   </NavLink>
                   <NavLink
-                    to="/myteam"
+                    to={leagueLink("/myteam")}
                     className={({ isActive }) =>
                       `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
                       }`
@@ -606,7 +617,7 @@ function App() {
               )}
 
               <NavLink
-                to="/players"
+                to={leagueLink("/players")}
                 className={({ isActive }) =>
                   `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
                   }`
@@ -616,7 +627,7 @@ function App() {
               </NavLink>
 
               <NavLink
-                to="/teams"
+                to={leagueLink("/teams")}
                 className={({ isActive }) =>
                   `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
                   }`
@@ -627,7 +638,7 @@ function App() {
 
               {finalsTabVisible && (
                 <NavLink
-                  to="/finals"
+                  to={leagueLink("/finals")}
                   className={({ isActive }) =>
                     `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
                     }`
@@ -638,7 +649,7 @@ function App() {
               )}
 
               <NavLink
-                to="/matchups"
+                to={leagueLink("/matchups")}
                 className={({ isActive }) =>
                   `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
                   }`
@@ -648,7 +659,7 @@ function App() {
               </NavLink>
 
               <NavLink
-                to="/leaderboard"
+                to={leagueLink("/leaderboard")}
                 className={({ isActive }) =>
                   `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
                   }`
@@ -659,7 +670,7 @@ function App() {
 
               {!loadingUser && user?.is_mod && (
                 <NavLink
-                  to="/modpanel"
+                  to={leagueLink("/modpanel")}
                   className={({ isActive }) =>
                     `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
                     }`
@@ -670,7 +681,7 @@ function App() {
               )}
               {!loadingUser && user?.is_dev && (
                 <NavLink
-                  to="/settings"
+                  to={leagueLink("/settings")}
                   className={({ isActive }) =>
                     `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
                     }`

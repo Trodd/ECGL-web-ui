@@ -57,7 +57,10 @@ func SendDiscordChannelLog(channelID, msg string) {
 // 📢 Backwards-compatible function for GENERAL logs
 // Uses DISCORD_LOG_CHANNEL_GENERAL instead of the old var
 // -------------------------------------------------------------------
-func SendDiscordLog(msg string) {
+func SendDiscordLog(msg string, league ...string) {
+	if len(league) > 0 {
+		msg = tagLeague(msg, league[0])
+	}
 	channelID := os.Getenv("DISCORD_LOG_CHANNEL_GENERAL")
 	SendDiscordChannelLog(channelID, msg)
 }
@@ -141,7 +144,10 @@ func SendDiscordEmbedToGeneral(title, description, buttonLabel, buttonURL, conte
 // -------------------------------------------------------------------
 // 🎮 General Logs (players, teams, join requests, etc.)
 // -------------------------------------------------------------------
-func LogGeneral(msg string) {
+func LogGeneral(msg string, league ...string) {
+	if len(league) > 0 {
+		msg = tagLeague(msg, league[0])
+	}
 	channelID := os.Getenv("DISCORD_LOG_CHANNEL_GENERAL")
 	SendDiscordChannelLog(channelID, msg)
 }
@@ -149,14 +155,21 @@ func LogGeneral(msg string) {
 // -------------------------------------------------------------------
 // 📅 Match Scheduling Logs
 // -------------------------------------------------------------------
-func LogMatch(msg string) {
-	SendDiscordEmbedWithPings("Match Notification", msg, "", "", nil)
+func LogMatch(msg string, league ...string) {
+	title := "Match Notification"
+	if len(league) > 0 && strings.TrimSpace(league[0]) != "" {
+		title = LeagueDisplayName(league[0]) + " — " + title
+	}
+	SendDiscordEmbedWithPings(title, msg, "", "", nil)
 }
 
 // -------------------------------------------------------------------
 // 📝 Score / Forfeit Logs
 // -------------------------------------------------------------------
-func LogScore(msg string) {
+func LogScore(msg string, league ...string) {
+	if len(league) > 0 {
+		msg = tagLeague(msg, league[0])
+	}
 	channelID := os.Getenv("DISCORD_LOG_CHANNEL_SCORES")
 	SendDiscordChannelLog(channelID, msg)
 }
@@ -570,6 +583,9 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 
 	// 🔨 Create text channel
 	channelName := fmt.Sprintf("%s-vs-%s", sanitizeChannelName(teamA.Name), sanitizeChannelName(teamB.Name))
+	if normalizeLeague(m.League) == LeagueRookie {
+		channelName = "rookie-" + channelName
+	}
 	channel, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
 		Name:                 channelName,
 		Type:                 discordgo.ChannelTypeGuildText,
@@ -635,12 +651,14 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 
 	// ---- BUILD REMINDER MESSAGE ----
 	msg := fmt.Sprintf(
-		"🏁 **Match Channel Opened**\n"+
+		"%s\n"+
+			"🏁 **Match Channel Opened**\n"+
 			"🔵 **%s** vs 🔴 **%s**\n\n"+
 			"📅 **Match Time:** %s\n"+
 			"%s\n"+
 			"👥 %s\n\n"+
 			"🔒 A League Mod can close this channel with the button below.",
+		leagueTag(m.League),
 		teamA.Name,
 		teamB.Name,
 		matchTime,

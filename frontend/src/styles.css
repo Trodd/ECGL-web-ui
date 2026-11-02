@@ -1301,6 +1301,21 @@ a:hover {
   color: var(--warning) !important;
 }
 
+.ecgl-alert-success {
+  background-color: rgba(46, 160, 67, 0.10) !important;
+  border: 1px solid rgba(46, 160, 67, 0.30) !important;
+  color: #8cc79b !important;
+  border-radius: var(--radius-md);
+}
+
+.ecgl-alert-success * {
+  color: #8cc79b !important;
+}
+
+.ecgl-alert-success strong {
+  color: #a9d8b4 !important;
+}
+
 /* ─── Match Hover ─── */
 .match-row:hover {
   background-color: rgba(59, 110, 165, 0.04);
@@ -1901,5 +1916,28 @@ a:hover {
 
   .ecgl-header .season-text {
     font-size: 0.85rem;
+  }
+}
+
+/* ===== League selector (side nav) ===== */
+.ecgl-league-switcher .ecgl-league-select {
+  width: 100%;
+  font-size: 1rem;
+  padding: 0.55rem 2.25rem 0.55rem 0.75rem;
+  border-radius: 8px;
+  min-height: 46px;
+}
+
+/* Bigger, easier tap target on mobile */
+@media (max-width: 767.98px) {
+  .ecgl-league-switcher .ecgl-league-select {
+    font-size: 1.15rem;
+    padding: 0.8rem 2.5rem 0.8rem 0.9rem;
+    min-height: 58px;
+    border-radius: 10px;
+  }
+
+  .ecgl-league-switcher label {
+    font-size: 0.95rem;
   }
 }
