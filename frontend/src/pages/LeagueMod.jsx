@@ -3,6 +3,8 @@ import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
 import PlayerIdentity, { getDiscordAvatarUrl } from "../components/PlayerIdentity";
+import RookieDraftPanel from "../components/RookieDraftPanel";
+import { getLeague } from "../league";
 
 export default function LeagueMod() {
     const urlBase = getApiUrl();
@@ -34,6 +36,11 @@ export default function LeagueMod() {
     const [openId, setOpenId] = useState(null);
     const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
     const menuRef = useRef(null);
+
+    // League format (season vs tournament) — tournaments are scheduled manually.
+    const [leagueFormat, setLeagueFormat] = useState("season");
+    const [leagueFormatLabel, setLeagueFormatLabel] = useState("");
+    const [schedulingAutomatic, setSchedulingAutomatic] = useState(true);
 
     useEffect(() => {
         function handleClickOutside(e) {
@@ -112,6 +119,11 @@ export default function LeagueMod() {
             .then(res => {
                 if (res.data?.arena_mode_enabled !== undefined) {
                     setArenaModeEnabled(res.data.arena_mode_enabled);
+                }
+                if (res.data?.league_format) {
+                    setLeagueFormat(res.data.league_format);
+                    setLeagueFormatLabel(res.data.league_format_label || "");
+                    setSchedulingAutomatic(res.data.scheduling_automatic !== false);
                 }
             })
             .catch(() => { });
@@ -727,6 +739,9 @@ export default function LeagueMod() {
                                 { key: "scoreTools", label: "☆ Scores" },
                                 { key: "teamTools", label: "☰ Teams" },
                                 { key: "playerTools", label: "⊘ Players" },
+                                ...(getLeague() === "rookie"
+                                    ? [{ key: "rookieDraft", label: "📝 Rookie Draft" }]
+                                    : []),
                                 { key: "finalsManagement", label: "★ Finals" },
                                 { key: "teamHistory", label: "↻ Rename Logs" },
                                 { key: "console", label: "⚙ Actions" },
@@ -748,6 +763,15 @@ export default function LeagueMod() {
                         {modTab === "weeklyMatches" && (
                             <>
                                 <h6 className="mb-3">📅 Generate or Clear Weekly Matchups</h6>
+
+                                {!schedulingAutomatic && (
+                                    <div className="alert ecgl-alert-warning small">
+                                        <strong>{leagueFormatLabel || leagueFormat || "Tournament"} format</strong> — this league has no
+                                        auto-generated weekly schedule. Add matches individually from the
+                                        <strong> Matches</strong> tab and enter scores manually. Change the format in
+                                        Settings → Rookie League → Rookie Format.
+                                    </div>
+                                )}
 
                                 {/* --- Generate Weekly Matches --- */}
                                 <div
@@ -2492,6 +2516,7 @@ export default function LeagueMod() {
                             </div>
                         )}
                         {modTab === "teamHistory" && <TeamRenameHistory urlBase={urlBase} />}
+                        {modTab === "rookieDraft" && <RookieDraftPanel urlBase={urlBase} />}
                         {modTab === "console" && <ModAuditLogPanel urlBase={urlBase} />}
                     </div>
                 </div>

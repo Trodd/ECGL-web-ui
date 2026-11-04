@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import DiscordRequiredModal from "../components/DiscordRequiredModal";
 import { getApiUrl } from "../config";
-import { leagueLabel } from "../league";
+import { leagueLabel, getLeague } from "../league";
 import { E } from "../components/CustomEmoji";
 
 export default function Register() {
@@ -24,6 +24,16 @@ export default function Register() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUnregistering, setIsUnregistering] = useState(false);
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
+
+  const [draft, setDraft] = useState(null);
+  const [draftNote, setDraftNote] = useState("");
+  const [draftBusy, setDraftBusy] = useState(false);
+  // Tournaments close their team list once matches exist.
+  const [tournamentStarted, setTournamentStarted] = useState(false);
+
+  // Team search dropdown — rendered as a fixed overlay above everything.
+  const teamInputRef = useRef(null);
+  const [teamMenuPos, setTeamMenuPos] = useState(null);
 
   // -----------------------------------------------------
   // Load roster lock
@@ -71,6 +81,105 @@ export default function Register() {
       .then((res) => setTeams(Array.isArray(res.data) ? res.data : []))
       .catch(() => setTeams([]));
   }, []);
+
+  // -----------------------------------------------------
+  // Position the team search dropdown over everything else
+  // -----------------------------------------------------
+  useEffect(() => {
+    if (!teamQuery) {
+      setTeamMenuPos(null);
+      return;
+    }
+
+    const count = teams.filter((t) =>
+      t.name.toLowerCase().includes(teamQuery.toLowerCase())
+    ).length;
+
+    function place() {
+      const el = teamInputRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const listHeight = Math.max(count, 1) * 36 + 8;
+      const spaceBelow = window.innerHeight - r.bottom;
+      const openUp = spaceBelow < listHeight + 12 && r.top > spaceBelow;
+      setTeamMenuPos({
+        left: r.left,
+        width: r.width,
+        ...(openUp
+          ? { bottom: window.innerHeight - r.top + 4 }
+          : { top: r.bottom + 4 }),
+      });
+    }
+
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [teamQuery, teams]);
+
+  // -----------------------------------------------------
+  // Load rookie draft status
+  // -----------------------------------------------------
+  useEffect(() => {
+    axios
+      .get(`${urlBase}/api/draft/status`, { withCredentials: true })
+      .then((res) => setDraft(res.data || null))
+      .catch(() => setDraft(null));
+
+    axios
+      .get(`${urlBase}/api/settings`, { withCredentials: true })
+      .then((res) => setTournamentStarted(Boolean(res.data?.tournament_started)))
+      .catch(() => setTournamentStarted(false));
+  }, []);
+
+  async function refreshDraft() {
+    try {
+      const res = await axios.get(`${urlBase}/api/draft/status`, {
+        withCredentials: true,
+      });
+      setDraft(res.data || null);
+    } catch {
+      setDraft(null);
+    }
+  }
+
+  async function handleDraftSignup() {
+    if (draftBusy) return;
+    setDraftBusy(true);
+    try {
+      await axios.post(
+        `${urlBase}/api/draft/signup`,
+        { note: draftNote },
+        { withCredentials: true }
+      );
+      setDraftNote("");
+      await refreshDraft();
+    } catch (err) {
+      alert(err.response?.data || "❌ Failed to join the draft");
+    } finally {
+      setDraftBusy(false);
+    }
+  }
+
+  async function handleDraftWithdraw() {
+    if (draftBusy) return;
+    setDraftBusy(true);
+    try {
+      await axios.post(
+        `${urlBase}/api/draft/withdraw`,
+        {},
+        { withCredentials: true }
+      );
+      await refreshDraft();
+    } catch (err) {
+      alert(err.response?.data || "❌ Failed to withdraw from the draft");
+    } finally {
+      setDraftBusy(false);
+    }
+  }
 
   // -----------------------------------------------------
   // Handlers
@@ -292,54 +401,141 @@ export default function Register() {
           </div>
 
           {!isLeagueSub && !isBanned && !rosterLocked && (
-            <>
-              <div className="card bg-dark border-secondary p-4 mb-4">
-                <h5><E n="team" /> Join a Team <span className="badge bg-secondary ms-2">{leagueLabel()}</span></h5>
-                <input
-                  className="form-control bg-dark text-light"
-                  placeholder="Search team…"
-                  value={teamQuery}
-                  onChange={(e) => setTeamQuery(e.target.value)}
-                />
-                {teamQuery && (
-                  <ul className="list-group mt-1">
-                    {teams
-                      .filter((t) =>
-                        t.name.toLowerCase().includes(teamQuery.toLowerCase())
-                      )
-                      .slice(0, 5)
-                      .map((t) => (
-                        <li
-                          key={t.id}
-                          className="list-group-item list-group-item-action bg-dark text-light"
-                          onClick={() => handleRequestJoin(t.name)}
-                        >
-                          {t.name}
-                        </li>
-                      ))}
-                  </ul>
-                )}
-              </div>
-
-              <div className="card bg-dark border-secondary p-4">
-                <h5><E n="plus" /> Create a Team <span className="badge bg-secondary ms-2">{leagueLabel()}</span></h5>
-                <div className="d-flex gap-2">
-                  <input
-                    className="form-control bg-dark text-light"
-                    placeholder="Team name"
-                    value={newTeamName}
-                    onChange={(e) => setNewTeamName(e.target.value)}
-                  />
-                  <button
-                    className="btn btn-info"
-                    onClick={handleCreateTeam}
-                    disabled={isCreatingTeam}
-                  >
-                    {isCreatingTeam ? "Creating…" : "Create"}
-                  </button>
+            <div className="row g-3 mb-4">
+              <div className="col-12 col-md-6">
+                <div className="card bg-dark border-secondary p-4 h-100">
+                  <h5><E n="team" /> Join a Team <span className="badge bg-secondary ms-2">{leagueLabel()}</span></h5>
+                  <div className="position-relative">
+                    <input
+                      ref={teamInputRef}
+                      className="form-control bg-dark text-light"
+                      placeholder="Search team…"
+                      value={teamQuery}
+                      onChange={(e) => setTeamQuery(e.target.value)}
+                    />
+                    {teamQuery && teamMenuPos && (
+                      <ul
+                        className="list-group"
+                        style={{
+                          position: "fixed",
+                          zIndex: 10000,
+                          background: "#212529",
+                          borderRadius: 6,
+                          boxShadow: "0 12px 28px rgba(0,0,0,0.65)",
+                          ...teamMenuPos,
+                        }}
+                      >
+                        {teams
+                          .filter((t) =>
+                            t.name.toLowerCase().includes(teamQuery.toLowerCase())
+                          )
+                          .map((t) => (
+                            <li
+                              key={t.id}
+                              className="list-group-item list-group-item-action bg-dark text-light py-1"
+                              style={{ cursor: "pointer" }}
+                              onClick={() => handleRequestJoin(t.name)}
+                            >
+                              {t.name}
+                            </li>
+                          ))}
+                        {teams.filter((t) =>
+                          t.name.toLowerCase().includes(teamQuery.toLowerCase())
+                        ).length === 0 && (
+                          <li className="list-group-item bg-dark text-secondary small py-1">
+                            No teams found
+                          </li>
+                        )}
+                      </ul>
+                    )}
+                  </div>
                 </div>
               </div>
-            </>
+
+              <div className="col-12 col-md-6">
+                <div className="card bg-dark border-secondary p-4 h-100">
+                  <h5><E n="plus" /> Create a Team <span className="badge bg-secondary ms-2">{leagueLabel()}</span></h5>
+                  {tournamentStarted ? (
+                    <p className="text-warning small mb-0">
+                      🔒 The tournament has started, so new teams can no longer be created.
+                      Ask a mod if you need to be added to a team.
+                    </p>
+                  ) : (
+                    <div className="d-flex flex-column flex-sm-row gap-2">
+                      <input
+                        className="form-control bg-dark text-light"
+                        placeholder="Team name"
+                        value={newTeamName}
+                        onChange={(e) => setNewTeamName(e.target.value)}
+                      />
+                      <button
+                        className="btn btn-info flex-shrink-0"
+                        onClick={handleCreateTeam}
+                        disabled={isCreatingTeam}
+                      >
+                        {isCreatingTeam ? "Creating…" : "Create"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {getLeague() === "rookie" && !isLeagueSub && !isBanned && (
+            <div className="card bg-dark border-secondary p-4 mb-4">
+              <h5>📝 Rookie Draft <span className="badge bg-secondary ms-2">Rookie League</span></h5>
+
+              {draft?.signed_up ? (
+                <>
+                  <div className="alert ecgl-alert-success small mb-2">
+                    ✅ You're in the draft. A mod will place you on a rookie team —
+                    it may be a brand new team built from other draft players.
+                  </div>
+                  {draft?.signup?.note ? (
+                    <p className="text-secondary small mb-2">
+                      Your note: <em>{draft.signup.note}</em>
+                    </p>
+                  ) : null}
+                  <button
+                    className="btn btn-outline-warning w-auto"
+                    onClick={handleDraftWithdraw}
+                    disabled={draftBusy}
+                  >
+                    {draftBusy ? "Removing…" : "Withdraw from draft"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-secondary small">
+                    Can't find a team? Enter the draft and a mod will assign you to
+                    an existing rookie team, or group you with other draft players
+                    onto a new one.
+                  </p>
+                  <textarea
+                    className="form-control bg-dark text-light mb-2"
+                    rows={2}
+                    maxLength={300}
+                    placeholder="Optional: availability, timezone, anything mods should know"
+                    value={draftNote}
+                    onChange={(e) => setDraftNote(e.target.value)}
+                  />
+                  <button
+                    className="btn btn-info w-auto"
+                    onClick={handleDraftSignup}
+                    disabled={draftBusy}
+                  >
+                    {draftBusy ? "Joining…" : "Enter the draft"}
+                  </button>
+                </>
+              )}
+
+              {rosterLocked && (
+                <p className="text-warning small mt-2 mb-0">
+                  ⏳ Roster lock is active — placements happen when rosters open.
+                </p>
+              )}
+            </div>
           )}
         </div>
       </>

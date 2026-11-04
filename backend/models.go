@@ -29,6 +29,39 @@ type Player struct {
 	Tier           string     `json:"tier" gorm:"-"`
 }
 
+// --- Per-league Player Stats ---
+// Rating / W-L / games are tracked separately per league so a player can be in
+// both the Varsity and Rookie leagues with independent records.
+type PlayerLeagueStats struct {
+	PlayerID int64  `gorm:"primaryKey" json:"player_id"`
+	League   string `gorm:"primaryKey" json:"league"`
+	Rating   int    `json:"rating"`
+	Wins     int    `json:"wins"`
+	Losses   int    `json:"losses"`
+	Matches  int    `json:"matches"`
+}
+
+func (PlayerLeagueStats) TableName() string { return "player_league_stats" }
+
+// --- Rookie Draft Signups ---
+// Players who want to play in the Rookie League but don't have a team yet.
+// Mods can assign them to an existing team or create one for them.
+type DraftSignup struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	PlayerID  int64     `gorm:"uniqueIndex:idx_draft_player_league" json:"player_id"`
+	League    string    `gorm:"uniqueIndex:idx_draft_player_league;default:'rookie'" json:"league"`
+	Role      string    `json:"role"`     // player role at signup (Player / League Sub)
+	Device    string    `json:"device"`   // device at signup
+	Timezone  string    `json:"timezone"` // timezone at signup
+	Note      string    `json:"note"`     // optional "about me" note from the player
+	Status    string    `gorm:"default:'Pending'" json:"status"`
+	TeamID    *uint     `json:"team_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (DraftSignup) TableName() string { return "draft_signups" }
+
 // --- Registered Player ---
 type RegisteredPlayer struct {
 	IDStr    string `json:"id" gorm:"-"`

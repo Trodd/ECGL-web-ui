@@ -198,16 +198,21 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	isDev := userHasDiscordRole(discordIDStr, os.Getenv("DISCORD_DEV_ROLE_ID"))
 	isCaster := userHasDiscordRole(discordIDStr, os.Getenv("DISCORD_CASTER_ROLE_ID"))
 
-	// --- DEV impersonation: preserve the real user's dev/mod powers so the
-	// toolbar stays visible, and expose who is really logged in. ---
+	// --- DEV impersonation ---
+	// While impersonating, the mod/caster flags stay those of the ACTIVE
+	// (impersonated) identity, so the UI shows exactly what that player sees
+	// and matches what the API will allow for them. Only the Dev flag is kept
+	// from the real user, so the Dev toolbar stays available to stop
+	// impersonating.
 	impersonating := false
+	canImpersonate := isDev
 	var realUser map[string]any
 	if v, _ := session.Values["dev_impersonating"].(bool); v {
 		if realID, _ := session.Values["dev_original_discord_id"].(string); realID != "" {
 			impersonating = true
-			isMod = userHasDiscordRole(realID, os.Getenv("DISCORD_LEAGUE_MOD_ROLE_ID"))
-			isDev = userHasDiscordRole(realID, os.Getenv("DISCORD_DEV_ROLE_ID"))
-			isCaster = userHasDiscordRole(realID, os.Getenv("DISCORD_CASTER_ROLE_ID"))
+			if userHasDiscordRole(realID, os.Getenv("DISCORD_DEV_ROLE_ID")) {
+				canImpersonate = true
+			}
 			realUser = map[string]any{
 				"id":           realID,
 				"username":     session.Values["dev_original_username"],
@@ -216,19 +221,23 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	devMode := os.Getenv("DEV_MODE") == "true"
+
 	var player Player
 	err := DB.First(&player, "id = ?", discordID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		respondJSON(w, map[string]any{
-			"registered":    false,
-			"id":            discordIDStr,
-			"username":      session.Values["username"],
-			"avatar":        session.Values["avatar"],
-			"is_mod":        isMod,
-			"is_dev":        isDev,
-			"is_caster":     isCaster,
-			"impersonating": impersonating,
-			"real_user":     realUser,
+			"registered":      false,
+			"id":              discordIDStr,
+			"username":        session.Values["username"],
+			"avatar":          session.Values["avatar"],
+			"is_mod":          isMod,
+			"is_dev":          isDev,
+			"is_caster":       isCaster,
+			"dev_mode":        devMode,
+			"can_impersonate": canImpersonate,
+			"impersonating":   impersonating,
+			"real_user":       realUser,
 		})
 		return
 	}
@@ -236,35 +245,38 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	// ❌ row exists but registration cleared
 	if player.Role == "" || player.Device == "" || player.Timezone == "" {
 		respondJSON(w, map[string]any{
-			"registered":    false,
-			"id":            discordIDStr,
-			"username":      session.Values["username"],
-			"avatar":        session.Values["avatar"],
-			"is_mod":        isMod,
-			"is_dev":        isDev,
-			"is_caster":     isCaster,
-			"impersonating": impersonating,
-			"real_user":     realUser,
+			"registered":      false,
+			"id":              discordIDStr,
+			"username":        session.Values["username"],
+			"avatar":          session.Values["avatar"],
+			"is_mod":          isMod,
+			"is_dev":          isDev,
+			"is_caster":       isCaster,
+			"dev_mode":        devMode,
+			"can_impersonate": canImpersonate,
+			"impersonating":   impersonating,
+			"real_user":       realUser,
 		})
 		return
 	}
 
 	// ✅ active registered player + mod info
 	respondJSON(w, map[string]any{
-		"registered":    true,
-		"id":            discordIDStr,
-		"username":      player.Username,
-		"display_name":  session.Values["display_name"],
-		"role":          player.Role,
-		"device":        player.Device,
-		"timezone":      player.Timezone,
-		"avatar":        session.Values["avatar"],
-		"is_mod":        isMod,
-		"is_dev":        isDev,
-		"is_caster":     isCaster,
-		"dev_mode":      os.Getenv("DEV_MODE") == "true",
-		"impersonating": impersonating,
-		"real_user":     realUser,
+		"registered":      true,
+		"id":              discordIDStr,
+		"username":        player.Username,
+		"display_name":    session.Values["display_name"],
+		"role":            player.Role,
+		"device":          player.Device,
+		"timezone":        player.Timezone,
+		"avatar":          session.Values["avatar"],
+		"is_mod":          isMod,
+		"is_dev":          isDev,
+		"is_caster":       isCaster,
+		"dev_mode":        devMode,
+		"can_impersonate": canImpersonate,
+		"impersonating":   impersonating,
+		"real_user":       realUser,
 	})
 }
 
@@ -480,7 +492,9 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 
 			// auto-disband if empty
 			if len(remaining) == 0 {
-				DB.Delete(&Team{}, m.TeamID)
+				// Preserve the team row (mark Disbanded) instead of deleting it, so
+				// its match history stays visible.
+				DB.Model(&Team{}).Where("id = ?", m.TeamID).Update("status", "Disbanded")
 
 				SendDiscordLog(fmt.Sprintf(
 					"🗑️ **Team Disbanded:** **%s (#%d)** — last member unregistered",
@@ -823,6 +837,16 @@ func main() {
 	r.HandleFunc("/api/mod/team/lock", HandleModToggleTeamLock).Methods("POST")
 	r.HandleFunc("/api/mod/player/remove-cooldown", ModRemoveCooldown).Methods("POST")
 	r.HandleFunc("/api/mod/player/archive-all", HandleArchiveAllPlayers).Methods("POST")
+	r.HandleFunc("/api/mod/draft", HandleModListDraft).Methods("GET")
+	r.HandleFunc("/api/mod/draft/team-name", HandleGetDraftTeamName).Methods("GET")
+	r.HandleFunc("/api/mod/draft/teams", HandleModListDraftTeams).Methods("GET")
+	r.HandleFunc("/api/mod/draft/transfer", HandleModTransferPlayer).Methods("POST")
+	r.HandleFunc("/api/mod/draft/release", HandleModReleasePlayer).Methods("POST")
+	r.HandleFunc("/api/mod/draft/assign", HandleModAssignDraft).Methods("POST")
+	r.HandleFunc("/api/mod/draft/auto-assign", HandleModAutoAssignDraft).Methods("POST")
+	r.HandleFunc("/api/mod/draft/create-team", HandleModCreateTeamForDraft).Methods("POST")
+	r.HandleFunc("/api/mod/tournament/generate", HandleModGenerateTournament).Methods("POST")
+	r.HandleFunc("/api/mod/tournament/match", HandleModAddTournamentMatch).Methods("POST")
 	r.HandleFunc("/api/mod/settings", HandleGetSettings).Methods("GET")
 	r.HandleFunc("/api/mod/settings", HandleUpdateSettings).Methods("POST")
 	r.HandleFunc("/api/rules", HandleGetRules).Methods("GET")
@@ -875,6 +899,9 @@ func main() {
 	// Players
 	api.HandleFunc("/register", handleRegister).Methods("POST")
 	api.HandleFunc("/unregister", handleUnregister).Methods("POST")
+	api.HandleFunc("/draft/status", HandleGetDraftStatus).Methods("GET")
+	api.HandleFunc("/draft/signup", HandleDraftSignup).Methods("POST")
+	api.HandleFunc("/draft/withdraw", HandleDraftWithdraw).Methods("POST")
 	api.HandleFunc("/players", GetPlayers).Methods("GET")
 	api.HandleFunc("/me", handleMe).Methods("GET")
 	api.HandleFunc("/player/{id:[0-9]+}", GetPlayerDetail).Methods("GET")

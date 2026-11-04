@@ -80,6 +80,17 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lg := leagueFromRequest(r)
+	season := seasonForLeague(lg)
+
+	if !leagueUsesWeeklySchedule(lg) {
+		http.Error(w, fmt.Sprintf(
+			"This league is set to %s — there is no weekly schedule for that format. Add matches manually instead.",
+			leagueFormatLabel(leagueFormat(lg)),
+		), http.StatusBadRequest)
+		return
+	}
+
 	var req struct {
 		Week    int `json:"week"`
 		Matches []struct {
@@ -98,9 +109,6 @@ func HandleGenerateWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "No matches provided to publish", http.StatusBadRequest)
 		return
 	}
-
-	lg := leagueFromRequest(r)
-	season := seasonForLeague(lg)
 
 	// Step 1: Load all teams for name → ID lookup (this league only)
 	var teams []Team
@@ -251,6 +259,14 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !leagueUsesWeeklySchedule(lg) {
+		http.Error(w, fmt.Sprintf(
+			"This league is set to %s — there is no weekly schedule for that format. Add matches manually instead.",
+			leagueFormatLabel(leagueFormat(lg)),
+		), http.StatusBadRequest)
+		return
+	}
+
 	weekStr := r.URL.Query().Get("week")
 	week, err := strconv.Atoi(weekStr)
 	if err != nil || week <= 0 {
@@ -288,7 +304,7 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	minPlayers := getEnvInt("MIN_TEAM_PLAYERS", 3)
+	minPlayers := leagueMinTeamPlayers(lg)
 	var teams []Team
 
 	for _, t := range allTeams {

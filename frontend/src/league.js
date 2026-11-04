@@ -11,7 +11,7 @@ import axios from "axios";
 const STORAGE_KEY = "ecgl_league";
 
 export const LEAGUES = [
-  { id: "main", label: "Main League" },
+  { id: "main", label: "Varsity League" },
   { id: "rookie", label: "Rookie League" },
 ];
 
@@ -38,7 +38,7 @@ export function setLeague(v) {
 
 export function leagueLabel(id = current) {
   const found = LEAGUES.find((l) => l.id === id);
-  return found ? found.label : "Main League";
+  return found ? found.label : "Varsity League";
 }
 
 // Build a path that carries the active league (e.g. /teams?league=rookie).

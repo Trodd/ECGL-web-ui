@@ -79,6 +79,11 @@ function scopesForRequest(url) {
   if (has(/challenges\/(enable|disable)\b/) || has(/\/finals\/toggle-visible\b/)) {
     s.add("settings");
   }
+  // Drafting a player changes rosters and player rows.
+  if (has(/\/mod\/draft\b/)) {
+    s.add("teams");
+    s.add("players");
+  }
 
   return [...s];
 }

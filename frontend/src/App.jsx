@@ -782,8 +782,8 @@ function App() {
         </div>
       </div>{/* end app-content */}
 
-      {/* Dev impersonation toolbar */}
-      {user?.is_dev && user?.dev_mode && (
+      {/* Dev impersonation toolbar — stays available while impersonating */}
+      {(user?.can_impersonate || user?.is_dev) && user?.dev_mode && (
         <DevToolbar user={user} />
       )}
     </div>

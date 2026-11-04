@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
-import { getLeague, leagueLabel } from "../league";
+import { LEAGUES, getLeague, setLeague, leagueLabel } from "../league";
 import { E } from "../components/CustomEmoji";
 
 // Helper: parse "start:end, start:end" into [{start, end}, ...]
@@ -107,8 +107,8 @@ const MAIN_SETTING_GROUPS = [
     {
         label: "Team Rules",
         keys: [
-            { key: "MIN_TEAM_PLAYERS", label: "Min Team Players", type: "number" },
-            { key: "MAX_TEAM_PLAYERS", label: "Max Team Players", type: "number" },
+            { key: "MIN_TEAM_PLAYERS", label: "Varsity Min Team Players", type: "number", hint: "Rookie League has its own limits in the Rookie League settings." },
+            { key: "MAX_TEAM_PLAYERS", label: "Varsity Max Team Players", type: "number", hint: "Rookie League has its own limits in the Rookie League settings." },
             { key: "WEEKLY_CHALLENGE_LIMIT", label: "Weekly Challenge Limit", type: "number" },
             { key: "ARENA_MODE_ENABLED", label: "Arena Mode Enabled", type: "toggle" },
         ],
@@ -136,12 +136,37 @@ const ROOKIE_SETTING_GROUPS = [
         ],
     },
     {
+        label: "Rookie Format",
+        keys: [
+            {
+                key: "ROOKIE_FORMAT",
+                label: "League Format",
+                type: "select",
+                hint: "Season runs the weekly generated schedule + finals. Every other format has no auto schedule — mods add matches and enter scores manually.",
+                options: [
+                    { value: "season", label: "Season — weekly schedule + finals" },
+                    { value: "round_robin", label: "Round robin — everyone plays everyone" },
+                    { value: "single_elim", label: "Single elimination bracket" },
+                    { value: "double_elim", label: "Double elimination bracket" },
+                    { value: "group_stage", label: "Group stage → playoffs" },
+                ],
+            },
+        ],
+    },
+    {
         label: "Rookie Veteran Rule",
         keys: [
             { key: "ROOKIE_VETERAN_RULE_ENABLED", label: "Enforce Veteran Rule", type: "toggle", hint: "Limit main-league veterans on rookie teams." },
             { key: "ROOKIE_NEW_PLAYERS_PER_VETERAN", label: "New Players per Veteran", type: "number", hint: "How many new players are required for each main-league veteran." },
             { key: "ROOKIE_VETERAN_MAX_RATING", label: "Veteran Max Rating", type: "number", hint: "Players at or below this rating are still treated as new (not veterans). 0 = ignore rating." },
             { key: "ROOKIE_VETERAN_MAX_GAMES", label: "Veteran Max Games", type: "number", hint: "Players at or below this many matches are still treated as new. 0 = ignore games." },
+        ],
+    },
+    {
+        label: "Rookie Team Rules",
+        keys: [
+            { key: "ROOKIE_MIN_TEAM_PLAYERS", label: "Rookie Min Team Players", type: "number", hint: "Minimum roster size for a rookie team (falls back to the global value when blank)." },
+            { key: "ROOKIE_MAX_TEAM_PLAYERS", label: "Rookie Max Team Players", type: "number", hint: "Maximum roster size for a rookie team (falls back to the global value when blank)." },
         ],
     },
 ];
@@ -153,6 +178,17 @@ export default function LeagueSettings() {
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState(null);
     const [clearingLogs, setClearingLogs] = useState(false);
+    // Which league's settings this page is showing (Varsity / Rookie).
+    const [viewLeague, setViewLeague] = useState(getLeague());
+
+    // Stay in sync when the league is switched from the sidebar switcher too.
+    useEffect(() => {
+        function onLeague(e) {
+            if (e?.detail) setViewLeague(e.detail);
+        }
+        window.addEventListener("ecgl-league-changed", onLeague);
+        return () => window.removeEventListener("ecgl-league-changed", onLeague);
+    }, []);
 
     useEffect(() => {
         axios
@@ -192,7 +228,15 @@ export default function LeagueSettings() {
         try {
             await axios.post(`${getApiUrl()}/api/mod/settings`, changed, { withCredentials: true });
             setOriginal({ ...settings });
-            setMessage({ type: "success", text: "Settings saved successfully! Restart the server for some changes to take full effect." });
+
+            // Season changes affect the season shown across the whole site,
+            // which is cached when the page loads — reload so it refreshes.
+            if ("CURRENT_SEASON" in changed || "CURRENT_SEASON_ROOKIE" in changed) {
+                setMessage({ type: "success", text: "Season updated — refreshing…" });
+                setTimeout(() => window.location.reload(), 700);
+            } else {
+                setMessage({ type: "success", text: "Settings saved successfully! Restart the server for some changes to take full effect." });
+            }
         } catch (err) {
             setMessage({ type: "danger", text: err.response?.data || "Failed to save settings." });
         } finally {
@@ -201,6 +245,18 @@ export default function LeagueSettings() {
     };
 
     const handleReset = () => {
+        setSettings({ ...original });
+        setMessage(null);
+    };
+
+    // Switch which league's settings are shown (also switches the app league).
+    const handleSwitchLeague = (id) => {
+        if (id === viewLeague) return;
+        if (hasChanges() && !confirm("You have unsaved changes. Switch league and discard them?")) {
+            return;
+        }
+        setLeague(id);
+        setViewLeague(id);
         setSettings({ ...original });
         setMessage(null);
     };
@@ -287,10 +343,24 @@ export default function LeagueSettings() {
 
     return (
         <div className="page-content">
-            <h2><E n="gear" /> League Settings <span className="badge bg-secondary ms-2">{leagueLabel()}</span></h2>
-            <p className="text-secondary mb-4">
-                Configure {leagueLabel()} parameters. Changes are saved to the server environment.
+            <h2><E n="gear" /> League Settings <span className="badge bg-secondary ms-2">{leagueLabel(viewLeague)}</span></h2>
+            <p className="text-secondary mb-3">
+                Configure {leagueLabel(viewLeague)} parameters. Changes are saved to the server environment.
             </p>
+
+            <ul className="nav nav-pills mb-4 flex-wrap gap-2">
+                {LEAGUES.map((l) => (
+                    <li className="nav-item" key={l.id}>
+                        <button
+                            type="button"
+                            className={`nav-link ${viewLeague === l.id ? "active" : ""}`}
+                            onClick={() => handleSwitchLeague(l.id)}
+                        >
+                            {l.label}
+                        </button>
+                    </li>
+                ))}
+            </ul>
 
             {message && (
                 <div className={`alert alert-${message.type} py-2`} role="alert">
@@ -299,9 +369,9 @@ export default function LeagueSettings() {
             )}
 
             {[
-                getLeague() === "rookie"
+                viewLeague === "rookie"
                     ? { section: "Rookie League", groups: ROOKIE_SETTING_GROUPS }
-                    : { section: "Main League", groups: MAIN_SETTING_GROUPS },
+                    : { section: "Varsity League", groups: MAIN_SETTING_GROUPS },
             ].map(({ section, groups }) => (
                 <div key={section} className="mb-2">
                     <h4 className="mb-3 mt-4" style={{ color: "var(--text-primary)" }}>{section}</h4>
@@ -311,7 +381,7 @@ export default function LeagueSettings() {
                                 <h5 className="mb-0" style={{ color: "var(--text-primary)" }}>{group.label}</h5>
                             </div>
                             <div className="card-body">
-                                {group.keys.map(({ key, label, type, hint }) => (
+                                {group.keys.map(({ key, label, type, hint, options }) => (
                                     <div key={key} className="row mb-3 align-items-center">
                                         <div className="col-sm-4">
                                             <label className="form-label mb-0" style={{ color: "var(--text-secondary)" }}>
@@ -334,6 +404,23 @@ export default function LeagueSettings() {
                                                     value={settings[key] || ""}
                                                     onChange={(val) => handleChange(key, val)}
                                                 />
+                                            ) : type === "select" ? (
+                                                <select
+                                                    className="form-select form-select-sm"
+                                                    style={{
+                                                        background: "var(--bg-elevated)",
+                                                        border: "1px solid var(--border-default)",
+                                                        color: "var(--text-primary)",
+                                                    }}
+                                                    value={settings[key] || ""}
+                                                    onChange={(e) => handleChange(key, e.target.value)}
+                                                >
+                                                    {(options || []).map((o) => (
+                                                        <option key={o.value} value={o.value}>
+                                                            {o.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
                                             ) : (
                                                 <input
                                                     type={type === "number" ? "number" : type === "date" ? "date" : "text"}

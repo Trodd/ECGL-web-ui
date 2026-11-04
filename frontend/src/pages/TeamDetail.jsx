@@ -118,6 +118,7 @@ export default function TeamDetail() {
   // ───────────────────────────────────────────────
   const matches = Array.isArray(team?.matches) ? team.matches : [];
   const roster = Array.isArray(team?.roster) ? team.roster : [];
+  const formerRoster = Array.isArray(team?.former_roster) ? team.former_roster : [];
 
   // ───────────────────────────────────────────────
   // 🔸 BUILD SEASON FILTER OPTIONS
@@ -334,7 +335,11 @@ export default function TeamDetail() {
             ))}
           </ul>
         ) : (
-          <p className="text-secondary mb-0">No roster found.</p>
+          <p className="text-secondary mb-0">
+            {team.status === "Disbanded"
+              ? "This team is disbanded — its former members are listed at the bottom of the page."
+              : "No roster found."}
+          </p>
         )}
       </div>
 
@@ -441,6 +446,44 @@ export default function TeamDetail() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* ================= FORMER MEMBERS (bottom) ================= */}
+      {(formerRoster.length > 0 || team.status === "Disbanded") && (
+        <div className="card bg-dark border-secondary p-4 shadow-sm">
+          <h4 className="mb-3">🕓 Former Members</h4>
+
+          {formerRoster.length === 0 ? (
+            <p className="text-secondary mb-0">
+              No former members on record for this team.
+            </p>
+          ) : (
+            <ul className="list-group">
+              {formerRoster.map(p => (
+                <li
+                  key={p.id}
+                  className="list-group-item bg-black text-light d-flex justify-content-between align-items-center"
+                  style={{ borderColor: "#333" }}
+                >
+                  <div className="d-flex align-items-center gap-2">
+                    <PlayerIdentity player={p} size={26} />
+                    <span className="badge bg-secondary">{p.role || "-"}</span>
+                    {p.season && (
+                      <span className="text-secondary small">
+                        {/^\d+$/.test(String(p.season)) ? `Season ${p.season}` : p.season}
+                      </span>
+                    )}
+                  </div>
+                  {p.left_at && (
+                    <span className="text-secondary small">
+                      {new Date(p.left_at).toLocaleDateString()}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>

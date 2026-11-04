@@ -197,18 +197,27 @@ func GetSettings(w http.ResponseWriter, r *http.Request) {
 		s.ChallengesEnabled = true
 	}
 
-	minPlayers := getEnvInt("MIN_TEAM_PLAYERS", 3)
-	maxPlayers := getEnvInt("MAX_TEAM_PLAYERS", 6)
+	minPlayers := leagueMinTeamPlayers(leagueFromRequest(r))
+	maxPlayers := leagueMaxTeamPlayers(leagueFromRequest(r))
 	arenaModeEnabled := os.Getenv("ARENA_MODE_ENABLED") == "true"
 
+	lg := leagueFromRequest(r)
+	lf := leagueFormat(lg)
+
 	respondJSON(w, map[string]any{
-		"roster_locked":          isRosterLocked(),
-		"min_team_players":       minPlayers,
-		"max_team_players":       maxPlayers,
-		"current_week":           s.CurrentWeek,
-		"weekly_challenge_limit": s.WeeklyChallengeLimit,
-		"challenges_enabled":     s.ChallengesEnabled,
-		"arena_mode_enabled":     arenaModeEnabled,
+		"roster_locked":           isRosterLocked(),
+		"min_team_players":        minPlayers,
+		"max_team_players":        maxPlayers,
+		"rookie_min_team_players": leagueMinTeamPlayers(LeagueRookie),
+		"rookie_max_team_players": leagueMaxTeamPlayers(LeagueRookie),
+		"league_format":           lf,
+		"league_format_label":     leagueFormatLabel(lf),
+		"scheduling_automatic":    leagueUsesWeeklySchedule(lg),
+		"tournament_started":      leagueTournamentStarted(lg),
+		"current_week":            s.CurrentWeek,
+		"weekly_challenge_limit":  s.WeeklyChallengeLimit,
+		"challenges_enabled":      s.ChallengesEnabled,
+		"arena_mode_enabled":      arenaModeEnabled,
 	})
 }
 
@@ -411,8 +420,9 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 🧱 Crash prevention: find team safely
+	lg := leagueFromRequest(r)
 	var team Team
-	if err := DB.Where("league = ?", leagueFromRequest(r)).First(&team, teamID).Error; err != nil {
+	if err := DB.Where("league = ?", lg).First(&team, teamID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			http.Error(w, "team not found", http.StatusNotFound)
 			return
@@ -443,9 +453,10 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 			players.display_name,
 			players.avatar,
 			team_members.role,
-			players.rating
+			COALESCE(pls.rating, players.rating) AS rating
 		`).
 		Joins("JOIN players ON players.id = team_members.player_id").
+		Joins("LEFT JOIN player_league_stats pls ON pls.player_id = players.id AND pls.league = ?", lg).
 		Where("team_members.team_id = ?", teamID).
 		Scan(&roster).Error
 
@@ -454,21 +465,10 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 		roster = []RosterPlayer{}
 	}
 
-	// 🧩 Fallback: player_history
-	if len(roster) == 0 {
-		DB.Raw(`
-			SELECT
-				CAST(p.id AS TEXT) AS id,
-				p.username,
-				p.display_name,
-				p.avatar,
-				ph.role,
-				p.rating
-			FROM player_history ph
-			JOIN players p ON p.id = ph.player_id
-			WHERE ph.team_id = ? AND ph.season = ?
-		`, teamID, seasonForLeague(leagueFromRequest(r))).Scan(&roster)
-	}
+	// NOTE: there used to be a player_history fallback here. It listed past
+	// members (including everyone on a disbanded team) as if they were the
+	// current roster. live team_members is the only source of truth — past
+	// players are returned separately as "former_roster".
 
 	// --- Apply cooldown
 	var ls LeagueSettings
@@ -514,12 +514,56 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 		matches = []MatchRow{}
 	}
 
+	// --- Former members (were on this team, no longer current) ---
+	type FormerPlayer struct {
+		ID          string     `json:"id"`
+		Username    string     `json:"username"`
+		DisplayName string     `json:"display_name"`
+		Avatar      string     `json:"avatar"`
+		Role        string     `json:"role"`
+		Season      string     `json:"season"`
+		LeftAt      *time.Time `json:"left_at"`
+	}
+
+	var former []FormerPlayer
+	if err := DB.Raw(`
+		SELECT * FROM (
+			SELECT DISTINCT ON (p.id)
+				CAST(p.id AS TEXT) AS id,
+				p.username,
+				p.display_name,
+				p.avatar,
+				ph.role,
+				ph.season,
+				ph.created_at AS left_at
+			FROM player_history ph
+			JOIN players p ON p.id = ph.player_id
+			WHERE (
+				ph.team_id = @teamID
+				OR (
+					ph.team_id IS NULL
+					AND COALESCE(ph.team_name, '') <> ''
+					AND LOWER(ph.team_name) = LOWER(@teamName)
+				)
+			  )
+			  AND ph.player_id NOT IN (SELECT player_id FROM team_members WHERE team_id = @teamID)
+			ORDER BY p.id, ph.created_at DESC
+		) t
+		ORDER BY left_at DESC NULLS LAST
+	`, sql.Named("teamID", teamID), sql.Named("teamName", team.Name)).Scan(&former).Error; err != nil {
+		log.Printf("❌ GetTeam: former roster query failed for team %d: %v", teamID, err)
+		former = []FormerPlayer{}
+	}
+
 	// 🧱 Crash prevention: never return nil arrays
 	if roster == nil {
 		roster = []RosterPlayer{}
 	}
 	if matches == nil {
 		matches = []MatchRow{}
+	}
+	if former == nil {
+		former = []FormerPlayer{}
 	}
 
 	respondJSON(w, map[string]any{
@@ -528,6 +572,7 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 		"logo_url":               team.LogoURL,
 		"status":                 team.Status,
 		"roster":                 roster,
+		"former_roster":          former,
 		"matches":                matches,
 		"allow_challenges":       team.AllowChallenges,
 		"weekly_challenges_used": team.WeeklyChallengesUsed,
@@ -536,9 +581,50 @@ func GetTeam(w http.ResponseWriter, r *http.Request) {
 
 // --- Player Leaderboard ---
 func GetPlayerLeaderboard(w http.ResponseWriter, r *http.Request) {
+	lg := leagueFromRequest(r)
+
+	isMain := "FALSE"
+	if lg == LeagueMain {
+		isMain = "TRUE"
+	}
+	defRating := getEnvInt("DEFAULT_PLAYER_RATING", 800)
+
+	// Per-league ratings. Main falls back to the legacy player columns (which
+	// are kept in sync for main); other leagues only ever use their own stats
+	// row, so Varsity progress can never leak into the Rookie leaderboard.
+	ratingExpr := fmt.Sprintf("COALESCE(s.rating, CASE WHEN %s THEN p.rating ELSE %d END)", isMain, defRating)
+	winsExpr := fmt.Sprintf("COALESCE(s.wins, CASE WHEN %s THEN p.wins ELSE 0 END)", isMain)
+	lossesExpr := fmt.Sprintf("COALESCE(s.losses, CASE WHEN %s THEN p.losses ELSE 0 END)", isMain)
+	matchesExpr := fmt.Sprintf("COALESCE(s.matches, CASE WHEN %s THEN p.matches ELSE 0 END)", isMain)
+
+	query := fmt.Sprintf(`
+		SELECT
+			p.id,
+			p.username,
+			p.display_name,
+			p.avatar,
+			p.role,
+			p.device,
+			p.timezone,
+			%s AS rating,
+			%s AS wins,
+			%s AS losses,
+			%s AS matches
+		FROM players p
+		LEFT JOIN player_league_stats s
+		  ON s.player_id = p.id AND s.league = ?
+		WHERE s.player_id IS NOT NULL
+		   OR EXISTS (
+		        SELECT 1 FROM team_members tm
+		        JOIN teams t ON t.id = tm.team_id
+		        WHERE tm.player_id = p.id AND t.league = ?
+		   )
+		ORDER BY %s DESC, %s DESC, %s ASC
+	`, ratingExpr, winsExpr, lossesExpr, matchesExpr, ratingExpr, winsExpr, lossesExpr)
+
 	var players []Player
 
-	if err := DB.Order("rating DESC, wins DESC, losses ASC").Find(&players).Error; err != nil {
+	if err := DB.Raw(query, lg, lg).Scan(&players).Error; err != nil {
 		http.Error(w, "failed to load player leaderboard", http.StatusInternalServerError)
 		return
 	}
@@ -999,8 +1085,9 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
                 players.display_name,
                 players.avatar,
                 team_members.role,
-                players.rating`).
+                COALESCE(pls.rating, players.rating) AS rating`).
 		Joins("JOIN players ON players.id = team_members.player_id").
+		Joins("LEFT JOIN player_league_stats pls ON pls.player_id = players.id AND pls.league = ?", lg).
 		Where("team_members.team_id = ?", team.ID).
 		Scan(&roster).Error; err != nil {
 		log.Printf("❌ GetMyTeam: roster query failed for team %d: %v", team.ID, err)
@@ -1015,11 +1102,12 @@ func GetMyTeam(w http.ResponseWriter, r *http.Request) {
                     p.display_name,
                     p.avatar,
                     ph.role,
-                    p.rating
+                    COALESCE(pls.rating, p.rating) AS rating
                 FROM player_history ph
                 JOIN players p ON p.id = ph.player_id
+                LEFT JOIN player_league_stats pls ON pls.player_id = p.id AND pls.league = ?
                 WHERE ph.team_id = ? AND ph.season = ?
-            `, team.ID, currentSeason).Scan(&roster)
+            `, lg, team.ID, currentSeason).Scan(&roster)
 	}
 
 	if roster == nil {
@@ -1173,7 +1261,7 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 	// 🚫 Prevent join if team is already full
 	var count int64
 	DB.Model(&TeamMember{}).Where("team_id = ?", team.ID).Count(&count)
-	maxPlayers := getEnvInt("MAX_TEAM_PLAYERS", 6)
+	maxPlayers := leagueMaxTeamPlayers(team.League)
 	if count >= int64(maxPlayers) {
 		http.Error(w, fmt.Sprintf("This team already has the maximum of %d players.", maxPlayers), http.StatusForbidden)
 		return
@@ -1259,6 +1347,12 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 
 	lg := leagueFromRequest(r)
 
+	// 🚫 Tournaments close their team list once the first matches exist.
+	if leagueTournamentStarted(lg) {
+		http.Error(w, "This tournament has already started — new teams can no longer be created.", http.StatusForbidden)
+		return
+	}
+
 	// 🚫 Prevent creating a second team in the same league
 	var existingMembership TeamMember
 	if err := DB.Table("team_members").
@@ -1308,6 +1402,12 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		Season:     seasonForLeague(lg),
 		IsTeamJoin: true,
 	})
+
+	// Ensure this player has a per-league stats record
+	getPlayerLeagueStats(playerID, team.League)
+
+	// Clear any pending draft signup for this player
+	resolveDraftSignup(playerID, team.League, team.ID)
 
 	syncDiscordRolesForPlayer(playerID)
 
@@ -1412,6 +1512,12 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 		var t Team
 		DB.Select("name, league").First(&t, jr.TeamID)
 
+		// Ensure the player has a stats record for this league
+		getPlayerLeagueStats(int64(jr.PlayerID), t.League)
+
+		// Clear any pending draft signup for this player
+		resolveDraftSignup(int64(jr.PlayerID), t.League, jr.TeamID)
+
 		display := p.DisplayName
 		if display == "" {
 			display = p.Username
@@ -1491,8 +1597,9 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 			Rating      int    `json:"rating"`
 		}
 		DB.Table("team_members").
-			Select("players.id, players.username, players.display_name, team_members.role, players.rating").
+			Select("players.id, players.username, players.display_name, team_members.role, COALESCE(pls.rating, players.rating) AS rating").
 			Joins("JOIN players ON players.id = team_members.player_id").
+			Joins("LEFT JOIN player_league_stats pls ON pls.player_id = players.id AND pls.league = ?", normalizeLeague(team.League)).
 			Where("team_members.team_id = ?", jr.TeamID).
 			Scan(&roster)
 
@@ -2117,7 +2224,9 @@ func HandleKickMember(w http.ResponseWriter, r *http.Request) {
 	var remaining []TeamMember
 	DB.Where("team_id = ?", req.TeamID).Find(&remaining)
 	if len(remaining) == 0 {
-		DB.Delete(&Team{}, req.TeamID)
+		// Keep the team row (mark Disbanded) so its historical matches aren't
+		// orphaned and hidden. A hard delete belongs only to "Delete Team".
+		DB.Model(&Team{}).Where("id = ?", req.TeamID).Update("status", "Disbanded")
 
 		// 🔔 Discord log for “kicked + disbanded”
 		SendDiscordLog(fmt.Sprintf(
@@ -3312,7 +3421,9 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Current team
+	lg := leagueFromRequest(r)
+
+	// --- Current team (within the active league)
 	var team struct {
 		ID   uint
 		Name string
@@ -3321,9 +3432,9 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
         SELECT t.id, t.name
         FROM teams t
         JOIN team_members tm ON tm.team_id = t.id
-        WHERE tm.player_id = ?
+        WHERE tm.player_id = ? AND t.league = ?
         LIMIT 1
-    `, playerID).Scan(&team)
+    `, playerID, lg).Scan(&team)
 
 	// 🟦 TEAM MEMBERSHIP HISTORY (joined/left/promoted)
 	type HistoryRow struct {
@@ -3335,12 +3446,14 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 
 	var history []HistoryRow
 	DB.Raw(`
-        SELECT season, team_id, team_name AS team, role
-        FROM player_history
-        WHERE player_id = ?
-          AND is_team_join = TRUE
-        ORDER BY created_at ASC
-    `, playerID).Scan(&history)
+        SELECT ph.season, ph.team_id, ph.team_name AS team, ph.role
+        FROM player_history ph
+        LEFT JOIN teams t ON t.id = ph.team_id
+        WHERE ph.player_id = ?
+          AND ph.is_team_join = TRUE
+          AND COALESCE(t.league, ?) = ?
+        ORDER BY ph.created_at ASC
+    `, playerID, lg, lg).Scan(&history)
 
 	// SEASON STATS HISTORY (archived stats)
 	type ArchiveRow struct {
@@ -3361,6 +3474,7 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 	`, playerID, leagueFromRequest(r)).Scan(&archived)
 
 	// --- Final Response
+	lstats := playerStatsForLeague(player, lg)
 	respondJSON(w, map[string]any{
 		"id":              strconv.FormatInt(player.ID, 10),
 		"username":        player.Username,
@@ -3368,10 +3482,10 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 		"avatar":          player.Avatar,
 		"role":            player.Role,
 		"timezone":        player.Timezone,
-		"rating":          player.Rating,
-		"wins":            player.Wins,
-		"losses":          player.Losses,
-		"matches":         player.Matches,
+		"rating":          lstats.Rating,
+		"wins":            lstats.Wins,
+		"losses":          lstats.Losses,
+		"matches":         lstats.Matches,
 		"current_team":    team.Name,
 		"current_team_id": team.ID,
 		"history":         history,
@@ -3462,6 +3576,26 @@ func modActionLabel(r *http.Request) string {
 		return "Remove Player Cooldown"
 	case method == http.MethodPost && path == "/api/mod/player/archive-all":
 		return "Archive All Players"
+
+	// Rookie draft
+	case method == http.MethodGet && path == "/api/mod/draft":
+		return "View Rookie Draft"
+	case method == http.MethodGet && path == "/api/mod/draft/teams":
+		return "View Rookie Teams"
+	case method == http.MethodPost && path == "/api/mod/draft/assign":
+		return "Rookie Draft: Assign Player"
+	case method == http.MethodPost && path == "/api/mod/draft/auto-assign":
+		return "Rookie Draft: Auto Assign"
+	case method == http.MethodPost && path == "/api/mod/draft/create-team":
+		return "Rookie Draft: Create Team"
+	case method == http.MethodPost && path == "/api/mod/draft/transfer":
+		return "Rookie Draft: Move Player"
+	case method == http.MethodPost && path == "/api/mod/draft/release":
+		return "Rookie Draft: Return Player To Draft"
+	case method == http.MethodPost && path == "/api/mod/tournament/generate":
+		return "Tournament: Generate Matchups"
+	case method == http.MethodPost && path == "/api/mod/tournament/match":
+		return "Tournament: Add Match"
 
 	// League settings / tools
 	case method == http.MethodPost && path == "/api/mod/leaderboard/reset":
@@ -3962,14 +4096,14 @@ func ModMatchForfeit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Snapshot both teams
-	snapshotTeamRoster(m.TeamAID, currentSeason)
-	snapshotTeamRoster(m.TeamBID, currentSeason)
+	snapshotTeamRoster(m.TeamAID, seasonForLeague(m.League))
+	snapshotTeamRoster(m.TeamBID, seasonForLeague(m.League))
 
 	// Freeze match rosters so the detail page shows the rosters at forfeit time
 	FreezeMatchRoster(m.ID)
 
 	// Update leaderboards — winner gains ELO + win, loser gets loss
-	updateLeaderboards(req.WinnerTeamID, loser, m.MatchCode)
+	updateLeaderboards(req.WinnerTeamID, loser, m.MatchCode, m.League)
 
 	// Fetch team names
 	var teamA, teamB Team
@@ -5241,7 +5375,7 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 	isFinals := match.IsFinals
 
 	if !isFinals && match.WinnerID != nil {
-		updateLeaderboards(*match.WinnerID, *match.LoserID, match.MatchCode)
+		updateLeaderboards(*match.WinnerID, *match.LoserID, match.MatchCode, match.League)
 	}
 
 	// Sub stats only if NOT finals
@@ -5259,16 +5393,20 @@ func HandleConfirmScore(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			p.Matches++
+			st := getPlayerLeagueStats(*subID, match.League)
+			st.Matches++
 			if won {
-				p.Wins++
-				p.Rating += getEnvInt("ELO_WIN_POINTS", 25)
+				st.Wins++
+				st.Rating += getEnvInt("ELO_WIN_POINTS", 25)
 			} else {
-				p.Losses++
-				p.Rating += getEnvInt("ELO_LOSS_POINTS", -25)
+				st.Losses++
+				st.Rating += getEnvInt("ELO_LOSS_POINTS", -25)
 			}
-			p.Rating = clampRating(p.Rating)
-			DB.Save(&p)
+			st.Rating = clampRating(st.Rating)
+			savePlayerLeagueStats(st)
+			if normalizeLeague(match.League) == LeagueMain {
+				mirrorPlayerStats(*subID, st)
+			}
 
 			DB.Create(&PlayerHistory{
 				PlayerID: *subID,
@@ -5430,7 +5568,7 @@ func snapshotMatchRosters(matchID, teamAID, teamBID uint) error {
 
 // updateLeaderboards updates both team + player leaderboards using ELO from env.
 // Applies underdog bonus based on rating difference; challenge matches get a multiplier.
-func updateLeaderboards(winnerID, loserID uint, matchCode string) {
+func updateLeaderboards(winnerID, loserID uint, matchCode string, league string) {
 	// Read from .env or fallback
 	eloWinPoints := getEnvInt("ELO_WIN_POINTS", 25)
 	eloLossPoints := getEnvInt("ELO_LOSS_POINTS", -25)
@@ -5552,44 +5690,48 @@ func updateLeaderboards(winnerID, loserID uint, matchCode string) {
 	}
 
 	for _, w := range winners {
-		var p Player
-		if DB.First(&p, w.PlayerID).Error != nil {
-			continue
-		}
-		p.Wins++
-		p.Matches++
+		st := getPlayerLeagueStats(w.PlayerID, league)
+		st.Wins++
+		st.Matches++
 		if ratingChanges {
-			p.Rating += actualWinPts
-			p.Rating = clampRating(p.Rating)
+			st.Rating += actualWinPts
+			st.Rating = clampRating(st.Rating)
 		}
 		// Player placement completion (mirrors team placement logic)
-		if p.Matches == placementMatches {
-			p.Rating = defaultPlayerRating + (p.Wins * eloWinPoints) + ((p.Matches - p.Wins) * eloLossPoints)
-			p.Rating = clampRating(p.Rating)
+		if st.Matches == placementMatches {
+			st.Rating = defaultPlayerRating + (st.Wins * eloWinPoints) + ((st.Matches - st.Wins) * eloLossPoints)
+			st.Rating = clampRating(st.Rating)
+			var pl Player
+			DB.Select("display_name").First(&pl, w.PlayerID)
 			log.Printf("🎓 Player %d (%s) completed placement: %dW/%dL → rating %d",
-				p.ID, p.DisplayName, p.Wins, p.Losses, p.Rating)
+				w.PlayerID, pl.DisplayName, st.Wins, st.Losses, st.Rating)
 		}
-		DB.Save(&p)
+		savePlayerLeagueStats(st)
+		if normalizeLeague(league) == LeagueMain {
+			mirrorPlayerStats(w.PlayerID, st)
+		}
 	}
 
 	for _, l := range losers {
-		var p Player
-		if DB.First(&p, l.PlayerID).Error != nil {
-			continue
-		}
-		p.Losses++
-		p.Matches++
+		st := getPlayerLeagueStats(l.PlayerID, league)
+		st.Losses++
+		st.Matches++
 		if ratingChanges {
-			p.Rating += actualLossPts
-			p.Rating = clampRating(p.Rating)
+			st.Rating += actualLossPts
+			st.Rating = clampRating(st.Rating)
 		}
-		if p.Matches == placementMatches {
-			p.Rating = defaultPlayerRating + (p.Wins * eloWinPoints) + ((p.Matches - p.Wins) * eloLossPoints)
-			p.Rating = clampRating(p.Rating)
+		if st.Matches == placementMatches {
+			st.Rating = defaultPlayerRating + (st.Wins * eloWinPoints) + ((st.Matches - st.Wins) * eloLossPoints)
+			st.Rating = clampRating(st.Rating)
+			var pl Player
+			DB.Select("display_name").First(&pl, l.PlayerID)
 			log.Printf("🎓 Player %d (%s) completed placement: %dW/%dL → rating %d",
-				p.ID, p.DisplayName, p.Wins, p.Losses, p.Rating)
+				l.PlayerID, pl.DisplayName, st.Wins, st.Losses, st.Rating)
 		}
-		DB.Save(&p)
+		savePlayerLeagueStats(st)
+		if normalizeLeague(league) == LeagueMain {
+			mirrorPlayerStats(l.PlayerID, st)
+		}
 	}
 }
 
@@ -6098,6 +6240,13 @@ func ModAddPlayerToTeam(w http.ResponseWriter, r *http.Request) {
 	if err := DB.Create(&newMember).Error; err != nil {
 		http.Error(w, "Failed to add player to team", http.StatusInternalServerError)
 		return
+	}
+
+	// Ensure the player has a stats record for this league
+	var modTeam Team
+	if err := DB.Select("league").First(&modTeam, req.TeamID).Error; err == nil {
+		getPlayerLeagueStats(pid, modTeam.League)
+		resolveDraftSignup(pid, modTeam.League, req.TeamID)
 	}
 
 	json.NewEncoder(w).Encode(map[string]any{
@@ -7443,25 +7592,31 @@ func HandleModAdjustPlayerStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lg := leagueFromRequest(r)
+
 	var p Player
 	if err := DB.First(&p, "id = ?", playerID).Error; err != nil {
 		http.Error(w, "Player not found", http.StatusNotFound)
 		return
 	}
 
-	p.Rating = clampRating(req.Rating)
-	p.Wins = req.Wins
-	p.Losses = req.Losses
-	p.Matches = req.Matches
+	st := getPlayerLeagueStats(playerID, lg)
+	st.Rating = clampRating(req.Rating)
+	st.Wins = req.Wins
+	st.Losses = req.Losses
+	st.Matches = req.Matches
 
-	if err := DB.Save(&p).Error; err != nil {
+	if err := DB.Save(&st).Error; err != nil {
 		http.Error(w, "Failed to update player stats", http.StatusInternalServerError)
 		return
+	}
+	if normalizeLeague(lg) == LeagueMain {
+		mirrorPlayerStats(playerID, st)
 	}
 
 	json.NewEncoder(w).Encode(map[string]any{
 		"success":   true,
-		"player_id": p.ID,
+		"player_id": st.PlayerID,
 	})
 }
 
@@ -7489,12 +7644,17 @@ func HandleModGetPlayerStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var st PlayerLeagueStats
+	if err := DB.Where("player_id = ? AND league = ?", id, leagueFromRequest(r)).First(&st).Error; err != nil {
+		st = playerStatsForLeague(p, leagueFromRequest(r))
+	}
+
 	json.NewEncoder(w).Encode(map[string]any{
 		"id":      p.ID,
-		"rating":  p.Rating,
-		"wins":    p.Wins,
-		"losses":  p.Losses,
-		"matches": p.Matches,
+		"rating":  st.Rating,
+		"wins":    st.Wins,
+		"losses":  st.Losses,
+		"matches": st.Matches,
 	})
 }
 
@@ -9876,12 +10036,21 @@ func archivePlayerStats(playerID int64, season string, league string) {
 	}
 
 	var p P
-	if err := DB.Raw(`
+	// Snapshot the stats for the league being archived, falling back to the
+	// legacy player row if no per-league record exists yet.
+	_ = DB.Raw(`
 		SELECT rating, wins, losses, matches
-		FROM players
-		WHERE id = ?
-	`, playerID).Scan(&p).Error; err != nil {
-		return
+		FROM player_league_stats
+		WHERE player_id = ? AND league = ?
+	`, playerID, league).Scan(&p)
+	if p.Rating == 0 && p.Wins == 0 && p.Losses == 0 && p.Matches == 0 {
+		if err := DB.Raw(`
+			SELECT rating, wins, losses, matches
+			FROM players
+			WHERE id = ?
+		`, playerID).Scan(&p).Error; err != nil {
+			return
+		}
 	}
 
 	// Replace this league+season snapshot atomically (no unique constraint
@@ -10644,6 +10813,9 @@ var settingsKeys = []string{
 	"PLACEMENT_MATCHES",
 	"MIN_TEAM_PLAYERS",
 	"MAX_TEAM_PLAYERS",
+	"ROOKIE_MIN_TEAM_PLAYERS",
+	"ROOKIE_MAX_TEAM_PLAYERS",
+	"ROOKIE_FORMAT",
 	"CURRENT_SEASON",
 	"CURRENT_SEASON_ROOKIE",
 	"SEASON_START_ROOKIE",
@@ -10700,6 +10872,13 @@ func HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		os.Setenv(key, val)
+
+		// The main-league season is cached in a package variable at startup and
+		// used throughout the app; keep it in sync so the change takes effect
+		// immediately instead of only after a restart.
+		if key == "CURRENT_SEASON" {
+			currentSeason = strings.TrimSpace(val)
+		}
 	}
 
 	// Persist to .env file
