@@ -41,6 +41,8 @@ func leagueFromRequest(r *http.Request) string {
 
 // LeagueContextMiddleware resolves the active league from the X-ECGL-League
 // header (or ?league=) and stores it on the request context. Defaults to main.
+// A league hidden from the public (ROOKIE_LEAGUE_PUBLIC=false) silently falls
+// back to the main league for anyone who isn't a league mod or dev.
 func LeagueContextMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		league := LeagueMain
@@ -49,6 +51,11 @@ func LeagueContextMiddleware(next http.Handler) http.Handler {
 		} else if v := r.URL.Query().Get("league"); strings.TrimSpace(v) != "" {
 			league = normalizeLeague(v)
 		}
+
+		if !leagueIsPublic(league) && !sessionIsStaff(r) {
+			league = LeagueMain
+		}
+
 		ctx := context.WithValue(r.Context(), leagueCtxKey{}, league)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -190,6 +197,51 @@ func ensureLeagueSettings(league string) LeagueSettings {
 		log.Printf("⚠️ ensureLeagueSettings(%s): %v", league, err)
 	}
 	return ls
+}
+
+// leagueAllowsTeamCreation reports whether players may create their own teams
+// in a league. Varsity always allows it; the Rookie League can be switched to
+// draft-only with ROOKIE_TEAM_CREATION_ENABLED=false.
+func leagueAllowsTeamCreation(league string) bool {
+	if normalizeLeague(league) != LeagueRookie {
+		return true
+	}
+	return getEnv("ROOKIE_TEAM_CREATION_ENABLED", "true") == "true"
+}
+
+// coachDraftEnabled reports whether the league runs a separate coach draft.
+func coachDraftEnabled(league string) bool {
+	if normalizeLeague(league) != LeagueRookie {
+		return false
+	}
+	return getEnv("ROOKIE_COACH_DRAFT_ENABLED", "false") == "true"
+}
+
+// leagueIsPublic reports whether a league is visible to non-staff visitors.
+// The Rookie League can be hidden with ROOKIE_LEAGUE_PUBLIC=false.
+func leagueIsPublic(league string) bool {
+	if normalizeLeague(league) != LeagueRookie {
+		return true
+	}
+	return getEnv("ROOKIE_LEAGUE_PUBLIC", "true") == "true"
+}
+
+// sessionIsStaff reports whether the logged-in session user is a league mod or
+// dev. Role checks are cached (see discordMemberRoles), so this is cheap enough
+// to call from middleware.
+func sessionIsStaff(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	session, _ := store.Get(r, "session")
+	discordID, _ := session.Values["discord_id"].(string)
+	if strings.TrimSpace(discordID) == "" {
+		return false
+	}
+	if userHasDiscordRole(discordID, getEnv("DISCORD_LEAGUE_MOD_ROLE_ID", "")) {
+		return true
+	}
+	return userHasDiscordRole(discordID, getEnv("DISCORD_DEV_ROLE_ID", ""))
 }
 
 // leagueWeek returns the current week for a league.

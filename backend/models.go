@@ -27,6 +27,9 @@ type Player struct {
 	OnCooldown     bool       `gorm:"-" json:"on_cooldown"`
 	Division       string     `json:"division" gorm:"-"`
 	Tier           string     `json:"tier" gorm:"-"`
+	// NameLocked is set when the player overrides their display name in Player
+	// Settings, so the Discord avatar sync stops overwriting it.
+	NameLocked bool `json:"name_locked" gorm:"default:false"`
 }
 
 // --- Per-league Player Stats ---
@@ -47,15 +50,17 @@ func (PlayerLeagueStats) TableName() string { return "player_league_stats" }
 // Players who want to play in the Rookie League but don't have a team yet.
 // Mods can assign them to an existing team or create one for them.
 type DraftSignup struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	PlayerID  int64     `gorm:"uniqueIndex:idx_draft_player_league" json:"player_id"`
-	League    string    `gorm:"uniqueIndex:idx_draft_player_league;default:'rookie'" json:"league"`
-	Role      string    `json:"role"`     // player role at signup (Player / League Sub)
-	Device    string    `json:"device"`   // device at signup
-	Timezone  string    `json:"timezone"` // timezone at signup
-	Note      string    `json:"note"`     // optional "about me" note from the player
-	Status    string    `gorm:"default:'Pending'" json:"status"`
-	TeamID    *uint     `json:"team_id"`
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	PlayerID int64  `gorm:"uniqueIndex:idx_draft_player_league" json:"player_id"`
+	League   string `gorm:"uniqueIndex:idx_draft_player_league;default:'rookie'" json:"league"`
+	Role     string `json:"role"`     // player role at signup (Player / League Sub)
+	Device   string `json:"device"`   // device at signup
+	Timezone string `json:"timezone"` // timezone at signup
+	Note     string `json:"note"`     // optional "about me" note from the player
+	Status   string `gorm:"default:'Pending'" json:"status"`
+	TeamID   *uint  `json:"team_id"`
+	// Kind is "player" for the normal draft, "coach" for the separate coach draft.
+	Kind      string    `gorm:"default:'player'" json:"kind"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -241,7 +246,24 @@ type CastLogMulti struct {
 	CameraID  int64          `json:"camera_id"`
 	CreatedAt time.Time      `json:"created_at"`
 	StreamURL string         `json:"stream_url"`
+	// MatchType is the caster-facing series format ("Best of 3"). Empty means
+	// "derive it from the recorded map count".
+	MatchType string `json:"match_type" gorm:"column:match_type;default:''"`
 }
+
+// CastAssignment holds one production slot for a match: caster1-3 or camera.
+// Slots are unique per match, so claiming replaces whoever held it.
+type CastAssignment struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	MatchID    uint      `gorm:"uniqueIndex:idx_cast_match_slot" json:"match_id"`
+	Slot       string    `gorm:"uniqueIndex:idx_cast_match_slot" json:"slot"`
+	PlayerID   int64     `json:"player_id"`
+	AssignedBy int64     `json:"assigned_by"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+func (CastAssignment) TableName() string { return "cast_assignments" }
 
 type MatchRoster struct {
 	ID          uint   `gorm:"primaryKey"`

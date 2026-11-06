@@ -16,7 +16,6 @@ export default function MatchDetail() {
     const [players, setPlayers] = useState([]);
     const [showCastModal, setShowCastModal] = useState(false);
     const [existingCast, setExistingCast] = useState(null);
-    const [goLiveMsg, setGoLiveMsg] = useState("");
 
     // -----------------------------------------------------
     // LOAD ALL PLAYERS
@@ -164,10 +163,26 @@ export default function MatchDetail() {
     // NORMALIZE CAST (STRING IDs SO LOOKUP ALWAYS MATCHES)
     // -----------------------------------------------------
     const cast = matchData.cast || {};
-    const castCasters = (cast.casters || []).map(String);
-    const castCamera = cast.camera ? String(cast.camera) : "";
     const streamURL = cast.stream_url || "";
     const embedURL = convertToEmbed(streamURL);
+    // -----------------------------------------------------
+    // CAST CREW — the Caster Board is the only source of truth. Releasing a
+    // slot removes that person here; an empty board shows no crew.
+    // -----------------------------------------------------
+    const crew = matchData.crew || {};
+    const crewCasters = Array.isArray(crew.casters) ? crew.casters : [];
+
+    const casterNames = crewCasters
+        .map((c) => c.display_name || c.username || "")
+        .filter(Boolean);
+
+    const camOpName = crew.cam_op
+        ? crew.cam_op.display_name || crew.cam_op.username || ""
+        : "";
+
+    const sidelineName = crew.sideline
+        ? crew.sideline.display_name || crew.sideline.username || ""
+        : "";
 
     async function openCastEditor() {
         try {
@@ -217,36 +232,12 @@ export default function MatchDetail() {
                 </h3>
 
                 {me && (me.is_caster || me.is_mod) && existingCast && (
-                    <>
-                        <button
-                            className="btn btn-info btn-sm"
-                            onClick={openCastEditor}
-                        >
-                            <E n="gamepad" /> Edit Cast
-                        </button>
-                        {existingCast?.casters?.length > 0 && existingCast?.camera && match.scheduled_date && (
-                            <button
-                                className="btn btn-danger btn-sm ms-2"
-                                onClick={async () => {
-                                    if (!confirm("Announce this match is LIVE?")) return;
-                                    setGoLiveMsg("Posting...");
-                                    try {
-                                        const res = await axios.post(
-                                            `${getApiUrl()}/api/match/go-live`,
-                                            { match_id: Number(id) },
-                                            { withCredentials: true }
-                                        );
-                                        setGoLiveMsg(res.data?.message || "Sent!");
-                                    } catch (err) {
-                                        setGoLiveMsg("Failed: " + (err.response?.data || err.message));
-                                    }
-                                }}
-                            >
-                                🔴 Go Live
-                            </button>
-                        )}
-                        {goLiveMsg && <span className="text-info small ms-2">{goLiveMsg}</span>}
-                    </>
+                    <button
+                        className="btn btn-info btn-sm"
+                        onClick={openCastEditor}
+                    >
+                        <E n="gamepad" /> Edit Cast
+                    </button>
                 )}
                 {me && (match.isFinals || match.scheduled_date) && !existingCast && (
                     <button
@@ -318,8 +309,10 @@ export default function MatchDetail() {
             {/* ================= MATCH AVAILABILITY ================= */}
             <MatchAvailability matchId={match.id || id} />
 
-            {/* ================= CAST & BROADCAST ================= */}
-            {(castCasters.length > 0 || castCamera || streamURL) && (
+            {/* ================= CAST & BROADCAST =================
+                Only shown when there's actually something to broadcast:
+                a board-assigned crew, or an embedded stream. */}
+            {(casterNames.length > 0 || camOpName || sidelineName || (streamURL && embedURL)) && (
                 <div className="card bg-dark border-info shadow-sm mb-4">
                     <div className="card-header text-info fw-bold">
                         <E n="target" /> Match Broadcast
@@ -327,21 +320,26 @@ export default function MatchDetail() {
 
                     <div className="card-body">
 
-                        <div className="mb-3">
-                            <div className="small text-secondary">Casters</div>
-                            <div className="fw-semibold">
-                                {castCasters.length
-                                    ? castCasters.map(id => getPlayerName(id)).join(", ")
-                                    : "None"}
+                        {casterNames.length > 0 && (
+                            <div className="mb-3">
+                                <div className="small text-secondary">Casters</div>
+                                <div className="fw-semibold">{casterNames.join(", ")}</div>
                             </div>
-                        </div>
+                        )}
 
-                        <div className="mb-4">
-                            <div className="small text-secondary">Camera Operator</div>
-                            <div className="fw-semibold">
-                                {castCamera ? getPlayerName(castCamera) : "None"}
+                        {camOpName && (
+                            <div className="mb-3">
+                                <div className="small text-secondary">Camera Operator</div>
+                                <div className="fw-semibold">{camOpName}</div>
                             </div>
-                        </div>
+                        )}
+
+                        {sidelineName && (
+                            <div className="mb-3">
+                                <div className="small text-secondary">Sideline</div>
+                                <div className="fw-semibold">{sidelineName}</div>
+                            </div>
+                        )}
 
                         {streamURL && embedURL && (
                             <div className="rounded overflow-hidden border">

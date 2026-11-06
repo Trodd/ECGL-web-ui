@@ -9,6 +9,11 @@ import (
 
 // ─── Helper: create a notification for a player ───
 func createNotification(playerID int64, ntype, title, message, link string) {
+	// Players can mute categories in Player Settings.
+	if notificationMuted(playerID, ntype) {
+		return
+	}
+
 	n := Notification{
 		PlayerID: playerID,
 		Type:     ntype,

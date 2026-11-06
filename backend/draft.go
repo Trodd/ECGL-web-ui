@@ -22,6 +22,28 @@ const (
 	draftWithdrawn = "Withdrawn"
 )
 
+// Draft kinds: the normal player draft, or the separate coach draft.
+const (
+	draftKindPlayer = "player"
+	draftKindCoach  = "coach"
+)
+
+// draftKindOf normalises a stored/requested draft kind.
+func draftKindOf(kind string) string {
+	if strings.EqualFold(strings.TrimSpace(kind), draftKindCoach) {
+		return draftKindCoach
+	}
+	return draftKindPlayer
+}
+
+// draftTeamRole is the team_members role a draft entry gets when placed.
+func draftTeamRole(kind string) string {
+	if draftKindOf(kind) == draftKindCoach {
+		return "Coach"
+	}
+	return "Member"
+}
+
 // draftPlayerID returns the logged-in player's Discord ID from the session.
 func draftPlayerID(r *http.Request) (int64, bool) {
 	session, _ := store.Get(r, "session")
@@ -81,13 +103,16 @@ func HandleGetDraftStatus(w http.ResponseWriter, r *http.Request) {
 	found := DB.Where("player_id = ? AND league = ?", playerID, lg).First(&s).Error == nil
 
 	resp := map[string]any{
-		"signed_up": false,
-		"has_team":  playerOnTeamInLeague(playerID, lg),
-		"league":    lg,
-		"available": lg == LeagueRookie,
+		"signed_up":             false,
+		"has_team":              playerOnTeamInLeague(playerID, lg),
+		"league":                lg,
+		"available":             lg == LeagueRookie,
+		"team_creation_enabled": leagueAllowsTeamCreation(lg),
+		"coach_draft_enabled":   coachDraftEnabled(lg),
 	}
 	if found && s.Status == draftPending {
 		resp["signed_up"] = true
+		resp["kind"] = draftKindOf(s.Kind)
 		resp["signup"] = s
 	}
 	respondJSON(w, resp)
@@ -120,8 +145,15 @@ func HandleDraftSignup(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Note string `json:"note"`
+		Kind string `json:"kind"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	kind := draftKindOf(req.Kind)
+	if kind == draftKindCoach && !coachDraftEnabled(lg) {
+		http.Error(w, "Coach signups are closed for the Rookie League right now.", http.StatusBadRequest)
+		return
+	}
 
 	note := strings.TrimSpace(req.Note)
 	if len(note) > 300 {
@@ -137,6 +169,7 @@ func HandleDraftSignup(w http.ResponseWriter, r *http.Request) {
 	s.Device = p.Device
 	s.Timezone = p.Timezone
 	s.Note = note
+	s.Kind = kind
 	s.Status = draftPending
 	s.TeamID = nil
 
@@ -150,7 +183,11 @@ func HandleDraftSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	LogGeneral(fmt.Sprintf("📝 **%s** entered the **Rookie League draft**", draftPlayerLabel(p)), lg)
+	if kind == draftKindCoach {
+		LogGeneral(fmt.Sprintf("🧑‍🏫 **%s** signed up to **coach** in the Rookie League draft", draftPlayerLabel(p)), lg)
+	} else {
+		LogGeneral(fmt.Sprintf("📝 **%s** entered the **Rookie League draft**", draftPlayerLabel(p)), lg)
+	}
 
 	respondJSON(w, map[string]any{"success": true, "signup": s})
 }
@@ -205,6 +242,7 @@ func HandleModListDraft(w http.ResponseWriter, r *http.Request) {
 		Device         string    `json:"device"`
 		Timezone       string    `json:"timezone"`
 		Note           string    `json:"note"`
+		Kind           string    `json:"kind"`
 		CreatedAt      time.Time `json:"created_at"`
 		VarsityRating  int       `json:"varsity_rating"`
 		VarsityMatches int       `json:"varsity_matches"`
@@ -214,7 +252,7 @@ func HandleModListDraft(w http.ResponseWriter, r *http.Request) {
 	var rows []draftRow
 	if err := DB.Raw(`
 		SELECT d.id, d.player_id, p.username, p.display_name, p.avatar,
-		       d.role, d.device, d.timezone, d.note, d.created_at
+		       d.role, d.device, d.timezone, d.note, d.kind, d.created_at
 		FROM draft_signups d
 		JOIN players p ON p.id = d.player_id
 		WHERE d.league = ? AND d.status = ?
@@ -306,7 +344,7 @@ func HandleModAssignDraft(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := DB.Create(&TeamMember{TeamID: req.TeamID, PlayerID: s.PlayerID, Role: "Member"}).Error; err != nil {
+	if err := DB.Create(&TeamMember{TeamID: req.TeamID, PlayerID: s.PlayerID, Role: draftTeamRole(s.Kind)}).Error; err != nil {
 		modJSONErr(w, http.StatusInternalServerError, "failed to add player to team")
 		return
 	}
@@ -320,7 +358,7 @@ func HandleModAssignDraft(w http.ResponseWriter, r *http.Request) {
 		PlayerID:   s.PlayerID,
 		TeamID:     team.ID,
 		TeamName:   team.Name,
-		Role:       "Member",
+		Role:       draftTeamRole(s.Kind),
 		Season:     seasonForLeague(team.League),
 		IsTeamJoin: true,
 	})
@@ -965,10 +1003,11 @@ func roleRank(role string) int {
 
 // draftAddMember adds a draft signup to an existing team and closes the signup.
 func draftAddMember(teamID uint, league string, s DraftSignup) bool {
+	role := draftTeamRole(s.Kind)
 	if err := DB.Omit("Player").Create(&TeamMember{
 		TeamID:   teamID,
 		PlayerID: s.PlayerID,
-		Role:     "Member",
+		Role:     role,
 	}).Error; err != nil {
 		log.Printf("❌ draftAddMember(%d → team %d): %v", s.PlayerID, teamID, err)
 		return false
@@ -983,7 +1022,7 @@ func draftAddMember(teamID uint, league string, s DraftSignup) bool {
 		PlayerID:   s.PlayerID,
 		TeamID:     teamID,
 		TeamName:   team.Name,
-		Role:       "Member",
+		Role:       role,
 		Season:     seasonForLeague(league),
 		IsTeamJoin: true,
 	})
@@ -1013,12 +1052,21 @@ func HandleModAutoAssignDraft(w http.ResponseWriter, r *http.Request) {
 	lg := leagueFromRequest(r)
 
 	var req struct {
-		Override bool `json:"override"` // ignore the veteran ratio rule
+		Override bool   `json:"override"` // ignore the veteran ratio rule
+		Kind     string `json:"kind"`     // "player" (default) | "coach"
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
+	if draftKindOf(req.Kind) == draftKindCoach {
+		autoAssignCoaches(w, lg)
+		return
+	}
+
 	var pending []DraftSignup
-	if err := DB.Where("league = ? AND status = ?", lg, draftPending).
+	// Coaches are excluded — they're placed by hand and must not consume roster
+	// slots or skew the veteran/rookie balancing.
+	if err := DB.Where("league = ? AND status = ? AND COALESCE(kind, 'player') <> ?",
+		lg, draftPending, draftKindCoach).
 		Order("created_at ASC").Find(&pending).Error; err != nil {
 		log.Printf("❌ HandleModAutoAssignDraft: %v", err)
 		modJSONErr(w, http.StatusInternalServerError, "failed to load the draft")
@@ -1235,5 +1283,87 @@ func HandleModAutoAssignDraft(w http.ResponseWriter, r *http.Request) {
 		"teams_created":     created,
 		"leftover":          leftoverNames,
 		"message":           msg,
+	})
+}
+
+// autoAssignCoaches places every pending coach signup on a team that doesn't
+// have a coach yet, smallest roster first. Roster size caps are ignored — a
+// coach doesn't take a player slot.
+func autoAssignCoaches(w http.ResponseWriter, lg string) {
+	var coaches []DraftSignup
+	if err := DB.Where("league = ? AND status = ? AND COALESCE(kind, 'player') = ?",
+		lg, draftPending, draftKindCoach).
+		Order("created_at ASC").Find(&coaches).Error; err != nil {
+		log.Printf("❌ autoAssignCoaches: %v", err)
+		modJSONErr(w, http.StatusInternalServerError, "failed to load coach signups")
+		return
+	}
+	if len(coaches) == 0 {
+		modJSONErr(w, http.StatusBadRequest, "no pending coach signups")
+		return
+	}
+
+	// Teams in this league that don't have a coach yet, smallest roster first.
+	type teamRow struct {
+		ID      uint
+		Name    string
+		Members int
+	}
+	var teams []teamRow
+	if err := DB.Raw(`
+		SELECT t.id, t.name, COUNT(tm.player_id) AS members
+		FROM teams t
+		LEFT JOIN team_members tm ON tm.team_id = t.id
+		WHERE t.league = ?
+		  AND COALESCE(t.status, '') <> 'Test'
+		  AND NOT EXISTS (
+		        SELECT 1 FROM team_members c
+		        WHERE c.team_id = t.id AND LOWER(c.role) = 'coach'
+		  )
+		GROUP BY t.id, t.name
+		ORDER BY members ASC, t.id ASC
+	`, lg).Scan(&teams).Error; err != nil {
+		log.Printf("❌ autoAssignCoaches teams: %v", err)
+		modJSONErr(w, http.StatusInternalServerError, "failed to load teams")
+		return
+	}
+
+	assigned := 0
+	leftover := []string{}
+	idx := 0
+
+	for _, s := range coaches {
+		if idx >= len(teams) {
+			var p Player
+			DB.First(&p, s.PlayerID)
+			leftover = append(leftover, draftPlayerLabel(p))
+			continue
+		}
+		team := teams[idx]
+		idx++
+
+		if draftAddMember(team.ID, lg, s) {
+			assigned++
+			continue
+		}
+
+		var p Player
+		DB.First(&p, s.PlayerID)
+		leftover = append(leftover, draftPlayerLabel(p))
+	}
+
+	msg := fmt.Sprintf("Placed %d coach(es).", assigned)
+	if len(leftover) > 0 {
+		msg += fmt.Sprintf(" %d coach(es) could not be placed (every team already has one): %s.",
+			len(leftover), strings.Join(leftover, ", "))
+	}
+
+	LogGeneral(fmt.Sprintf("🧑‍🏫 Draft coach auto-assign: %s", msg), lg)
+
+	respondJSON(w, map[string]any{
+		"success":  true,
+		"assigned": assigned,
+		"leftover": leftover,
+		"message":  msg,
 	})
 }

@@ -10,6 +10,7 @@ import MyTeam from "./pages/MyTeam";
 import Register from "./pages/Register";
 import Players from "./pages/Players";
 import Matchups from "./pages/Matchups";
+import Casters from "./pages/Casters";
 import PlayerDetail from "./pages/PlayerDetail";
 import MatchDetail from "./pages/MatchDetail";
 import Finals from "./pages/Finals";
@@ -258,6 +259,47 @@ function App() {
     };
   }, [pullDistance, isRefreshing]);
 
+  // ─── UI preferences (mirrored to localStorage by Player Settings) ─────
+  const [prefs, setPrefs] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("ecgl_prefs") || "{}") || {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    function onPrefs() {
+      try {
+        setPrefs(JSON.parse(localStorage.getItem("ecgl_prefs") || "{}") || {});
+      } catch {
+        setPrefs({});
+      }
+    }
+    window.addEventListener("ecgl-prefs-changed", onPrefs);
+    return () => window.removeEventListener("ecgl-prefs-changed", onPrefs);
+  }, []);
+
+  // Send the player to their preferred landing page once per session.
+  useEffect(() => {
+    if (!user) return;
+    const target = prefs?.landing_page;
+    if (!target) return;
+    if (location.pathname !== "/") return;
+    if (sessionStorage.getItem("ecgl_landed")) return;
+    sessionStorage.setItem("ecgl_landed", "1");
+    navigate(leagueLink(target));
+  }, [user]);
+
+  // If the league currently selected isn't one this user may see (e.g. the
+  // Rookie League was made staff-only while it was selected), drop back to main.
+  useEffect(() => {
+    const allowed = user?.visible_leagues;
+    if (Array.isArray(allowed) && allowed.length > 0 && !allowed.includes(getLeague())) {
+      setLeague("main");
+    }
+  }, [user]);
+
   useEffect(() => {
     // Fetch user (session-based). When impersonating, the session cookie itself
     // has been swapped server-side, so a single /api/me returns the impersonated
@@ -285,16 +327,43 @@ function App() {
   // Poll notification count
   useEffect(() => {
     if (!user) { setNotifCount(0); return; }
+    let lastCount = null;
+
+    const beep = () => {
+      if (!prefs?.notify_sound) return;
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = new Ctx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = 880;
+        gain.gain.value = 0.06;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.12);
+        setTimeout(() => ctx.close().catch(() => {}), 400);
+      } catch { /* ignore */ }
+    };
+
     const fetchCount = () => {
       fetch(`${getApiUrl()}/api/notifications/count`, { credentials: "include" })
         .then(res => res.ok ? res.json() : null)
-        .then(data => { if (data) setNotifCount(data.unread_count || 0); })
+        .then(data => {
+          if (!data) return;
+          const next = data.unread_count || 0;
+          if (lastCount !== null && next > lastCount) beep();
+          lastCount = next;
+          setNotifCount(next);
+        })
         .catch(() => { });
     };
     fetchCount();
     const interval = setInterval(fetchCount, 30000);
     return () => clearInterval(interval);
-  }, [user]);
+  }, [user, prefs?.notify_sound]);
 
   // Clear notifications when visiting My Team
   useEffect(() => {
@@ -325,6 +394,13 @@ function App() {
   // League selector shown at the top of the side navigation, above Home and
   // visually separated from the page tabs.
   function renderLeagueSwitcher() {
+    // Leagues the server says this user may open (a hidden league — e.g. Rookie
+    // when ROOKIE_LEAGUE_PUBLIC is off — is only listed for mods/devs).
+    const allowed = Array.isArray(user?.visible_leagues) ? user.visible_leagues : null;
+    const options = allowed ? LEAGUES.filter((l) => allowed.includes(l.id)) : LEAGUES;
+
+    if (options.length <= 1) return null;
+
     return (
       <div className="ecgl-league-switcher px-2 py-2 border-bottom border-secondary mb-2">
         <label className="form-label text-secondary small mb-1 d-block">League</label>
@@ -341,7 +417,7 @@ function App() {
           }}
           aria-label="Select league"
         >
-          {LEAGUES.map((l) => (
+          {options.map((l) => (
             <option key={l.id} value={l.id}>
               {l.label}
             </option>
@@ -352,7 +428,9 @@ function App() {
   }
 
   return (
-    <div className="app-wrapper">
+    <div
+      className={`app-wrapper${prefs?.compact_cards ? " pref-compact" : ""}${prefs?.reduce_motion ? " pref-reduce-motion" : ""}`}
+    >
       {/* Pull-to-refresh indicator - slides down from top */}
       <div className={`pull-to-refresh-zone ${pullDistance > 20 || isRefreshing ? 'visible' : ''}`}>
         <div className={`ptr-spinner ${isRefreshing ? 'spinning' : ''}`}>
@@ -483,23 +561,38 @@ function App() {
                 <E n="leaderboard" /> Leaderboard
               </button>
 
-              {!loadingUser && user?.is_mod && (
-                <button
-                  type="button"
-                  className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/modpanel" ? "mobile-nav-active" : ""}`}
-                  onClick={() => navigateFromMobile("/modpanel")}
-                >
-                  <E n="tools" /> League Mod
-                </button>
-              )}
-              {!loadingUser && user?.is_dev && (
-                <button
-                  type="button"
-                  className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/settings" ? "mobile-nav-active" : ""}`}
-                  onClick={() => navigateFromMobile("/settings")}
-                >
-                  <E n="gear" /> Settings
-                </button>
+              {!loadingUser && (user?.is_mod || user?.is_caster || user?.is_dev) && (
+                <div className="ecgl-nav-section">
+                  <div className="ecgl-nav-section-label">Staff</div>
+
+                  {user?.is_mod && (
+                    <button
+                      type="button"
+                      className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/modpanel" ? "mobile-nav-active" : ""}`}
+                      onClick={() => navigateFromMobile("/modpanel")}
+                    >
+                      <E n="tools" /> League Mod
+                    </button>
+                  )}
+                  {user?.is_caster && (
+                    <button
+                      type="button"
+                      className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/casters" ? "mobile-nav-active" : ""}`}
+                      onClick={() => navigateFromMobile("/casters")}
+                    >
+                      🎥 Casters
+                    </button>
+                  )}
+                  {user?.is_dev && (
+                    <button
+                      type="button"
+                      className={`list-group-item list-group-item-action bg-dark text-light ${location.pathname === "/settings" ? "mobile-nav-active" : ""}`}
+                      onClick={() => navigateFromMobile("/settings")}
+                    >
+                      <E n="gear" /> Settings
+                    </button>
+                  )}
+                </div>
               )}
             </div>
 
@@ -668,27 +761,44 @@ function App() {
                 <E n="leaderboard" /> Leaderboard
               </NavLink>
 
-              {!loadingUser && user?.is_mod && (
-                <NavLink
-                  to={leagueLink("/modpanel")}
-                  className={({ isActive }) =>
-                    `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
-                    }`
-                  }
-                >
-                  <E n="tools" /> League Mod
-                </NavLink>
-              )}
-              {!loadingUser && user?.is_dev && (
-                <NavLink
-                  to={leagueLink("/settings")}
-                  className={({ isActive }) =>
-                    `list-group-item list-group-item-action ecgl-side-link${isActive ? " active" : ""
-                    }`
-                  }
-                >
-                  <E n="gear" /> Settings
-                </NavLink>
+              {!loadingUser && (user?.is_mod || user?.is_caster || user?.is_dev) && (
+                <div className="ecgl-nav-section">
+                  <div className="ecgl-nav-section-label">Staff</div>
+
+                  {user?.is_mod && (
+                    <NavLink
+                      to={leagueLink("/modpanel")}
+                      className={({ isActive }) =>
+                        `list-group-item list-group-item-action ecgl-side-link ecgl-side-link--staff${isActive ? " active" : ""
+                        }`
+                      }
+                    >
+                      <E n="tools" /> League Mod
+                    </NavLink>
+                  )}
+                  {user?.is_caster && (
+                    <NavLink
+                      to={leagueLink("/casters")}
+                      className={({ isActive }) =>
+                        `list-group-item list-group-item-action ecgl-side-link ecgl-side-link--staff${isActive ? " active" : ""
+                        }`
+                      }
+                    >
+                      🎥 Casters
+                    </NavLink>
+                  )}
+                  {user?.is_dev && (
+                    <NavLink
+                      to={leagueLink("/settings")}
+                      className={({ isActive }) =>
+                        `list-group-item list-group-item-action ecgl-side-link ecgl-side-link--staff${isActive ? " active" : ""
+                        }`
+                      }
+                    >
+                      <E n="gear" /> Settings
+                    </NavLink>
+                  )}
+                </div>
               )}
             </div>
 
@@ -769,6 +879,7 @@ function App() {
                   <Route path="/players" element={<Players />} />
                   <Route path="/players/:id" element={<PlayerDetail />} />
                   <Route path="/finals" element={<Finals />} />
+                  <Route path="/casters" element={<Casters />} />
                   <Route path="/rules" element={<RulesPage />} />
 
                   {/* 🛠️ League Mod Route (extra protected inside component) */}

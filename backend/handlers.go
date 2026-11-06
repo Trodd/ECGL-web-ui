@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -294,42 +295,105 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 
 // --- Helper: Check if a user has a Discord role ---
 func userHasDiscordRole(discordIDStr string, roleID string) bool {
-	guildID := getEnv("DISCORD_GUILD_ID", "")
-	botToken := getEnv("DISCORD_BOT_TOKEN", "")
-
-	if guildID == "" || botToken == "" || roleID == "" {
+	if strings.TrimSpace(roleID) == "" {
 		return false
 	}
-
-	req, _ := http.NewRequest("GET",
-		fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s",
-			guildID, discordIDStr),
-		nil)
-
-	req.Header.Set("Authorization", "Bot "+botToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		return false
-	}
-
-	defer resp.Body.Close()
-
-	var member struct {
-		Roles []string `json:"roles"`
-	}
-
-	if json.NewDecoder(resp.Body).Decode(&member) != nil {
-		return false
-	}
-
-	for _, r := range member.Roles {
+	for _, r := range discordMemberRoles(discordIDStr) {
 		if r == roleID {
 			return true
 		}
 	}
-
 	return false
+}
+
+// --- Discord role cache ---
+//
+// Role lookups used to hit https://discord.com/api/v10/guilds/{g}/members/{u}
+// on every call — handleMe alone fired three of them, on every page load, with
+// no timeout. That's why the caster/mod UI lagged (badly right after a restart,
+// when nothing was warm). Now the bot's gateway state is read first (no HTTP at
+// all) and REST is only a fallback, memoised for discordRolesTTL.
+const discordRolesTTL = 60 * time.Second
+
+type cachedDiscordRoles struct {
+	roles   []string
+	expires time.Time
+}
+
+var (
+	discordRolesMu    sync.Mutex
+	discordRolesCache = map[string]cachedDiscordRoles{}
+	discordRoleClient = &http.Client{Timeout: 5 * time.Second}
+)
+
+// discordMemberRoles returns the guild role ids for a Discord user id.
+func discordMemberRoles(discordIDStr string) []string {
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	discordIDStr = strings.TrimSpace(discordIDStr)
+	if guildID == "" || discordIDStr == "" {
+		return nil
+	}
+
+	key := guildID + ":" + discordIDStr
+
+	discordRolesMu.Lock()
+	if c, ok := discordRolesCache[key]; ok && time.Now().Before(c.expires) {
+		roles := c.roles
+		discordRolesMu.Unlock()
+		return roles
+	}
+	discordRolesMu.Unlock()
+
+	var roles []string
+	found := false
+
+	// 1) Gateway state — instant, no HTTP round-trip.
+	if discordSession != nil && discordSession.State != nil {
+		if m, err := discordSession.State.Member(guildID, discordIDStr); err == nil && m != nil {
+			roles = m.Roles
+			found = true
+		}
+	}
+
+	// 2) REST fallback (cached after the first success).
+	if !found {
+		botToken := getEnv("DISCORD_BOT_TOKEN", "")
+		if botToken == "" {
+			return nil
+		}
+
+		req, _ := http.NewRequest("GET",
+			fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordIDStr),
+			nil)
+		req.Header.Set("Authorization", "Bot "+botToken)
+
+		resp, err := discordRoleClient.Do(req)
+		if err != nil {
+			return nil
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			return nil
+		}
+
+		var member struct {
+			Roles []string `json:"roles"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&member) != nil {
+			return nil
+		}
+		roles = member.Roles
+	}
+
+	discordRolesMu.Lock()
+	discordRolesCache[key] = cachedDiscordRoles{
+		roles:   roles,
+		expires: time.Now().Add(discordRolesTTL),
+	}
+	discordRolesMu.Unlock()
+
+	return roles
 }
 
 // --- Players ---
@@ -401,6 +465,7 @@ func GetTeams(w http.ResponseWriter, r *http.Request) {
 	if err := DB.
 		Where("league = ?", leagueFromRequest(r)).
 		Where("name NOT IN ('(No Team)', 'League Sub')").
+		Where("COALESCE(status, '') <> 'Test'").
 		Order("CASE WHEN status = 'Active' THEN 1 WHEN status = 'Inactive' THEN 2 ELSE 3 END").
 		Find(&teams).Error; err != nil {
 
@@ -660,9 +725,10 @@ func GetTeamLeaderboard(w http.ResponseWriter, r *http.Request) {
 
 	var rows []TeamRow
 
-	// Show all teams including disbanded
+	// Show all teams including disbanded (but never dev-only Test teams)
 	if err := DB.Table("teams").
 		Where("league = ?", leagueFromRequest(r)).
+		Where("COALESCE(status, '') <> 'Test'").
 		Select("id, name, status, rating, wins, losses, matches").
 		Order("rating DESC").
 		Order("wins DESC").
@@ -1220,6 +1286,14 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 
 	lg := leagueFromRequest(r)
 
+	// 🚫 Draft-only league: players can't join teams directly, only the draft.
+	if !leagueAllowsTeamCreation(lg) {
+		http.Error(w,
+			"Joining teams is closed in this league — sign up for the draft and a mod will place you on a team.",
+			http.StatusForbidden)
+		return
+	}
+
 	// ensure team exists (within the active league)
 	var team Team
 	if err := DB.Where("league = ?", lg).First(&team, req.TeamID).Error; err != nil {
@@ -1346,6 +1420,14 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lg := leagueFromRequest(r)
+
+	// 🚫 League may be draft-only: players can't form their own teams.
+	if !leagueAllowsTeamCreation(lg) {
+		http.Error(w,
+			"Team creation is closed in this league — sign up for the draft and a mod will place you on a team.",
+			http.StatusForbidden)
+		return
+	}
 
 	// 🚫 Tournaments close their team list once the first matches exist.
 	if leagueTournamentStarted(lg) {
@@ -3090,12 +3172,28 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ------------------------------------------------------------
+	// Standings (leaderboard rank + rating for both teams)
+	// ------------------------------------------------------------
+	ranks := teamRankMap(match.League)
+
+	// ------------------------------------------------------------
+	// Cast crew (owned by the Caster Board)
+	// ------------------------------------------------------------
+	crewCasters, crewCamOp, crewSideline := castCrewFor(match.ID)
+
+	// ------------------------------------------------------------
 	// Response
 	// ------------------------------------------------------------
 	respondJSON(w, map[string]any{
 		"match":      match,
 		"teams":      map[string]any{"a": teamA, "b": teamB},
+		"standings":  map[string]any{"a": buildStanding(ranks, teamA), "b": buildStanding(ranks, teamB)},
 		"map_scores": mapScores,
+		"crew": map[string]any{
+			"casters":  crewCasters,
+			"cam_op":   crewCamOp,
+			"sideline": crewSideline,
+		},
 		"roster": map[string]any{
 			"a": stringifyRosterPlayers(rosterA),
 			"b": stringifyRosterPlayers(rosterB),
@@ -6335,32 +6433,7 @@ func HandleRequestCast(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- verify caster role ---
-	isCaster := false
-	{
-		url := fmt.Sprintf(
-			"https://discord.com/api/v10/guilds/%s/members/%s",
-			guildID,
-			discordIDStr,
-		)
-		req2, _ := http.NewRequest("GET", url, nil)
-		req2.Header.Set("Authorization", "Bot "+botToken)
-
-		resp, err := http.DefaultClient.Do(req2)
-		if err == nil && resp != nil && resp.StatusCode == 200 {
-			defer resp.Body.Close()
-			var member struct {
-				Roles []string `json:"roles"`
-			}
-			_ = json.NewDecoder(resp.Body).Decode(&member)
-			for _, r := range member.Roles {
-				if r == casterRoleID {
-					isCaster = true
-					break
-				}
-			}
-		}
-	}
-	if !isCaster {
+	if !userHasDiscordRole(discordIDStr, casterRoleID) {
 		http.Error(w, "You are not a caster", http.StatusForbidden)
 		return
 	}
@@ -7133,8 +7206,8 @@ func HandleSetCast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.MatchID == 0 || len(req.Casters) == 0 || strings.TrimSpace(req.CameraID) == "" {
-		http.Error(w, "Missing required fields", http.StatusBadRequest)
+	if req.MatchID == 0 {
+		http.Error(w, "Missing match id", http.StatusBadRequest)
 		return
 	}
 
@@ -7153,16 +7226,17 @@ func HandleSetCast(w http.ResponseWriter, r *http.Request) {
 		casterIDs = append(casterIDs, id)
 	}
 
-	if len(casterIDs) == 0 {
-		http.Error(w, "No valid caster IDs", http.StatusBadRequest)
-		return
-	}
-
-	// Convert camera ID
-	camID, err := strconv.ParseInt(strings.TrimSpace(req.CameraID), 10, 64)
-	if err != nil || camID == 0 {
-		http.Error(w, "Invalid camera ID", http.StatusBadRequest)
-		return
+	// Casters and camera are optional. An empty value leaves the stored crew
+	// untouched — slots are now claimed/assigned on the Caster Board, so this
+	// endpoint mostly edits the stream URL.
+	var camID int64
+	if camStr := strings.TrimSpace(req.CameraID); camStr != "" {
+		id, err := strconv.ParseInt(camStr, 10, 64)
+		if err != nil || id == 0 {
+			http.Error(w, "Invalid camera ID", http.StatusBadRequest)
+			return
+		}
+		camID = id
 	}
 
 	// 🔍 Load previous casters (for diff)
@@ -7204,13 +7278,18 @@ func HandleSetCast(w http.ResponseWriter, r *http.Request) {
 		}
 
 	} else if dbErr == nil {
-		// UPDATE EXISTING
-		existing.MatchID = req.MatchID
-		existing.Casters = castersJSON
-		existing.CameraID = camID
-		existing.StreamURL = strings.TrimSpace(req.StreamURL) // ⭐ SAVE STREAM URL
+		// UPDATE EXISTING — only touch what was actually provided.
+		updates := map[string]any{
+			"stream_url": strings.TrimSpace(req.StreamURL),
+		}
+		if len(casterIDs) > 0 {
+			updates["casters"] = castersJSON
+		}
+		if camID > 0 {
+			updates["camera_id"] = camID
+		}
 
-		if err := DB.Save(&existing).Error; err != nil {
+		if err := DB.Model(&existing).Updates(updates).Error; err != nil {
 			http.Error(w, "Failed to update cast", http.StatusInternalServerError)
 			return
 		}
@@ -7239,9 +7318,8 @@ func HandleSetCast(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if match.DiscordChannelID != nil &&
-			strings.TrimSpace(*match.DiscordChannelID) != "" {
-
+		// Only announce when someone new actually joined the cast.
+		if len(newCasters) > 0 {
 			channelID := *match.DiscordChannelID
 			botToken := os.Getenv("DISCORD_BOT_TOKEN")
 
@@ -7460,8 +7538,28 @@ func HandleGoLive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var match Match
-	if err := DB.First(&match, req.MatchID).Error; err != nil {
+	if err := DB.Where("league = ?", leagueFromRequest(r)).First(&match, req.MatchID).Error; err != nil {
 		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
+	// --- Safeguards (same spirit as the crew-ready action) ---
+	if match.Archived {
+		http.Error(w, "This match is archived and can no longer be announced.", http.StatusBadRequest)
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(match.Status), "Scheduled") ||
+		match.WinnerID != nil || match.LoserID != nil {
+		http.Error(w, "Only scheduled matches that haven't been played can be announced as live.",
+			http.StatusBadRequest)
+		return
+	}
+	if !match.TeamAScheduleConfirmed || !match.TeamBScheduleConfirmed {
+		http.Error(w, "Both teams must confirm the schedule before going live.", http.StatusForbidden)
+		return
+	}
+	if hasCaster, hasCam := matchCastReady(match.ID); !hasCaster || !hasCam {
+		http.Error(w, "Assign at least one caster and a cam op before going live.", http.StatusBadRequest)
 		return
 	}
 
@@ -7469,14 +7567,14 @@ func HandleGoLive(w http.ResponseWriter, r *http.Request) {
 	DB.First(&teamA, match.TeamAID)
 	DB.First(&teamB, match.TeamBID)
 
-	// Build stream URL from env
-	streamURL := os.Getenv("TWITCH_CHANNEL")
-	if streamURL == "" {
-		var multi CastLogMulti
-		if DB.Where("match_id = ?", req.MatchID).First(&multi).Error == nil && multi.StreamURL != "" {
-			streamURL = multi.StreamURL
-		}
+	// A stream channel must be selected for this match before going live.
+	var castMulti CastLogMulti
+	if err := DB.Where("match_id = ?", match.ID).First(&castMulti).Error; err != nil ||
+		strings.TrimSpace(castMulti.StreamURL) == "" {
+		http.Error(w, "Select a stream channel for this match before going live.", http.StatusBadRequest)
+		return
 	}
+	streamURL := strings.TrimSpace(castMulti.StreamURL)
 
 	msg := ""
 	if streamURL != "" {
@@ -7519,6 +7617,38 @@ func HandleGoLive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, map[string]any{"success": true, "message": "Go-live announcement sent!"})
+}
+
+// matchCastReady reports whether the match has at least one caster and a cam op
+// assigned, checking the caster board and the legacy cast log.
+func matchCastReady(matchID uint) (hasCaster bool, hasCam bool) {
+	var casts []CastAssignment
+	DB.Where("match_id = ?", matchID).Find(&casts)
+	for _, c := range casts {
+		if c.PlayerID == 0 {
+			continue
+		}
+		switch c.Slot {
+		case "caster1", "caster2":
+			hasCaster = true
+		case "camera":
+			hasCam = true
+		}
+	}
+
+	var multi CastLogMulti
+	if err := DB.Where("match_id = ?", matchID).First(&multi).Error; err == nil {
+		var ids []int64
+		_ = json.Unmarshal(multi.Casters, &ids)
+		if len(ids) > 0 {
+			hasCaster = true
+		}
+		if multi.CameraID != 0 {
+			hasCam = true
+		}
+	}
+
+	return hasCaster, hasCam
 }
 
 // POST /api/mod/team/adjust-stats
@@ -10826,6 +10956,9 @@ var settingsKeys = []string{
 	"ROOKIE_NEW_PLAYERS_PER_VETERAN",
 	"ROOKIE_VETERAN_MAX_RATING",
 	"ROOKIE_VETERAN_MAX_GAMES",
+	"ROOKIE_TEAM_CREATION_ENABLED",
+	"ROOKIE_COACH_DRAFT_ENABLED",
+	"ROOKIE_LEAGUE_PUBLIC",
 	"ARENA_MODE_ENABLED",
 	"DISCORD_INVITE_URL",
 	"FRONTEND_URL",
@@ -11234,6 +11367,25 @@ func GetTeamAvailability(w http.ResponseWriter, r *http.Request) {
 	memberIDs := make([]int64, len(members))
 	for i, m := range members {
 		memberIDs[i] = m.PlayerID
+	}
+
+	// Privacy: players who hid their availability are only visible to their own
+	// team and to staff.
+	if hidden := hiddenAvailabilityPlayers(memberIDs); len(hidden) > 0 {
+		if !requesterSeesTeam(r, teamID) {
+			filtered := make([]int64, 0, len(memberIDs))
+			for _, id := range memberIDs {
+				if hidden[id] {
+					continue
+				}
+				filtered = append(filtered, id)
+			}
+			memberIDs = filtered
+			if len(memberIDs) == 0 {
+				respondJSON(w, map[string]any{"dates": []any{}})
+				return
+			}
+		}
 	}
 
 	playerMap := map[int64]string{}

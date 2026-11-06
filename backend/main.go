@@ -162,7 +162,9 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 			updates["username"] = user.Username
 		}
 		if existing.DisplayName != serverDisplay {
-			updates["display_name"] = serverDisplay
+			if !existing.NameLocked {
+				updates["display_name"] = serverDisplay
+			}
 		}
 		if existing.Avatar != user.Avatar {
 			updates["avatar"] = user.Avatar
@@ -194,9 +196,30 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	discordID, _ := strconv.ParseInt(discordIDStr, 10, 64)
 
 	// --- Discord role flags for the ACTIVE identity ---
-	isMod := userHasDiscordRole(discordIDStr, os.Getenv("DISCORD_LEAGUE_MOD_ROLE_ID"))
-	isDev := userHasDiscordRole(discordIDStr, os.Getenv("DISCORD_DEV_ROLE_ID"))
-	isCaster := userHasDiscordRole(discordIDStr, os.Getenv("DISCORD_CASTER_ROLE_ID"))
+	// One cached lookup instead of three REST calls per page load.
+	roles := discordMemberRoles(discordIDStr)
+	hasRole := func(roleID string) bool {
+		if strings.TrimSpace(roleID) == "" {
+			return false
+		}
+		for _, r := range roles {
+			if r == roleID {
+				return true
+			}
+		}
+		return false
+	}
+
+	isMod := hasRole(os.Getenv("DISCORD_LEAGUE_MOD_ROLE_ID"))
+	isDev := hasRole(os.Getenv("DISCORD_DEV_ROLE_ID"))
+	isCaster := hasRole(os.Getenv("DISCORD_CASTER_ROLE_ID"))
+
+	// Leagues this user may open in the UI. A league hidden from the public
+	// (ROOKIE_LEAGUE_PUBLIC=false) is only offered to league mods and devs.
+	visibleLeagues := []string{LeagueMain}
+	if leagueIsPublic(LeagueRookie) || isMod || isDev {
+		visibleLeagues = append(visibleLeagues, LeagueRookie)
+	}
 
 	// --- DEV impersonation ---
 	// While impersonating, the mod/caster flags stay those of the ACTIVE
@@ -234,6 +257,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 			"is_mod":          isMod,
 			"is_dev":          isDev,
 			"is_caster":       isCaster,
+			"visible_leagues": visibleLeagues,
 			"dev_mode":        devMode,
 			"can_impersonate": canImpersonate,
 			"impersonating":   impersonating,
@@ -252,6 +276,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 			"is_mod":          isMod,
 			"is_dev":          isDev,
 			"is_caster":       isCaster,
+			"visible_leagues": visibleLeagues,
 			"dev_mode":        devMode,
 			"can_impersonate": canImpersonate,
 			"impersonating":   impersonating,
@@ -273,6 +298,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		"is_mod":          isMod,
 		"is_dev":          isDev,
 		"is_caster":       isCaster,
+		"visible_leagues": visibleLeagues,
 		"dev_mode":        devMode,
 		"can_impersonate": canImpersonate,
 		"impersonating":   impersonating,
@@ -620,8 +646,13 @@ func syncPlayerAvatars(dg *discordgo.Session) {
 		if displayName == "" && member.User.GlobalName != "" {
 			displayName = member.User.GlobalName
 		}
+		// A player who set their own display name in Player Settings keeps it.
 		if displayName != "" {
-			updates["display_name"] = displayName
+			var row struct{ NameLocked bool }
+			DB.Table("players").Select("name_locked").Where("id = ?", pid).Scan(&row)
+			if !row.NameLocked {
+				updates["display_name"] = displayName
+			}
 		}
 
 		if len(updates) > 0 {
@@ -727,6 +758,20 @@ func main() {
 			frontend := mustGet("FRONTEND_URL", "https://gigglesquad.mooo.com")
 			frontendDev := mustGet("FRONTEND_URL_DEV", "http://localhost:5173")
 			origin := r.Header.Get("Origin")
+
+			// Public read-only feed: allow any origin (no credentials).
+			if strings.HasPrefix(r.URL.Path, "/api/caster/") {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-ECGL-League")
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			if origin == frontend || origin == frontendDev {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Vary", "Origin")
@@ -760,6 +805,7 @@ func main() {
 	// Dev impersonation (DEV_MODE only, guarded inside handlers)
 	r.HandleFunc("/api/dev/impersonate", handleDevImpersonate).Methods("POST")
 	r.HandleFunc("/api/dev/stop-impersonating", handleDevStopImpersonating).Methods("POST")
+	r.HandleFunc("/api/dev/test-match", HandleDevCreateTestMatch).Methods("POST")
 	r.HandleFunc("/api/matches/generate", HandleGenerateWeeklyMatches).Methods("POST")
 	r.HandleFunc("/api/match/confirm-schedule", HandleConfirmSchedule).Methods("POST")
 	r.HandleFunc("/api/match/confirm-score", HandleConfirmScore).Methods("POST")
@@ -902,11 +948,26 @@ func main() {
 	api.HandleFunc("/draft/status", HandleGetDraftStatus).Methods("GET")
 	api.HandleFunc("/draft/signup", HandleDraftSignup).Methods("POST")
 	api.HandleFunc("/draft/withdraw", HandleDraftWithdraw).Methods("POST")
+
+	// Caster production board (caster role enforced in the handlers)
+	api.HandleFunc("/casters/matches", HandleGetCasterMatches).Methods("GET")
+	api.HandleFunc("/casters/assign", HandleAssignCastSlot).Methods("POST")
+	api.HandleFunc("/casters/release", HandleReleaseCastSlot).Methods("POST")
+	api.HandleFunc("/casters/crew-ready", HandleCasterCrewReady).Methods("POST")
+	api.HandleFunc("/casters/stream", HandleSetCastStream).Methods("POST")
+	api.HandleFunc("/casters/match-type", HandleSetCastMatchType).Methods("POST")
+
+	// External caster feed — public, no auth
+	r.HandleFunc("/api/caster/matches", HandleCasterBotMatches).Methods("GET")
 	api.HandleFunc("/players", GetPlayers).Methods("GET")
 	api.HandleFunc("/me", handleMe).Methods("GET")
 	api.HandleFunc("/player/{id:[0-9]+}", GetPlayerDetail).Methods("GET")
 	api.HandleFunc("/player/availability", GetPlayerAvailability).Methods("GET")
 	api.HandleFunc("/player/availability", SavePlayerAvailability).Methods("POST")
+	api.HandleFunc("/player/settings", GetPlayerSettings).Methods("GET")
+	api.HandleFunc("/player/settings", SavePlayerSettings).Methods("POST")
+	api.HandleFunc("/player/overlay-token", RotateOverlayToken).Methods("POST")
+	api.HandleFunc("/player/export", ExportPlayerData).Methods("GET")
 
 	// Leaderboards
 	api.HandleFunc("/leaderboard/players", GetPlayerLeaderboard).Methods("GET")

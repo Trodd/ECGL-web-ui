@@ -67,7 +67,17 @@ export function initLeague() {
     }
   } else {
     try {
-      current = normalize(localStorage.getItem(STORAGE_KEY) || "main");
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        current = normalize(stored);
+      } else {
+        // First visit — honour the player's Player Settings default league.
+        let pref = "main";
+        try {
+          pref = JSON.parse(localStorage.getItem("ecgl_prefs") || "{}")?.default_league || "main";
+        } catch { /* ignore */ }
+        current = normalize(pref);
+      }
     } catch {
       current = "main";
     }

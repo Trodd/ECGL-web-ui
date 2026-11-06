@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import { getApiUrl } from "../config";
-import { LEAGUES, getLeague, setLeague, leagueLabel } from "../league";
+import { LEAGUES, getLeague, setLeague, leagueLabel, leagueLink } from "../league";
 import { E } from "../components/CustomEmoji";
 
 // Helper: parse "start:end, start:end" into [{start, end}, ...]
@@ -169,6 +169,29 @@ const ROOKIE_SETTING_GROUPS = [
             { key: "ROOKIE_MAX_TEAM_PLAYERS", label: "Rookie Max Team Players", type: "number", hint: "Maximum roster size for a rookie team (falls back to the global value when blank)." },
         ],
     },
+    {
+        label: "Rookie Draft & Team Creation",
+        keys: [
+            {
+                key: "ROOKIE_TEAM_CREATION_ENABLED",
+                label: "Allow Players to Create Teams",
+                type: "toggle",
+                hint: "On: players can form their own rookie teams. Off: team creation is closed and players can only sign up for the draft, where a mod places them on a team.",
+            },
+            {
+                key: "ROOKIE_COACH_DRAFT_ENABLED",
+                label: "Allow Coach Draft Signups",
+                type: "toggle",
+                hint: "On: the Register tab also offers a separate sign-up to coach a rookie team. Coaches are placed on a team with the Coach role.",
+            },
+            {
+                key: "ROOKIE_LEAGUE_PUBLIC",
+                label: "Rookie League Publicly Visible",
+                type: "toggle",
+                hint: "Off: the Rookie League is hidden from everyone except League Mods and Devs — it won't appear in the league switcher and its API data falls back to Varsity.",
+            },
+        ],
+    },
 ];
 
 export default function LeagueSettings() {
@@ -178,6 +201,20 @@ export default function LeagueSettings() {
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState(null);
     const [clearingLogs, setClearingLogs] = useState(false);
+    // 🧪 Dev test-match tool
+    const [devTeams, setDevTeams] = useState([]);
+    const [devBusy, setDevBusy] = useState(false);
+    const [devMsg, setDevMsg] = useState(null);
+    const [devForm, setDevForm] = useState({
+        team_a_id: "",
+        team_b_id: "",
+        made_up: false,
+        team_a_name: "Test Team A",
+        team_b_name: "Test Team B",
+        scheduled_date: "",
+        week: "",
+        confirm: true,
+    });
     // Which league's settings this page is showing (Varsity / Rookie).
     const [viewLeague, setViewLeague] = useState(getLeague());
 
@@ -189,6 +226,14 @@ export default function LeagueSettings() {
         window.addEventListener("ecgl-league-changed", onLeague);
         return () => window.removeEventListener("ecgl-league-changed", onLeague);
     }, []);
+
+    // Teams for the dev test-match picker.
+    useEffect(() => {
+        axios
+            .get(`${getApiUrl()}/api/teams`, { withCredentials: true })
+            .then((res) => setDevTeams(Array.isArray(res.data) ? res.data : []))
+            .catch(() => setDevTeams([]));
+    }, [viewLeague]);
 
     useEffect(() => {
         axios
@@ -271,6 +316,64 @@ export default function LeagueSettings() {
             setMessage({ type: "danger", text: "Failed to clear audit logs." });
         } finally {
             setClearingLogs(false);
+        }
+    };
+
+    // 🧪 Create a throwaway match for testing.
+    const handleCreateTestMatch = async () => {
+        if (devForm.made_up) {
+            if (!devForm.team_a_name.trim() || !devForm.team_b_name.trim()) {
+                setDevMsg({ type: "danger", text: "Give both made-up teams a name." });
+                return;
+            }
+            if (devForm.team_a_name.trim().toLowerCase() === devForm.team_b_name.trim().toLowerCase()) {
+                setDevMsg({ type: "danger", text: "Made-up team names must differ." });
+                return;
+            }
+        } else {
+            if (!devForm.team_a_id || !devForm.team_b_id) {
+                setDevMsg({ type: "danger", text: "Pick two teams first." });
+                return;
+            }
+            if (devForm.team_a_id === devForm.team_b_id) {
+                setDevMsg({ type: "danger", text: "Pick two different teams." });
+                return;
+            }
+        }
+
+        setDevBusy(true);
+        setDevMsg(null);
+        try {
+            const payload = {
+                league: viewLeague,
+                scheduled_date: devForm.scheduled_date || "",
+                week: Number(devForm.week) || 0,
+                confirm: !!devForm.confirm,
+            };
+            if (devForm.made_up) {
+                payload.team_a_name = devForm.team_a_name.trim();
+                payload.team_b_name = devForm.team_b_name.trim();
+            } else {
+                payload.team_a_id = Number(devForm.team_a_id);
+                payload.team_b_id = Number(devForm.team_b_id);
+            }
+
+            const res = await axios.post(`${getApiUrl()}/api/dev/test-match`, payload, {
+                withCredentials: true,
+            });
+            setDevMsg({
+                type: "success",
+                text: res.data?.message || "Test match created.",
+                matchId: res.data?.match_id,
+            });
+            setDevForm({ ...devForm, team_a_id: "", team_b_id: "" });
+        } catch (err) {
+            setDevMsg({
+                type: "danger",
+                text: err.response?.data || "Failed to create test match",
+            });
+        } finally {
+            setDevBusy(false);
         }
     };
 
@@ -458,6 +561,165 @@ export default function LeagueSettings() {
                 >
                     Reset Changes
                 </button>
+            </div>
+
+            <div className="card mb-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
+                <div className="card-header" style={{ background: "var(--bg-elevated)", borderBottom: "1px solid var(--border-default)" }}>
+                    <h5 className="mb-0" style={{ color: "var(--text-primary)" }}>🧪 Dev — Create Test Match</h5>
+                </div>
+                <div className="card-body">
+                    <p className="text-secondary small">
+                        Creates a throwaway match in {leagueLabel(viewLeague)} coded{" "}
+                        <code>&lt;season&gt;-Week&lt;n&gt;-T###</code> so you can test casting, scoring
+                        and match pages. Delete it afterwards with Matches → Delete.
+                    </p>
+
+                    {devMsg && (
+                        <div className={`alert alert-${devMsg.type} py-2 small`} role="alert">
+                            {devMsg.text}
+                            {devMsg.matchId ? (
+                                <>
+                                    {" "}
+                                    <a href={leagueLink(`/match/${devMsg.matchId}`)} className="alert-link">
+                                        Open match →
+                                    </a>
+                                </>
+                            ) : null}
+                        </div>
+                    )}
+
+                    <div className="row g-2 align-items-end">
+                        <div className="col-12">
+                            <div className="form-check">
+                                <input
+                                    className="form-check-input"
+                                    type="checkbox"
+                                    id="devMadeUp"
+                                    checked={devForm.made_up}
+                                    onChange={(e) =>
+                                        setDevForm({ ...devForm, made_up: e.target.checked })
+                                    }
+                                />
+                                <label className="form-check-label small text-secondary" htmlFor="devMadeUp">
+                                    Use made-up teams (creates hidden <code>Test</code> teams — no real
+                                    players or teams are touched)
+                                </label>
+                            </div>
+                        </div>
+
+                        {devForm.made_up ? (
+                            <>
+                                <div className="col-12 col-md-4">
+                                    <label className="form-label small text-secondary mb-0">Team A name</label>
+                                    <input
+                                        className="form-control form-control-sm bg-dark text-light"
+                                        placeholder="Test Team A"
+                                        value={devForm.team_a_name}
+                                        onChange={(e) =>
+                                            setDevForm({ ...devForm, team_a_name: e.target.value })
+                                        }
+                                    />
+                                </div>
+                                <div className="col-12 col-md-4">
+                                    <label className="form-label small text-secondary mb-0">Team B name</label>
+                                    <input
+                                        className="form-control form-control-sm bg-dark text-light"
+                                        placeholder="Test Team B"
+                                        value={devForm.team_b_name}
+                                        onChange={(e) =>
+                                            setDevForm({ ...devForm, team_b_name: e.target.value })
+                                        }
+                                    />
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="col-12 col-md-4">
+                                    <label className="form-label small text-secondary mb-0">Team A</label>
+                                    <select
+                                        className="form-select form-select-sm bg-dark text-light"
+                                        value={devForm.team_a_id}
+                                        onChange={(e) =>
+                                            setDevForm({ ...devForm, team_a_id: e.target.value })
+                                        }
+                                    >
+                                        <option value="">Select team…</option>
+                                        {devTeams.map((t) => (
+                                            <option key={t.id} value={t.id}>
+                                                {t.name} (#{t.id})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="col-12 col-md-4">
+                                    <label className="form-label small text-secondary mb-0">Team B</label>
+                                    <select
+                                        className="form-select form-select-sm bg-dark text-light"
+                                        value={devForm.team_b_id}
+                                        onChange={(e) =>
+                                            setDevForm({ ...devForm, team_b_id: e.target.value })
+                                        }
+                                    >
+                                        <option value="">Select team…</option>
+                                        {devTeams.map((t) => (
+                                            <option key={t.id} value={t.id}>
+                                                {t.name} (#{t.id})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </>
+                        )}
+
+                        <div className="col-12 col-md-4">
+                            <label className="form-label small text-secondary mb-0">Scheduled (optional)</label>
+                            <input
+                                type="datetime-local"
+                                className="form-control form-control-sm bg-dark text-light"
+                                value={devForm.scheduled_date}
+                                onChange={(e) => setDevForm({ ...devForm, scheduled_date: e.target.value })}
+                            />
+                        </div>
+
+                        <div className="col-12 col-md-3">
+                            <label className="form-label small text-secondary mb-0">Week (optional)</label>
+                            <input
+                                type="number"
+                                min="1"
+                                className="form-control form-control-sm bg-dark text-light"
+                                placeholder="current week"
+                                value={devForm.week}
+                                onChange={(e) => setDevForm({ ...devForm, week: e.target.value })}
+                            />
+                        </div>
+
+                        <div className="col-12 col-md-5">
+                            <div className="form-check">
+                                <input
+                                    className="form-check-input"
+                                    type="checkbox"
+                                    id="devConfirm"
+                                    checked={devForm.confirm}
+                                    onChange={(e) => setDevForm({ ...devForm, confirm: e.target.checked })}
+                                />
+                                <label className="form-check-label small text-secondary" htmlFor="devConfirm">
+                                    Mark both teams as schedule-confirmed (shows up on the caster board)
+                                </label>
+                            </div>
+                        </div>
+
+                        <div className="col-12 col-md-4">
+                            <button
+                                className="btn btn-warning btn-sm w-100"
+                                onClick={handleCreateTestMatch}
+                                disabled={devBusy}
+                            >
+                                {devBusy ? "Creating…" : "Create test match"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div className="card mb-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>

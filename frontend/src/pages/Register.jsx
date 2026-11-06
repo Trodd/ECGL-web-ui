@@ -146,13 +146,13 @@ export default function Register() {
     }
   }
 
-  async function handleDraftSignup() {
+  async function handleDraftSignup(kind = "player") {
     if (draftBusy) return;
     setDraftBusy(true);
     try {
       await axios.post(
         `${urlBase}/api/draft/signup`,
-        { note: draftNote },
+        { note: draftNote, kind },
         { withCredentials: true }
       );
       setDraftNote("");
@@ -405,6 +405,12 @@ export default function Register() {
               <div className="col-12 col-md-6">
                 <div className="card bg-dark border-secondary p-4 h-100">
                   <h5><E n="team" /> Join a Team <span className="badge bg-secondary ms-2">{leagueLabel()}</span></h5>
+                  {draft?.team_creation_enabled === false ? (
+                    <p className="text-warning small mb-0">
+                      🔒 Joining teams is closed in this league. Sign up for the draft below and a
+                      mod will place you on a team.
+                    </p>
+                  ) : (
                   <div className="position-relative">
                     <input
                       ref={teamInputRef}
@@ -449,13 +455,19 @@ export default function Register() {
                       </ul>
                     )}
                   </div>
+                  )}
                 </div>
               </div>
 
               <div className="col-12 col-md-6">
                 <div className="card bg-dark border-secondary p-4 h-100">
                   <h5><E n="plus" /> Create a Team <span className="badge bg-secondary ms-2">{leagueLabel()}</span></h5>
-                  {tournamentStarted ? (
+                  {draft?.team_creation_enabled === false ? (
+                    <p className="text-warning small mb-0">
+                      🔒 Team creation is closed in this league. Sign up for the draft below and a
+                      mod will place you on a team.
+                    </p>
+                  ) : tournamentStarted ? (
                     <p className="text-warning small mb-0">
                       🔒 The tournament has started, so new teams can no longer be created.
                       Ask a mod if you need to be added to a team.
@@ -489,7 +501,8 @@ export default function Register() {
               {draft?.signed_up ? (
                 <>
                   <div className="alert ecgl-alert-success small mb-2">
-                    ✅ You're in the draft. A mod will place you on a rookie team —
+                    ✅ You're in the draft{draft?.kind === "coach" ? " as a coach" : ""}. A mod will
+                    place you on {draft?.kind === "coach" ? "a team to coach" : "a rookie team"} —
                     it may be a brand new team built from other draft players.
                   </div>
                   {draft?.signup?.note ? (
@@ -520,13 +533,25 @@ export default function Register() {
                     value={draftNote}
                     onChange={(e) => setDraftNote(e.target.value)}
                   />
-                  <button
-                    className="btn btn-info w-auto"
-                    onClick={handleDraftSignup}
-                    disabled={draftBusy}
-                  >
-                    {draftBusy ? "Joining…" : "Enter the draft"}
-                  </button>
+                  <div className="d-flex flex-wrap gap-2">
+                    <button
+                      className="btn btn-info w-auto"
+                      onClick={() => handleDraftSignup("player")}
+                      disabled={draftBusy}
+                    >
+                      {draftBusy ? "Joining…" : "Enter the draft"}
+                    </button>
+                    {draft?.coach_draft_enabled && (
+                      <button
+                        className="btn btn-outline-info w-auto"
+                        onClick={() => handleDraftSignup("coach")}
+                        disabled={draftBusy}
+                        title="Sign up to coach a rookie team instead of playing on one"
+                      >
+                        {draftBusy ? "Joining…" : "🧑‍🏫 Sign up as coach"}
+                      </button>
+                    )}
+                  </div>
                 </>
               )}
 

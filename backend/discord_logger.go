@@ -518,7 +518,10 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 		}
 	}
 
-	if len(casterIDs) > 0 {
+	// Casters already claimed on the caster board (slot claims) get access too.
+	boardCasterIDs := castCrewPlayerIDs(m.ID)
+
+	if len(casterIDs) > 0 || len(boardCasterIDs) > 0 {
 		casterRoleID := os.Getenv("DISCORD_CASTER_ROLE_ID")
 		if casterRoleID != "" {
 			overwrites = append(overwrites, &discordgo.PermissionOverwrite{
@@ -578,6 +581,15 @@ func createMatchChannel(s *discordgo.Session, m *Match) {
 			for _, cid := range casterIDs {
 				add(cid, false) // ← no mention
 			}
+
+			if cast.CameraID != 0 {
+				add(cast.CameraID, false)
+			}
+		}
+
+		// Caster-board slots (caster1 / caster2 / camera / sideline)
+		for _, cid := range boardCasterIDs {
+			add(cid, false)
 		}
 	}
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { Fragment, useState, useEffect } from "react";
 import axios from "axios";
 import PlayerIdentity from "./PlayerIdentity";
 import { leagueLink } from "../league";
@@ -12,9 +12,6 @@ import { leagueLink } from "../league";
  */
 export default function RookieDraftPanel({ urlBase }) {
     const [rows, setRows] = useState([]);
-    const [teams, setTeams] = useState([]);
-    const [pick, setPick] = useState({});     // signup_id -> team_id
-    const [force, setForce] = useState({});   // signup_id -> bypass rookie ratio rule
     const [selected, setSelected] = useState({}); // signup_id -> selected for a new team
     const [groupName, setGroupName] = useState("");
     const [captain, setCaptain] = useState("");
@@ -50,15 +47,6 @@ export default function RookieDraftPanel({ urlBase }) {
         }
 
         try {
-            const teamRes = await axios.get(`${urlBase}/api/teams`, {
-                withCredentials: true,
-            });
-            setTeams(Array.isArray(teamRes.data) ? teamRes.data : []);
-        } catch {
-            setTeams([]);
-        }
-
-        try {
             const rosterRes = await axios.get(`${urlBase}/api/mod/draft/teams`, {
                 withCredentials: true,
             });
@@ -82,7 +70,7 @@ export default function RookieDraftPanel({ urlBase }) {
         try {
             await axios.post(
                 `${urlBase}/api/mod/draft/assign`,
-                { signup_id: row.id, team_id: teamID, override: !!force[row.id] },
+                { signup_id: row.id, team_id: teamID, override: groupForce },
                 { withCredentials: true }
             );
             const teamName = rosters.find((t) => t.id === teamID)?.name || "a team";
@@ -133,15 +121,6 @@ export default function RookieDraftPanel({ urlBase }) {
         }
     }
 
-    async function handleAssign(row) {
-        const teamID = Number(pick[row.id] || 0);
-        if (!teamID) {
-            setMsg("⚠️ Pick a team first.");
-            return;
-        }
-        await assignToTeam(row, teamID);
-    }
-
     async function handleCreateGroup() {
         const ids = rows.filter((r) => selected[r.id]).map((r) => r.id);
         if (ids.length === 0) {
@@ -190,15 +169,23 @@ export default function RookieDraftPanel({ urlBase }) {
         }
     }
 
-    async function handleAutoAssign() {
-        if (rows.length === 0) {
-            setMsg("⚠️ There are no pending signups to assign.");
+    async function handleAutoAssign(kind = "player") {
+        const isCoachRun = kind === "coach";
+        const pool = isCoachRun
+            ? rows.filter((r) => r.kind === "coach")
+            : rows.filter((r) => r.kind !== "coach");
+
+        if (pool.length === 0) {
+            setMsg(`⚠️ There are no pending ${isCoachRun ? "coach " : ""}signups to assign.`);
             return;
         }
+
         const ok = confirm(
-            `Auto-assign ${rows.length} pending player(s)?\n\n` +
-            "Existing teams get topped up first, then new teams are created. " +
-            "The veteran ratio, team size limits and Force setting are respected."
+            isCoachRun
+                ? `Auto-assign ${pool.length} coach(es) to the teams that don't have one yet?`
+                : `Auto-assign ${pool.length} pending player(s)?\n\n` +
+                  "Existing teams get topped up first, then new teams are created. " +
+                  "The veteran ratio, team size limits and Force setting are respected."
         );
         if (!ok) return;
 
@@ -206,7 +193,7 @@ export default function RookieDraftPanel({ urlBase }) {
         try {
             const res = await axios.post(
                 `${urlBase}/api/mod/draft/auto-assign`,
-                { override: groupForce },
+                { override: groupForce, kind: isCoachRun ? "coach" : "player" },
                 { withCredentials: true }
             );
             setMsg("✅ " + (res.data?.message || "Auto-assign complete."));
@@ -219,18 +206,50 @@ export default function RookieDraftPanel({ urlBase }) {
         }
     }
 
+    const isCoach = (row) => row.kind === "coach";
+    const coachRows = rows.filter(isCoach);
+    const playerRows = rows.filter((row) => !isCoach(row));
+    const draftOrdered = [...playerRows, ...coachRows];
+
     return (
-        <div>
-            <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-                <h6 className="mb-0">📝 Rookie Draft Signups</h6>
-                <div className="d-flex gap-2">
-                    <button
-                        className="btn btn-warning btn-sm"
-                        onClick={handleAutoAssign}
-                        disabled={busyId !== 0 || rows.length === 0}
-                        title="Fill existing teams, then create new teams using the veteran rules"
+        <div className="rdp">
+            <div
+                className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 p-2 px-3 rounded"
+                style={{ background: "#141414", border: "1px solid #7a3f10" }}
+            >
+                <div className="d-flex align-items-center gap-2 flex-wrap">
+                    <span className="fw-bold text-light">📝 Rookie Draft Signups</span>
+                    <span
+                        className="badge"
+                        style={{ background: "#242424", color: "#e6e6e6", border: "1px solid #3d3d3d" }}
                     >
-                        {busyId === -1 ? "Working…" : "⚡ Auto-assign all"}
+                        {playerRows.length} player{playerRows.length === 1 ? "" : "s"}
+                    </span>
+                    {coachRows.length > 0 && (
+                        <span
+                            className="badge"
+                            style={{ background: "#0b3540", color: "#67e8f9", border: "1px solid #0dcaf0" }}
+                        >
+                            🧑‍🏫 {coachRows.length} coach{coachRows.length === 1 ? "" : "es"}
+                        </span>
+                    )}
+                </div>
+                <div className="d-flex gap-2 flex-wrap">
+                    <button
+                        className="btn btn-warning btn-sm fw-semibold"
+                        onClick={() => handleAutoAssign("player")}
+                        disabled={busyId !== 0 || playerRows.length === 0}
+                        title="Fill existing teams with players, then create new teams using the veteran rules"
+                    >
+                        {busyId === -1 ? "Working…" : "⚡ Auto-assign players"}
+                    </button>
+                    <button
+                        className="btn btn-info btn-sm fw-semibold"
+                        onClick={() => handleAutoAssign("coach")}
+                        disabled={busyId !== 0 || coachRows.length === 0}
+                        title="Give each coach signup a team that doesn't have a coach yet"
+                    >
+                        {busyId === -1 ? "Working…" : "🧑‍🏫 Auto-assign coaches"}
                     </button>
                     <button
                         className="btn btn-outline-light btn-sm"
@@ -242,14 +261,21 @@ export default function RookieDraftPanel({ urlBase }) {
                 </div>
             </div>
 
-            <p className="text-secondary small">
+            <div className="rdp-note text-secondary small mb-3">
                 Players below registered but don't have a Rookie League team. Assign them to an
                 existing team, or select several and group them into a new one. A captain is
                 optional — you can promote one later from Team Tools.
                 <br />
                 <span className="text-info">💡 On desktop you can drag a player card onto a team
                     on the right to assign them instantly.</span>
-            </p>
+                {coachRows.length > 0 && (
+                    <>
+                        <br />
+                        <span className="text-info">🧑‍🏫 Coach signups are listed below the players —
+                            place each one on the team they'll coach.</span>
+                    </>
+                )}
+            </div>
 
             {msg && (
                 <div
@@ -269,7 +295,6 @@ export default function RookieDraftPanel({ urlBase }) {
             {!loading && rows.length === 0 && (
                 <p className="text-secondary small">No pending draft signups.</p>
             )}
-
             <div className="row g-3">
                 <div
                     className="col-12 col-lg-7"
@@ -371,10 +396,15 @@ export default function RookieDraftPanel({ urlBase }) {
             )}
 
             <div className="d-flex flex-column gap-3">
-                {rows.map((row) => (
+                {draftOrdered.map((row, rowIdx) => (
+                    <Fragment key={row.id}>
+                    {isCoach(row) && !isCoach(draftOrdered[rowIdx - 1] || {}) && (
+                        <div className="rdp-coach-row">
+                            🧑‍🏫 Coach signups ({coachRows.length}) — assign to the team they'll coach
+                        </div>
+                    )}
                     <div
-                        key={row.id}
-                        className="p-3 rounded"
+                        className={`p-3 rounded rdp-card${isCoach(row) ? " rdp-card--coach" : ""}`}
                         draggable={busyId === 0}
                         onDragStart={(e) => {
                             e.dataTransfer.setData("text/plain", String(row.id));
@@ -386,8 +416,6 @@ export default function RookieDraftPanel({ urlBase }) {
                             setDragOverTeam(0);
                         }}
                         style={{
-                            backgroundColor: "#1a1a1a",
-                            border: "1px solid #333",
                             cursor: "grab",
                             opacity: draggingId === row.id ? 0.5 : 1,
                         }}
@@ -403,6 +431,9 @@ export default function RookieDraftPanel({ urlBase }) {
                                 linkTo={leagueLink(`/players/${row.player_id_str}`)}
                             />
                             <span className="badge bg-secondary">{row.role || "Player"}</span>
+                            {row.kind === "coach" && (
+                                <span className="badge bg-info text-dark">🧑‍🏫 Coach</span>
+                            )}
                             <span className="badge bg-dark border border-secondary">
                                 {row.device || "device n/a"}
                             </span>
@@ -425,7 +456,7 @@ export default function RookieDraftPanel({ urlBase }) {
                             <p className="text-secondary small mb-2">“{row.note}”</p>
                         )}
 
-                        <div className="d-flex flex-column flex-md-row gap-2 align-items-md-center">
+                        <div className="d-flex flex-wrap gap-2 align-items-center">
                             <label className="text-secondary small d-flex align-items-center gap-1 me-2">
                                 <input
                                     type="checkbox"
@@ -437,44 +468,12 @@ export default function RookieDraftPanel({ urlBase }) {
                                 />
                                 Select
                             </label>
-                            <select
-                                className="form-select bg-dark text-light"
-                                style={{ maxWidth: 240 }}
-                                value={pick[row.id] || ""}
-                                onChange={(e) =>
-                                    setPick((p) => ({ ...p, [row.id]: e.target.value }))
-                                }
-                            >
-                                <option value="">Assign to team…</option>
-                                {teams.map((t) => (
-                                    <option key={t.id} value={t.id}>
-                                        {t.name} (#{t.id})
-                                    </option>
-                                ))}
-                            </select>
-                            <button
-                                className="btn btn-success btn-sm"
-                                onClick={() => handleAssign(row)}
-                                disabled={busyId === row.id}
-                            >
-                                {busyId === row.id ? "Working…" : "Assign"}
-                            </button>
-                            <label
-                                className="text-secondary small d-flex align-items-center gap-1"
-                                title="Bypass the rookie veteran ratio rule for this assignment"
-                            >
-                                <input
-                                    type="checkbox"
-                                    className="form-check-input mt-0"
-                                    checked={!!force[row.id]}
-                                    onChange={(e) =>
-                                        setForce((p) => ({ ...p, [row.id]: e.target.checked }))
-                                    }
-                                />
-                                Force
-                            </label>
+                            {busyId === row.id && (
+                                <span className="text-info small">Working…</span>
+                            )}
                         </div>
                     </div>
+                    </Fragment>
                 ))}
             </div>
                 </div>
@@ -625,6 +624,45 @@ export default function RookieDraftPanel({ urlBase }) {
                     </div>
                 </div>
             </div>
+
+            <style>{`
+            .rdp .rdp-card {
+                background: #161616;
+                border: 1px solid #343434;
+                border-radius: 10px;
+                transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+            }
+            .rdp .rdp-card:hover {
+                border-color: #ff8c42;
+                box-shadow: 0 4px 16px rgba(255,140,66,0.16);
+            }
+            .rdp .rdp-card--coach {
+                background: #10262b;
+                border-color: #0dcaf0;
+            }
+            .rdp .rdp-card--coach:hover {
+                box-shadow: 0 4px 16px rgba(13,202,240,0.18);
+            }
+            .rdp .rdp-note {
+                background: #131313;
+                border: 1px dashed #3a3a3a;
+                border-radius: 8px;
+                padding: 8px 10px;
+            }
+            .rdp .rdp-coach-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin: 6px 0 0;
+                padding-top: 10px;
+                border-top: 1px solid #2f3a3d;
+                color: #67e8f9;
+                font-size: 0.78rem;
+                font-weight: 700;
+                letter-spacing: 0.3px;
+                text-transform: uppercase;
+            }
+            `}</style>
         </div>
     );
 }
