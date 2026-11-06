@@ -261,6 +261,9 @@ func HandleSetRookieVeteranFlag(w http.ResponseWriter, r *http.Request) {
 		Where("player_id = ? AND league = ? AND status = ?", pid, lg, draftPending).
 		Update("kind", kind)
 
+	// Rookie League Discord role (player ⇄ coach).
+	go syncDiscordRolesForPlayer(pid)
+
 	action := "unmarked as veteran"
 	if *req.Veteran {
 		action = "marked as veteran"
@@ -346,6 +349,9 @@ func HandleSetRookiePlayOverride(w http.ResponseWriter, r *http.Request) {
 
 	// Any team they are already on needs to move between Coach and Member.
 	applyPlayOverrideToRoster(pid, lg, *req.Allow)
+
+	// Rookie League Discord role (coach → player).
+	go syncDiscordRolesForPlayer(pid)
 
 	// Keep their pending draft signup in the matching pool.
 	if *req.Allow {

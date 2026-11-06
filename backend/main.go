@@ -437,6 +437,10 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	registerLeague := leagueFromRequest(r)
 	_ = setPlayerRoleInLeague(discordID, registerLeague, player.Role)
 
+	// Re-sync Discord roles so the Rookie League player/sub role follows the
+	// league they just registered for.
+	go syncDiscordRolesForPlayer(discordID)
+
 	// A coach whose registration role changed loses their coaching slot.
 	if !alreadyRegistered && existing.ID != 0 {
 		enforceCoachRoleChange(discordID, existing.Role, player.Role)

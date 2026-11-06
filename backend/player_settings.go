@@ -269,6 +269,9 @@ func SavePlayerSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		// A coach who changes role loses their coaching slot (rookie league).
 		enforceCoachRoleChange(playerID, oldRole, role)
+
+		// Keep the Rookie League Discord roles (player / sub / coach) in step.
+		go syncDiscordRolesForPlayer(playerID)
 	}
 	if req.Device != nil {
 		device := trim(req.Device, 60)

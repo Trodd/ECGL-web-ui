@@ -547,6 +547,10 @@ var (
 	discordMemberRefreshMu sync.Mutex
 	discordMembersLastSync time.Time
 	discordMembersCount    int
+	// Set when Discord denies the member list (403). That endpoint needs the
+	// privileged GUILD_MEMBERS intent, which we can't get, so there's no point
+	// retrying — we fall back to per-user lookups instead.
+	discordPrefetchDisabled bool
 )
 
 // prefetchGuildMemberRoles pages through the guild member list and refreshes the
@@ -559,6 +563,10 @@ func prefetchGuildMemberRoles() {
 
 	discordMemberRefreshMu.Lock()
 	defer discordMemberRefreshMu.Unlock()
+
+	if discordPrefetchDisabled {
+		return
+	}
 
 	type member struct {
 		User struct {
@@ -578,6 +586,12 @@ func prefetchGuildMemberRoles() {
 		body, status, err := discordRESTGet(url)
 		if err != nil {
 			log.Printf("⚠️ Guild member prefetch failed: %v", err)
+			return
+		}
+		if status == http.StatusForbidden {
+			// Listing guild members requires the privileged GUILD_MEMBERS intent.
+			discordPrefetchDisabled = true
+			log.Println("👥 Member list denied (needs the Server Members intent) — using per-user role lookups with a cache")
 			return
 		}
 		if status != http.StatusOK {
@@ -616,19 +630,24 @@ func prefetchGuildMemberRoles() {
 // StartDiscordRoleRefresher keeps the guild role cache warm in the background.
 func StartDiscordRoleRefresher() {
 	every := discordMembersRefreshEvery()
-	log.Printf("👥 Discord role cache refresh every %s", every)
 
 	// First pass shortly after boot so the UI is warm quickly.
 	go func() {
 		time.Sleep(2 * time.Second)
 		prefetchGuildMemberRoles()
-		log.Printf("👥 Discord role cache primed for %d member(s)", discordMembersCount)
+		if discordPrefetchDisabled {
+			return
+		}
+		log.Printf("👥 Discord role cache primed for %d member(s), refresh every %s", discordMembersCount, every)
 	}()
 
 	go func() {
 		ticker := time.NewTicker(every)
 		defer ticker.Stop()
 		for range ticker.C {
+			if discordPrefetchDisabled {
+				return
+			}
 			prefetchGuildMemberRoles()
 		}
 	}()
@@ -7325,109 +7344,28 @@ func HandleModSyncRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rolePlayer := os.Getenv("DISCORD_PLAYER_ROLE_ID")
-	roleSub := os.Getenv("DISCORD_LEAGUE_SUB_ROLE_ID")
-	roleCaptain := os.Getenv("DISCORD_CAPTAIN_ROLE_ID")
-	roleCoCaptain := os.Getenv("DISCORD_CO_CAPTAIN_ROLE_ID")
-
-	guildID := os.Getenv("DISCORD_GUILD_ID")
-	botToken := os.Getenv("DISCORD_BOT_TOKEN")
-
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	botToken := getEnv("DISCORD_BOT_TOKEN", "")
 	if guildID == "" || botToken == "" {
 		http.Error(w, "Missing Discord bot env vars", http.StatusInternalServerError)
 		return
 	}
 
-	// Load players
-	var players []Player
-	DB.Find(&players)
+	// Recalculate every player's roles from scratch using the shared rules, which
+	// now include the Rookie League coach / player / sub roles.
+	var ids []int64
+	DB.Table("players").Pluck("id", &ids)
 
-	// Load team roles
-	var members []TeamMember
-	DB.Find(&members)
-
-	teamRole := map[int64]string{}
-	for _, m := range members {
-		teamRole[m.PlayerID] = m.Role
-	}
-
-	for _, p := range players {
-		pid := strconv.FormatInt(p.ID, 10)
-
-		// Queue worker: fetch member → compute → update
+	for _, id := range ids {
+		pid := id
 		queueRoleJob(func() {
-			// 1. Fetch existing roles
-			url := "https://discord.com/api/v10/guilds/" + guildID + "/members/" + pid
-			req, _ := http.NewRequest("GET", url, nil)
-			req.Header.Set("Authorization", "Bot "+botToken)
-
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				log.Println("❌ Failed fetching Discord member:", err)
-				return
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode == 404 {
-				log.Println("⚠️ Member", pid, "not in guild — skipping")
-				return
-			}
-
-			var member struct {
-				Roles []string `json:"roles"`
-			}
-			json.NewDecoder(resp.Body).Decode(&member)
-
-			have := map[string]bool{}
-			for _, r := range member.Roles {
-				have[r] = true
-			}
-
-			// 2. Determine which roles they SHOULD have
-			need := map[string]bool{}
-
-			if p.Role == "Player" {
-				need[rolePlayer] = true
-			}
-			if p.Role == "League Sub" {
-				need[roleSub] = true
-			}
-
-			switch teamRole[p.ID] {
-			case "Captain":
-				need[roleCaptain] = true
-			case "Co-Captain":
-				need[roleCoCaptain] = true
-			}
-
-			// 3. Compute roles to add/remove
-			for role := range need {
-				if !have[role] {
-					r := role
-					queueRoleJob(func() {
-						DiscordAddRole(pid, r)
-					})
-				}
-			}
-
-			for role := range have {
-				if role == rolePlayer || role == roleSub || role == roleCaptain || role == roleCoCaptain {
-					if !need[role] {
-						r := role
-						queueRoleJob(func() {
-							DiscordRemoveRole(pid, r)
-						})
-					}
-				}
-			}
+			syncDiscordRolesForPlayer(pid)
 		})
 	}
 
-	// SendDiscordLog("🔄 **Discord Roles Synced** — All roles recalculated safely.")
-
 	respondJSON(w, map[string]any{
 		"success": true,
-		"message": "Role sync started — may take ~1 minute depending on player count",
+		"message": fmt.Sprintf("Role sync started for %d player(s) — may take ~1 minute", len(ids)),
 	})
 }
 
@@ -11044,7 +10982,48 @@ func buildDesiredDiscordRoles(
 		}
 	}
 
+	// Rookie League roles: coach / player / sub.
+	//
+	// A coach (self-registered, or a veteran who is a coach automatically) gets
+	// the rookie coach role and never a playing one. Everyone else registered for
+	// the Rookie League gets the rookie player role, or the rookie sub role if
+	// they're registered as a League Sub.
+	registeredRookieRole := strings.TrimSpace(playerRoleInLeague(p.ID, LeagueRookie))
+	rookieRegistered := registeredRookieRole != "" && !strings.EqualFold(registeredRookieRole, "Unregistered")
+
+	switch {
+	case isRegisteredRookieCoach(p.ID):
+		roles = append(roles, os.Getenv("DISCORD_ROOKIE_COACH_ROLE_ID"))
+	case rookieRegistered && !playerIsBannedIn(p.ID, LeagueRookie):
+		if strings.EqualFold(registeredRookieRole, "League Sub") {
+			roles = append(roles, os.Getenv("DISCORD_ROOKIE_SUB_ROLE_ID"))
+		} else {
+			roles = append(roles, os.Getenv("DISCORD_ROOKIE_PLAYER_ROLE_ID"))
+		}
+	}
+
 	return roles
+}
+
+// managedRoleIDs returns every Discord role the bot is allowed to add/remove.
+// Empty (unconfigured) ids are dropped so we never call the API with a blank
+// role id.
+func managedRoleIDs() []string {
+	keys := []string{
+		"DISCORD_LEAGUE_SUB_ROLE_ID",
+		"DISCORD_CAPTAIN_ROLE_ID",
+		"DISCORD_CO_CAPTAIN_ROLE_ID",
+		"DISCORD_ROOKIE_COACH_ROLE_ID",
+		"DISCORD_ROOKIE_PLAYER_ROLE_ID",
+		"DISCORD_ROOKIE_SUB_ROLE_ID",
+	}
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func syncDiscordRolesForPlayer(playerID int64) {
@@ -11084,14 +11063,16 @@ func syncDiscordRolesForPlayer(playerID int64) {
 }
 
 func isManagedRole(roleID string) bool {
-	switch roleID {
-	case os.Getenv("DISCORD_LEAGUE_SUB_ROLE_ID"),
-		os.Getenv("DISCORD_CAPTAIN_ROLE_ID"),
-		os.Getenv("DISCORD_CO_CAPTAIN_ROLE_ID"):
-		return true
-	default:
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
 		return false
 	}
+	for _, id := range managedRoleIDs() {
+		if id == roleID {
+			return true
+		}
+	}
+	return false
 }
 
 func SyncAllDiscordRoles() {
@@ -11108,86 +11089,35 @@ func fetchMemberRoles(
 	userID int64,
 	botToken string,
 ) ([]string, error) {
-
-	url := fmt.Sprintf(
-		"https://discord.com/api/v10/guilds/%s/members/%d",
-		guildID,
-		userID,
-	)
-
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("Authorization", "Bot "+botToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("fetch member failed %s %s", resp.Status, body)
-	}
-
-	var data struct {
-		Roles []string `json:"roles"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
-	}
-
-	return data.Roles, nil
+	return discordGetMemberRoles(guildID, fmt.Sprintf("%d", userID), botToken)
 }
 
 func addGuildRoleHTTP(guildID string, userID int64, roleID, botToken string) error {
+	if strings.TrimSpace(roleID) == "" {
+		return nil
+	}
 	url := fmt.Sprintf(
-		"https://discord.com/api/v10/guilds/%s/members/%d/roles/%s",
+		"%s/guilds/%s/members/%d/roles/%s",
+		discordAPIRoot(),
 		guildID,
 		userID,
 		roleID,
 	)
-
-	req, _ := http.NewRequest("PUT", url, nil)
-	req.Header.Set("Authorization", "Bot "+botToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 204 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("add role failed %s %s", resp.Status, body)
-	}
-
-	return nil
+	return discordRoleMutation("PUT", url, botToken)
 }
 
 func removeGuildRoleHTTP(guildID string, userID int64, roleID, botToken string) error {
+	if strings.TrimSpace(roleID) == "" {
+		return nil
+	}
 	url := fmt.Sprintf(
-		"https://discord.com/api/v10/guilds/%s/members/%d/roles/%s",
+		"%s/guilds/%s/members/%d/roles/%s",
+		discordAPIRoot(),
 		guildID,
 		userID,
 		roleID,
 	)
-
-	req, _ := http.NewRequest("DELETE", url, nil)
-	req.Header.Set("Authorization", "Bot "+botToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 204 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("remove role failed %s %s", resp.Status, body)
-	}
-
-	return nil
+	return discordRoleMutation("DELETE", url, botToken)
 }
 
 func syncMemberRoles(
@@ -11198,6 +11128,10 @@ func syncMemberRoles(
 ) {
 	currentRoles, err := fetchMemberRoles(guildID, playerID, botToken)
 	if err != nil {
+		if err == errDiscordNotInGuild {
+			// Not in the guild — nothing to sync, and not an error worth logging.
+			return
+		}
 		log.Printf("❌ role fetch failed for %d: %v", playerID, err)
 		return
 	}
@@ -11217,10 +11151,13 @@ func syncMemberRoles(
 	// ➕ ADD missing roles
 	for roleID := range desired {
 		if !current[roleID] {
-			if err := addGuildRoleHTTP(guildID, playerID, roleID, botToken); err != nil {
-				log.Printf("❌ add role %s to %d failed: %v", roleID, playerID, err)
-			} else {
+			switch err := addGuildRoleHTTP(guildID, playerID, roleID, botToken); {
+			case err == nil:
 				log.Printf("✅ added role %s → %d", roleID, playerID)
+			case err == errDiscordNotInGuild:
+				return
+			default:
+				log.Printf("❌ add role %s to %d failed: %v", roleID, playerID, err)
 			}
 		}
 	}
@@ -11228,10 +11165,13 @@ func syncMemberRoles(
 	// ➖ REMOVE managed roles that should not exist
 	for roleID := range current {
 		if isManagedRole(roleID) && !desired[roleID] {
-			if err := removeGuildRoleHTTP(guildID, playerID, roleID, botToken); err != nil {
-				log.Printf("❌ remove role %s from %d failed: %v", roleID, playerID, err)
-			} else {
+			switch err := removeGuildRoleHTTP(guildID, playerID, roleID, botToken); {
+			case err == nil:
 				log.Printf("🧹 removed role %s ← %d", roleID, playerID)
+			case err == errDiscordNotInGuild:
+				return
+			default:
+				log.Printf("❌ remove role %s from %d failed: %v", roleID, playerID, err)
 			}
 		}
 	}

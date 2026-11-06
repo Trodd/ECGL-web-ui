@@ -180,6 +180,9 @@ func HandleCoachRegister(w http.ResponseWriter, r *http.Request) {
 	// Registering clears any earlier opt-out.
 	DB.Exec(`UPDATE player_settings SET rookie_coach_opt_out = FALSE, updated_at = NOW() WHERE player_id = ?`, playerID)
 
+	// Give them the Rookie League coach Discord role.
+	go syncDiscordRolesForPlayer(playerID)
+
 	LogGeneral("🧑‍🏫 **"+draftPlayerLabel(p)+"** registered as a **Rookie League coach**", lg)
 
 	respondJSON(w, map[string]any{
@@ -217,6 +220,9 @@ func HandleCoachUnregister(w http.ResponseWriter, r *http.Request) {
 	// Veterans are coaches automatically, so clearing the flag isn't enough —
 	// mark an explicit opt-out so we don't put them straight back in.
 	DB.Exec(`UPDATE player_settings SET rookie_coach_opt_out = TRUE, updated_at = NOW() WHERE player_id = ?`, playerID)
+
+	// Swap the coach Discord role back to the player/sub role.
+	go syncDiscordRolesForPlayer(playerID)
 
 	// If they're currently sitting on a team as a coach, take them off it so the
 	// team frees the slot up. Their coach-only membership was the reason they
