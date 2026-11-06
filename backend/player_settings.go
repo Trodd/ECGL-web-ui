@@ -34,6 +34,15 @@ type PlayerSettings struct {
 	AvailableAsSub   bool `json:"available_as_sub" gorm:"default:false"`
 	HideAvailability bool `json:"hide_availability" gorm:"default:false"`
 
+	// IsRookieCoach marks a player who registered as a Rookie League coach.
+	// Coaches join teams in the Coach role (one per team) and never play.
+	IsRookieCoach bool `json:"is_rookie_coach" gorm:"default:false"`
+
+	// RookieCoachOptOut is set when a player explicitly unregisters from coaching.
+	// Veterans are coaches automatically, so "false" on its own can't express
+	// "I don't want to coach" — this flag can.
+	RookieCoachOptOut bool `json:"rookie_coach_opt_out" gorm:"default:false"`
+
 	// MutedNotificationTypes is a comma separated list of notification `type`s
 	// the player doesn't want to receive.
 	MutedNotificationTypes string `json:"muted_notification_types" gorm:"default:''"`
@@ -177,12 +186,13 @@ func GetPlayerSettings(w http.ResponseWriter, r *http.Request) {
 			"id":           strconv.FormatInt(p.ID, 10),
 			"username":     p.Username,
 			"display_name": p.DisplayName,
-			"role":         p.Role,
+			"role":         playerRoleInLeague(playerID, leagueFromRequest(r)),
 			"device":       p.Device,
 			"timezone":     p.Timezone,
 			"name_locked":  p.NameLocked,
 			"avatar":       p.Avatar,
 		},
+		"league":             leagueFromRequest(r),
 		"prefs":              ps,
 		"teams":              teams,
 		"notification_types": notificationTypes,
@@ -250,7 +260,15 @@ func SavePlayerSettings(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Unknown role", http.StatusBadRequest)
 			return
 		}
-		profile["role"] = role
+		// Save for the ACTIVE league only; players.role keeps the primary value.
+		activeLeague := leagueFromRequest(r)
+		oldRole := playerRoleInLeague(playerID, activeLeague)
+		if err := setPlayerRoleInLeague(playerID, activeLeague, role); err != nil {
+			http.Error(w, "Failed to save role", http.StatusInternalServerError)
+			return
+		}
+		// A coach who changes role loses their coaching slot (rookie league).
+		enforceCoachRoleChange(playerID, oldRole, role)
 	}
 	if req.Device != nil {
 		device := trim(req.Device, 60)

@@ -7,6 +7,7 @@ import { E } from "../components/CustomEmoji";
 import TeamLogo from "../components/TeamLogo";
 import PlayerIdentity from "../components/PlayerIdentity";
 import TeamAvailability from "../components/TeamAvailability";
+import RoleBadge from "../components/RoleBadge";
 
 export default function MyTeam() {
   const [data, setData] = useState({
@@ -723,7 +724,7 @@ export default function MyTeam() {
               >
                 <div>
                   <PlayerIdentity player={m} size={26} />
-                  <span className="text-secondary small ms-2">{m.role || "-"}</span>
+                  <RoleBadge role={m.role} className="ms-2" />
 
                   {m.on_cooldown && (
                     <span className="badge bg-warning text-dark ms-2">

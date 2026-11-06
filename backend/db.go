@@ -52,7 +52,7 @@ func InitDB() {
 		&Player{}, &Team{}, &TeamLogo{}, &TeamMember{}, &TeamJoinRequest{},
 		&Match{}, &MatchScore{}, &PlayerHistory{}, &CastLog{}, &CastLogMulti{}, &MatchRoster{}, &FinalsTeam{}, &TeamArchive{}, &FinalsArchive{},
 		&ModAuditLog{}, &LeagueSettings{}, &RuleSection{}, &Clip{}, &Notification{}, &PlayerAvailability{}, &PlayerLeagueStats{},
-		&DraftSignup{}, &CastAssignment{}, &PlayerSettings{},
+		&DraftSignup{}, &CastAssignment{}, &PlayerSettings{}, &PlayerLeagueRole{},
 	)
 	if err != nil {
 		log.Fatal("❌ Migration failed:", err)

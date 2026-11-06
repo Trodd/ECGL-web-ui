@@ -5,6 +5,7 @@ import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
 import PlayerIdentity, { getDiscordAvatarUrl } from "../components/PlayerIdentity";
 import RookieDraftPanel from "../components/RookieDraftPanel";
+import RookieVeteranPanel from "../components/RookieVeteranPanel";
 import { getLeague } from "../league";
 
 export default function LeagueMod() {
@@ -728,7 +729,10 @@ export default function LeagueMod() {
                                 { key: "teamTools", label: "☰ Teams" },
                                 { key: "playerTools", label: "⊘ Players" },
                                 ...(getLeague() === "rookie"
-                                    ? [{ key: "rookieDraft", label: "📝 Rookie Draft" }]
+                                    ? [
+                                        { key: "rookieDraft", label: "📝 Rookie Draft" },
+                                        { key: "rookieVeterans", label: "🧑‍🏫 Eligibility" },
+                                      ]
                                     : []),
                                 { key: "finalsManagement", label: "★ Finals" },
                                 { key: "teamHistory", label: "↻ Rename Logs" },
@@ -2495,6 +2499,7 @@ export default function LeagueMod() {
                         )}
                         {modTab === "teamHistory" && <TeamRenameHistory urlBase={urlBase} />}
                         {modTab === "rookieDraft" && <RookieDraftPanel urlBase={urlBase} />}
+                        {modTab === "rookieVeterans" && <RookieVeteranPanel urlBase={urlBase} />}
                         {modTab === "console" && <ModAuditLogPanel urlBase={urlBase} />}
                     </div>
                 </div>

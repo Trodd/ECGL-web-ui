@@ -157,10 +157,9 @@ const ROOKIE_SETTING_GROUPS = [
     {
         label: "Rookie Veteran Rule",
         keys: [
-            { key: "ROOKIE_VETERAN_RULE_ENABLED", label: "Enforce Veteran Rule", type: "toggle", hint: "Limit main-league veterans on rookie teams." },
-            { key: "ROOKIE_NEW_PLAYERS_PER_VETERAN", label: "New Players per Veteran", type: "number", hint: "How many new players are required for each main-league veteran." },
-            { key: "ROOKIE_VETERAN_MAX_RATING", label: "Veteran Max Rating", type: "number", hint: "Players at or below this rating are still treated as new (not veterans). 0 = ignore rating." },
-            { key: "ROOKIE_VETERAN_MAX_GAMES", label: "Veteran Max Games", type: "number", hint: "Players at or below this many matches are still treated as new. 0 = ignore games." },
+            { key: "ROOKIE_VETERAN_RULE_ENABLED", label: "Veterans Join as Coaches Only", type: "toggle", hint: "On: main-league veterans may sit on a rookie roster but only in the Coach role — they never play. Off: veterans are treated like any other player." },
+            { key: "ROOKIE_VETERAN_MAX_RATING", label: "Veteran Max Rating", type: "number", hint: "Players at or below this rating are still treated as rookies (not veterans). 0 = ignore rating." },
+            { key: "ROOKIE_VETERAN_MAX_GAMES", label: "Veteran Max Games", type: "number", hint: "Players at or below this many matches are still treated as rookies. 0 = ignore games." },
         ],
     },
     {
@@ -184,6 +183,12 @@ const ROOKIE_SETTING_GROUPS = [
                 label: "Allow Coach Draft Signups",
                 type: "toggle",
                 hint: "On: the Register tab also offers a separate sign-up to coach a rookie team. Coaches are placed on a team with the Coach role.",
+            },
+            {
+                key: "ROOKIE_COACH_ROLE_CHANGE_REMOVES",
+                label: "Remove Coaches Who Change Role",
+                type: "toggle",
+                hint: "On: if a coach changes their registration role (Player ⇄ League Sub) while they hold a Coach slot on a rookie team, they are removed from that team and the slot frees up.",
             },
             {
                 key: "ROOKIE_LEAGUE_PUBLIC",
@@ -759,7 +764,7 @@ export default function LeagueSettings() {
             </div>
 
             <hr className="my-5" />
-            <RulesEditor />
+            <RulesEditor league={viewLeague} />
         </div>
     );
 }
@@ -902,18 +907,19 @@ Otherwise → double forfeit.`,
     },
 ];
 
-function RulesEditor() {
+function RulesEditor({ league = "main" }) {
     const [sections, setSections] = useState([]);
     const [original, setOriginal] = useState([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
-        axios.get(`${getApiUrl()}/api/rules`)
+        setLoading(true);
+        axios.get(`${getApiUrl()}/api/rules?league=${encodeURIComponent(league)}&include_hidden=1`)
             .then(res => {
                 const data = res.data && res.data.length > 0 ? res.data : DEFAULT_RULES;
-                setSections(data.map(s => ({ title: s.title, content: s.content })));
-                setOriginal(JSON.stringify(data.map(s => ({ title: s.title, content: s.content }))));
+                setSections(data.map(s => ({ title: s.title, content: s.content, hidden: Boolean(s.hidden) })));
+                setOriginal(JSON.stringify(data.map(s => ({ title: s.title, content: s.content, hidden: Boolean(s.hidden) }))));
                 setLoading(false);
             })
             .catch(() => {
@@ -922,7 +928,7 @@ function RulesEditor() {
                 setOriginal(JSON.stringify(DEFAULT_RULES));
                 setLoading(false);
             });
-    }, []);
+    }, [league]);
 
     const hasChanges = useCallback(() => {
         return JSON.stringify(sections) !== original;
@@ -933,7 +939,7 @@ function RulesEditor() {
     };
 
     const addSection = () => {
-        setSections(prev => [...prev, { title: "", content: "" }]);
+        setSections(prev => [...prev, { title: "", content: "", hidden: false }]);
     };
 
     const removeSection = (idx) => {
@@ -954,9 +960,13 @@ function RulesEditor() {
         setSaving(true);
         
         try {
-            await axios.post(`${getApiUrl()}/api/mod/rules`, sections, { withCredentials: true });
+            await axios.post(
+                `${getApiUrl()}/api/mod/rules?league=${encodeURIComponent(league)}`,
+                sections,
+                { withCredentials: true }
+            );
             setOriginal(JSON.stringify(sections));
-            toast("Rules saved!", "success");
+            toast(`Rules saved for ${league === "rookie" ? "Rookie" : "Varsity"} League.`, "success");
         } catch (err) {
             toast(err.response?.data || "Failed to save rules.", "danger");
         } finally {
@@ -970,7 +980,9 @@ function RulesEditor() {
         <div>
             <h3 className="mb-2">📜 Rules Editor</h3>
             <p className="text-secondary mb-3" style={{ fontSize: "0.85rem" }}>
-                Each section has a title (include emoji) and content. Content format:<br />
+                Editing the <strong>{league === "rookie" ? "Rookie League" : "Varsity League"}</strong> rules —
+                each league has its own separate rule set.
+                <br />
                 <code>- item</code> = bullet list &nbsp;|&nbsp;
                 <code>{">"} text</code> = blockquote &nbsp;|&nbsp;
                 <code>### Heading</code> = sub-heading &nbsp;|&nbsp;
@@ -983,7 +995,13 @@ function RulesEditor() {
                 <div
                     key={idx}
                     className="card mb-3"
-                    style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}
+                    style={{
+                        background: "var(--bg-card)",
+                        border: section.hidden
+                            ? "1px dashed var(--border-default)"
+                            : "1px solid var(--border-default)",
+                        opacity: section.hidden ? 0.72 : 1,
+                    }}
                 >
                     <div
                         className="card-header d-flex align-items-center gap-2"
@@ -998,6 +1016,19 @@ function RulesEditor() {
                             value={section.title}
                             onChange={(e) => updateSection(idx, "title", e.target.value)}
                         />
+                        {section.hidden && (
+                            <span className="badge bg-secondary" title="Hidden from the public rules page">
+                                🚫 Hidden
+                            </span>
+                        )}
+                        <button
+                            type="button"
+                            className={`btn btn-sm ${section.hidden ? "btn-warning" : "btn-outline-light"}`}
+                            onClick={() => updateSection(idx, "hidden", !section.hidden)}
+                            title={section.hidden ? "Show this section publicly" : "Hide from the public rules page (content is kept)"}
+                        >
+                            {section.hidden ? "Hidden" : "Visible"}
+                        </button>
                         <button
                             className="btn btn-sm btn-outline-secondary"
                             onClick={() => moveSection(idx, -1)}

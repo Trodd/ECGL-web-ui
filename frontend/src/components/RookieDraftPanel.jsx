@@ -2,6 +2,7 @@ import { Fragment, useState, useEffect } from "react";
 import { toast } from "../toast";
 import axios from "axios";
 import PlayerIdentity from "./PlayerIdentity";
+import RoleBadge from "./RoleBadge";
 import { leagueLink } from "../league";
 
 /**
@@ -102,8 +103,7 @@ export default function RookieDraftPanel({ urlBase }) {
         }
     }
 
-    async function releaseToDraft(playerID) {
-        if (!playerID) return;
+    async function releaseToDraft(playerID) {        if (!playerID) return;
         setBusyId(-2);
         toast("");
         try {
@@ -429,7 +429,16 @@ export default function RookieDraftPanel({ urlBase }) {
                                 {row.timezone || "tz n/a"}
                             </span>
                             {row.is_veteran ? (
-                                <span className="badge bg-warning text-dark">Veteran (Varsity)</span>
+                                <span
+                                    className={`badge ${row.play_override ? "bg-success" : "bg-warning text-dark"}`}
+                                    title={
+                                        row.play_override
+                                            ? "A league mod allowed this veteran to play as a normal rookie"
+                                            : "Veteran — Coach only unless a mod allows them to play (League Mod → Eligibility)"
+                                    }
+                                >
+                                    {row.play_override ? "Veteran — play allowed" : "Veteran (Varsity)"}
+                                </span>
                             ) : (
                                 <span className="badge bg-success">New player</span>
                             )}
@@ -592,9 +601,7 @@ export default function RookieDraftPanel({ urlBase }) {
                                                             {m.display_name || m.username}
                                                         </span>
                                                         {m.role && (
-                                                            <span className="badge bg-dark border border-secondary">
-                                                                {m.role}
-                                                            </span>
+                                                            <RoleBadge role={m.role} />
                                                         )}
                                                         {m.is_veteran ? (
                                                             <span className="badge bg-warning text-dark">Vet</span>

@@ -161,9 +161,8 @@ func eligibleTournamentTeams(lg string) []Team {
 
 	out := make([]Team, 0, len(all))
 	for _, t := range all {
-		var count int64
-		DB.Table("team_members").Where("team_id = ?", t.ID).Count(&count)
-		if int(count) >= minPlayers {
+		// Plays count only playing members — coaches never fill a roster slot.
+		if teamPlayingCount(t.ID) >= int64(minPlayers) {
 			out = append(out, t)
 		}
 	}

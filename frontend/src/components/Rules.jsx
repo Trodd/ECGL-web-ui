@@ -84,17 +84,23 @@ export default function Rules() {
     useEffect(() => {
         axios.get(`${getApiUrl()}/api/rules`)
             .then(res => {
-                if (res.data && res.data.length > 0) {
-                    setSections(res.data);
-                } else {
-                    setError(true);
-                }
+                // Rules are per-league (the league header scopes the request),
+                // so an empty list just means this league has none yet.
+                setSections(Array.isArray(res.data) ? res.data : []);
             })
             .catch(() => setError(true));
     }, []);
 
     if (error) return <StaticRules />;
     if (sections === null) return <p className="text-secondary">Loading rules…</p>;
+
+    if (sections.length === 0) {
+        return (
+            <p className="text-secondary text-start">
+                No rules have been published for this league yet.
+            </p>
+        );
+    }
 
     return (
         <div className="rules text-start">

@@ -313,8 +313,8 @@ func HandlePreviewWeeklyMatches(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		var playerCount int64
-		DB.Model(&TeamMember{}).Where("team_id = ?", t.ID).Count(&playerCount)
+		// Coaches (rookie veterans) don't count toward the playing minimum.
+		playerCount := teamPlayingCount(t.ID)
 
 		if playerCount < int64(minPlayers) {
 			log.Printf("🚫 Skipping %s — only %d players (need %d)", t.Name, playerCount, minPlayers)

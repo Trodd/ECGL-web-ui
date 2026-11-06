@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Leagues. The main league is the default so existing behaviour is unchanged;
@@ -109,6 +111,39 @@ func ensureLeagueSchema() {
 		// One-time migration markers.
 		`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT NOW())`,
 
+		// Per-league registration roles (Player / League Sub), seeded from the
+		// legacy global players.role so existing members keep their role in both.
+		`CREATE TABLE IF NOT EXISTS player_league_roles (
+			player_id BIGINT NOT NULL,
+			league TEXT NOT NULL DEFAULT 'main',
+			role TEXT DEFAULT '',
+			updated_at TIMESTAMPTZ DEFAULT NOW(),
+			PRIMARY KEY (player_id, league)
+		)`,
+		`INSERT INTO player_league_roles (player_id, league, role)
+		 SELECT id, 'main', role FROM players WHERE COALESCE(role, '') <> ''
+		 ON CONFLICT (player_id, league) DO NOTHING`,
+		`INSERT INTO player_league_roles (player_id, league, role)
+		 SELECT id, 'rookie', role FROM players WHERE COALESCE(role, '') <> ''
+		 ON CONFLICT (player_id, league) DO NOTHING`,
+
+		// Rookie coach registration flag (AutoMigrate also adds it, this is just
+		// belt-and-braces so the column always exists).
+		`ALTER TABLE player_settings ADD COLUMN IF NOT EXISTS is_rookie_coach BOOLEAN DEFAULT FALSE`,
+		`ALTER TABLE player_settings ADD COLUMN IF NOT EXISTS rookie_coach_opt_out BOOLEAN DEFAULT FALSE`,
+
+		// League mods can let a specific veteran play as a normal roster player
+		// in a league that would otherwise force them into the Coach role.
+		`ALTER TABLE player_league_roles ADD COLUMN IF NOT EXISTS play_override BOOLEAN DEFAULT FALSE`,
+		// …and the reverse: mark a seasoned new player as a veteran.
+		`ALTER TABLE player_league_roles ADD COLUMN IF NOT EXISTS force_veteran BOOLEAN DEFAULT FALSE`,
+
+		// Rule sections are per-league (existing rows belong to Varsity).
+		`ALTER TABLE rule_sections ADD COLUMN IF NOT EXISTS league TEXT DEFAULT 'main'`,
+		`ALTER TABLE rule_sections ADD COLUMN IF NOT EXISTS hidden BOOLEAN DEFAULT FALSE`,
+		`UPDATE rule_sections SET league = 'main' WHERE league IS NULL OR league = ''`,
+		`CREATE INDEX IF NOT EXISTS idx_rule_sections_league ON rule_sections (league)`,
+
 		// Per-league player stats. Main league mirrors the legacy columns; other
 		// leagues always start each player at the default rating with a clean
 		// record so Varsity progress never carries over.
@@ -137,6 +172,32 @@ func ensureLeagueSchema() {
 
 	ensureLeagueSettings(LeagueMain)
 	ensureLeagueSettings(LeagueRookie)
+
+	// One-time seed: copy Varsity's rule sections into the Rookie League so
+	// mods aren't starting from a blank page. Runs only when the Rookie League
+	// has no rules of its own yet.
+	if !migrationApplied("rookie_rules_seed_v1") {
+		var rookieRuleCount int64
+		DB.Model(&RuleSection{}).Where("league = ?", LeagueRookie).Count(&rookieRuleCount)
+
+		if rookieRuleCount == 0 {
+			if err := DB.Exec(`
+				INSERT INTO rule_sections (league, title, content, sort_order)
+				SELECT ?, title, content, sort_order
+				FROM rule_sections
+				WHERE league = ?
+				ORDER BY sort_order ASC, id ASC
+			`, LeagueRookie, LeagueMain).Error; err != nil {
+				log.Printf("⚠️ rookie rules seed: %v", err)
+			} else {
+				log.Printf("📜 Copied Varsity rule sections into the Rookie League")
+			}
+		}
+
+		if err := markMigrationApplied("rookie_rules_seed_v1"); err != nil {
+			log.Printf("⚠️ rookie rules seed marker: %v", err)
+		}
+	}
 
 	// One-time reset: rookie records created before per-league stats existed were
 	// seeded from Varsity values. Reset them to a clean default record. Varsity
@@ -317,7 +378,50 @@ func tagLeague(msg, league string) string {
 //
 // A main-league player is a veteran if they are above either ceiling. If both
 // are 0 (unset) any main-league participation makes them a veteran.
+//
+// Results are memoised for a minute because this is called once per player when
+// building the players list, and each check is several queries.
+var (
+	veteranCacheMu sync.Mutex
+	veteranCache   = map[int64]veteranCacheEntry{}
+)
+
+type veteranCacheEntry struct {
+	isVeteran bool
+	expires   time.Time
+}
+
+// isMainLeagueVeteran reports whether a player is a main-league veteran
+// (memoised for 60s).
 func isMainLeagueVeteran(playerID int64) bool {
+	veteranCacheMu.Lock()
+	if e, ok := veteranCache[playerID]; ok && time.Now().Before(e.expires) {
+		veteranCacheMu.Unlock()
+		return e.isVeteran
+	}
+	veteranCacheMu.Unlock()
+
+	vet := computeMainLeagueVeteran(playerID)
+
+	veteranCacheMu.Lock()
+	if len(veteranCache) > 5000 {
+		veteranCache = map[int64]veteranCacheEntry{}
+	}
+	veteranCache[playerID] = veteranCacheEntry{isVeteran: vet, expires: time.Now().Add(60 * time.Second)}
+	veteranCacheMu.Unlock()
+
+	return vet
+}
+
+// invalidateVeteranCache drops the memoised veteran status for one player (call
+// after roster changes so the next read is accurate).
+func invalidateVeteranCache(playerID int64) {
+	veteranCacheMu.Lock()
+	delete(veteranCache, playerID)
+	veteranCacheMu.Unlock()
+}
+
+func computeMainLeagueVeteran(playerID int64) bool {
 	onMain := false
 	var count int64
 
@@ -385,20 +489,84 @@ func isMainLeagueVeteran(playerID int64) bool {
 	return false
 }
 
-// rookieRosterCounts returns (# main-league veterans, # new players) on a team.
-func rookieRosterCounts(teamID uint) (veterans int, rookies int) {
-	var ids []int64
-	DB.Table("team_members").Where("team_id = ?", teamID).Pluck("player_id", &ids)
-	for _, id := range ids {
-		if isMainLeagueVeteran(id) {
-			veterans++
-		}
+// rookieRosterCounts returns (# coaches, # playing members) on a team.
+// Coaches are excluded from the playing count so they never consume a roster
+// slot.
+func rookieRosterCounts(teamID uint) (coaches int, players int) {
+	var rows []struct {
+		PlayerID int64
+		Role     string
 	}
-	return veterans, len(ids) - veterans
+	DB.Table("team_members").Select("player_id, role").Where("team_id = ?", teamID).Scan(&rows)
+
+	for _, r := range rows {
+		if strings.EqualFold(strings.TrimSpace(r.Role), "coach") {
+			coaches++
+			continue
+		}
+		players++
+	}
+	return coaches, players
 }
 
-// canJoinRookieTeam enforces the rookie-league composition rule:
-// 1 main-league veteran per N new players (N configurable; default 3).
+// teamPlayingCount returns how many playing members (coaches excluded) a team has.
+func teamPlayingCount(teamID uint) int64 {
+	var count int64
+	DB.Table("team_members").
+		Where("team_id = ? AND LOWER(TRIM(COALESCE(role, ''))) <> 'coach'", teamID).
+		Count(&count)
+	return count
+}
+
+// isVeteranInLeague reports whether a player counts as a veteran for a league.
+//
+// Normally that means a main-league (Varsity) veteran, but a league mod can also
+// mark a seasoned new player as a veteran — someone who never played Varsity can
+// still be far too experienced for a rookie league.
+func isVeteranInLeague(league string, playerID int64) bool {
+	if isMainLeagueVeteran(playerID) {
+		return true
+	}
+	return playerForcedVeteran(playerID, league)
+}
+
+// playerLockedToCoach reports whether a player may only join a team as a Coach
+// (they are on the roster but never play) in this league.
+//
+// In the Rookie League a main-league veteran is locked to Coach unless a league
+// mod flipped the per-player play override ("this veteran is really a rookie").
+func playerLockedToCoach(league string, playerID int64) bool {
+	if normalizeLeague(league) != LeagueRookie {
+		return false
+	}
+	if getEnv("ROOKIE_VETERAN_RULE_ENABLED", "true") != "true" {
+		return false
+	}
+	if playerPlayOverride(playerID, league) {
+		return false
+	}
+	return isVeteranInLeague(league, playerID)
+}
+
+// leagueMemberRole returns the team_members role to give a player when they join
+// a team. In the Rookie League both main-league veterans (they can't play) and
+// players who registered as coaches join in the Coach role.
+func leagueMemberRole(league string, playerID int64) string {
+	if normalizeLeague(league) != LeagueRookie {
+		return "Member"
+	}
+	if isRegisteredRookieCoach(playerID) {
+		return "Coach"
+	}
+	if playerLockedToCoach(league, playerID) {
+		return "Coach"
+	}
+	return "Member"
+}
+
+// canJoinRookieTeam used to enforce a 1-veteran-per-N-new-players ratio. Veterans
+// are now rosterable but never playable — they join as Coaches — so everyone is
+// eligible for a slot. Kept as a single choke point for future composition rules.
 func canJoinRookieTeam(teamID uint, playerID int64) (bool, string) {
 	var team Team
 	if err := DB.First(&team, teamID).Error; err != nil {
@@ -406,30 +574,6 @@ func canJoinRookieTeam(teamID uint, playerID int64) (bool, string) {
 	}
 	if normalizeLeague(team.League) != LeagueRookie {
 		return true, ""
-	}
-
-	// The whole rule can be toggled off from Settings → Rookie League.
-	if getEnv("ROOKIE_VETERAN_RULE_ENABLED", "true") != "true" {
-		return true, ""
-	}
-
-	// New players are always allowed.
-	if !isMainLeagueVeteran(playerID) {
-		return true, ""
-	}
-
-	perVeteran := getEnvInt("ROOKIE_NEW_PLAYERS_PER_VETERAN", 3)
-	if perVeteran <= 0 {
-		perVeteran = 3
-	}
-
-	veterans, rookies := rookieRosterCounts(teamID)
-	// Require `perVeteran` new players for every veteran (including this one).
-	if rookies < perVeteran*(veterans+1) {
-		return false, fmt.Sprintf(
-			"Rookie teams allow 1 main-league veteran per %d new players — add more new players first.",
-			perVeteran,
-		)
 	}
 	return true, ""
 }

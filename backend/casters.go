@@ -80,8 +80,16 @@ func requireCaster(w http.ResponseWriter, r *http.Request) (string, bool) {
 		return "", false
 	}
 
-	// Cached (gateway state first) — see discordMemberRoles.
-	if !userHasDiscordRole(discordID, casterRoleID) {
+	// Cached (gateway state first) for reads; writes verify live so a revoked
+	// caster role can't still claim/assign slots.
+	isRead := r.Method == http.MethodGet || r.Method == http.MethodHead
+	allowed := false
+	if isRead {
+		allowed = userHasDiscordRole(discordID, casterRoleID)
+	} else {
+		allowed = userHasDiscordRoleFresh(discordID, casterRoleID)
+	}
+	if !allowed {
 		http.Error(w, "You are not a caster", http.StatusForbidden)
 		return "", false
 	}

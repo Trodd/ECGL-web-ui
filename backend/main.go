@@ -286,12 +286,13 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ✅ active registered player + mod info
+	// The role reported to the client is the one for the ACTIVE league.
 	respondJSON(w, map[string]any{
 		"registered":      true,
 		"id":              discordIDStr,
 		"username":        player.Username,
 		"display_name":    session.Values["display_name"],
-		"role":            player.Role,
+		"role":            playerRoleInLeague(discordID, leagueFromRequest(r)),
 		"device":          player.Device,
 		"timezone":        player.Timezone,
 		"avatar":          session.Values["avatar"],
@@ -430,6 +431,16 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	DB.First(&player, discordID)
+
+	// Store the role for the ACTIVE league (players.role stays as the primary
+	// global value used by Discord role sync).
+	registerLeague := leagueFromRequest(r)
+	_ = setPlayerRoleInLeague(discordID, registerLeague, player.Role)
+
+	// A coach whose registration role changed loses their coaching slot.
+	if !alreadyRegistered && existing.ID != 0 {
+		enforceCoachRoleChange(discordID, existing.Role, player.Role)
+	}
 
 	if !alreadyRegistered {
 		// ⭐ Discord role handling — only on first signup or role change
@@ -719,7 +730,32 @@ func main() {
 
 	// Only Guilds intent needed — slash commands use the Interactions API,
 	// and all channel/role operations use REST. No privileged intents required.
+	//
+	// Optional: setting DISCORD_GUILD_MEMBERS_INTENT=true adds the (privileged)
+	// GuildMembers intent. That makes discordgo track guild members locally so
+	// role checks need zero REST calls AND role removals in Discord take effect
+	// instantly instead of after the 60s cache TTL. It must be enabled for the
+	// bot in the Discord developer portal first ("Server Members Intent").
 	dg.Identify.Intents = discordgo.IntentsGuilds
+	if getEnv("DISCORD_GUILD_MEMBERS_INTENT", "false") == "true" {
+		dg.Identify.Intents |= discordgo.IntentsGuildMembers
+		log.Println("👥 Discord GuildMembers intent enabled — role checks are gateway-backed")
+	}
+
+	// Keep the role cache honest: whenever Discord tells us a member's roles
+	// changed, drop our memoised copy for that user.
+	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberUpdate) {
+		if m == nil || m.User == nil {
+			return
+		}
+		invalidateDiscordRoles(m.User.ID)
+	})
+	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
+		if m == nil || m.User == nil {
+			return
+		}
+		invalidateDiscordRoles(m.User.ID)
+	})
 
 	// 🔹 REGISTER SLASH COMMAND HANDLERS (commands registered after Open)
 	RegisterSlashHandlers(dg)
@@ -732,7 +768,22 @@ func main() {
 
 	// Open Discord gateway
 	if err := dg.Open(); err != nil {
-		log.Fatalf("❌ Failed to connect to Discord: %v", err)
+		// A privileged intent that hasn't been enabled in the Discord developer
+		// portal makes the gateway reject the connection (close code 4014). Fall
+		// back to the plain Guilds intent so the bot — and therefore logging and
+		// channel management — keeps working.
+		if getEnv("DISCORD_GUILD_MEMBERS_INTENT", "false") == "true" {
+			log.Printf("⚠️ Discord refused the GuildMembers intent (%v)", err)
+			log.Println("⚠️ Enable 'Server Members Intent' at https://discord.com/developers/applications → Bot → Privileged Gateway Intents")
+			log.Println("⚠️ Falling back to Guilds-only intent — role checks will use cached REST calls")
+			dg.Identify.Intents = discordgo.IntentsGuilds
+
+			if err2 := dg.Open(); err2 != nil {
+				log.Fatalf("❌ Failed to connect to Discord: %v", err2)
+			}
+		} else {
+			log.Fatalf("❌ Failed to connect to Discord: %v", err)
+		}
 	}
 
 	discordSession = dg // make available to handlers
@@ -740,6 +791,19 @@ func main() {
 	defer dg.Close()
 
 	log.Println("🤖 Discord bot connected (prefix commands enabled)")
+
+	// Confirm the gateway state actually carries members — that's what makes
+	// role checks free and instantly accurate.
+	if guildID := getEnv("DISCORD_GUILD_ID", ""); guildID != "" {
+		if g, err := dg.State.Guild(guildID); err == nil && g != nil && len(g.Members) > 1 {
+			log.Printf("👥 Gateway member cache: %d member(s) tracked", len(g.Members))
+		} else {
+			// No GuildMembers intent (unavailable above 10k users) — fall back to
+			// one bulk member-list REST call per minute instead of per-request.
+			log.Println("👥 Gateway member cache unavailable — using bulk member prefetch (1 REST call/min)")
+			StartDiscordRoleRefresher()
+		}
+	}
 
 	// 🔹 REGISTER SLASH COMMANDS (requires active connection)
 	RegisterSlashCommands(dg)
@@ -891,6 +955,10 @@ func main() {
 	r.HandleFunc("/api/mod/draft/assign", HandleModAssignDraft).Methods("POST")
 	r.HandleFunc("/api/mod/draft/auto-assign", HandleModAutoAssignDraft).Methods("POST")
 	r.HandleFunc("/api/mod/draft/create-team", HandleModCreateTeamForDraft).Methods("POST")
+	r.HandleFunc("/api/mod/rookie/play-override", HandleGetRookiePlayOverride).Methods("GET")
+	r.HandleFunc("/api/mod/rookie/play-override", HandleSetRookiePlayOverride).Methods("POST")
+	r.HandleFunc("/api/mod/rookie/veterans", HandleListRookieVeterans).Methods("GET")
+	r.HandleFunc("/api/mod/rookie/veteran-flag", HandleSetRookieVeteranFlag).Methods("POST")
 	r.HandleFunc("/api/mod/tournament/generate", HandleModGenerateTournament).Methods("POST")
 	r.HandleFunc("/api/mod/tournament/match", HandleModAddTournamentMatch).Methods("POST")
 	r.HandleFunc("/api/mod/settings", HandleGetSettings).Methods("GET")
@@ -968,6 +1036,9 @@ func main() {
 	api.HandleFunc("/player/settings", SavePlayerSettings).Methods("POST")
 	api.HandleFunc("/player/overlay-token", RotateOverlayToken).Methods("POST")
 	api.HandleFunc("/player/export", ExportPlayerData).Methods("GET")
+	api.HandleFunc("/coach/status", HandleGetCoachStatus).Methods("GET")
+	api.HandleFunc("/coach/register", HandleCoachRegister).Methods("POST")
+	api.HandleFunc("/coach/unregister", HandleCoachUnregister).Methods("POST")
 
 	// Leaderboards
 	api.HandleFunc("/leaderboard/players", GetPlayerLeaderboard).Methods("GET")

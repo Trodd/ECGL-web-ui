@@ -4,6 +4,7 @@ import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
 import { getDiscordAvatarUrl } from "../components/PlayerIdentity";
+import { getLeague } from "../league";
 
 export default function PlayerDetail() {
   const { id } = useParams();
@@ -90,7 +91,26 @@ export default function PlayerDetail() {
         </div>
 
         <div className="text-secondary small">
-          <div><b>Role:</b> {player.role || "-"}</div>
+          <div className="d-flex align-items-center gap-2">
+            <b>Role:</b> {player.role || "-"}
+            {player.is_rookie_coach && getLeague() === "rookie" && (
+              <span
+                className="badge"
+                style={{
+                  background: "#0b3540",
+                  color: "#67e8f9",
+                  border: "1px solid #0dcaf0",
+                  fontWeight: 700,
+                }}
+                title="Rookie League coach — does not play"
+              >
+                🧑‍🏫 Rookie Coach
+              </span>
+            )}
+          </div>
+          {player.is_rookie_coach && player.coach_team && getLeague() === "rookie" && (
+            <div><b>Coaching:</b> {player.coach_team}</div>
+          )}
           <div><b>Timezone:</b> {player.timezone || "-"}</div>
 
           {/* Discord User ID */}

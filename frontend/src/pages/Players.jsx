@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import { getApiUrl } from "../config";
+import { getLeague } from "../league";
 
 export default function Players() {
   const [players, setPlayers] = useState([]);
@@ -48,6 +49,10 @@ export default function Players() {
             avatar: typeof p.avatar === "string" ? p.avatar : "",
             role: typeof p.role === "string" ? p.role : "",
             timezone: typeof p.timezone === "string" ? p.timezone : "",
+            is_coach: !!p.is_coach,
+            coach_team: typeof p.coach_team === "string" ? p.coach_team : "",
+            is_veteran: !!p.is_veteran,
+            play_override: !!p.play_override,
           }));
 
         if (!canceled) setPlayers(normalized);
@@ -116,7 +121,8 @@ export default function Players() {
         safeIncludes(p.display_name || "", srch) ||
         safeIncludes(p.username || "", srch);
       const matchesRole =
-        rf === "all" || safeLower(p.role || "") === rf;
+        rf === "all" ||
+        (rf === "coach" ? !!p.is_coach : safeLower(p.role || "") === rf);
       return matchesSearch && matchesRole;
     });
   }, [players, search, roleFilter]);
@@ -153,6 +159,7 @@ export default function Players() {
               <option value="all">All Roles</option>
               <option value="player">Player</option>
               <option value="league sub">League Sub</option>
+              <option value="coach">🧑‍🏫 Coach</option>
               <option value="banned">Banned</option>
             </select>
           </div>
@@ -221,17 +228,51 @@ export default function Players() {
                   </div>
 
                   {/* RIGHT */}
-                  <span
-                    className={`rank-badge ${p.role === "Banned"
-                      ? "rank-bronze"
-                      : p.role === "League Sub"
-                        ? "rank-silver"
-                        : "rank-gold"
-                      }`}
-                    style={{ fontSize: "0.75rem" }}
-                  >
-                    {p.role || "Player"}
-                  </span>
+                  <div className="d-flex align-items-center gap-2">
+                    {p.is_coach && getLeague() === "rookie" && (
+                      <span
+                        className="badge"
+                        style={{
+                          background: "#0b3540",
+                          color: "#67e8f9",
+                          border: "1px solid #0dcaf0",
+                          fontSize: "0.7rem",
+                          fontWeight: 700,
+                        }}
+                        title={
+                          p.coach_team
+                            ? `Rookie League coach — ${p.coach_team}`
+                            : "Registered Rookie League coach"
+                        }
+                      >
+                        🧑‍🏫 Coach
+                      </span>
+                    )}
+                    {p.is_veteran && !p.is_coach && getLeague() === "rookie" && (
+                      <span
+                        className={`badge ${p.play_override ? "bg-success" : "bg-warning text-dark"}`}
+                        style={{ fontSize: "0.7rem" }}
+                        title={
+                          p.play_override
+                            ? "Varsity veteran — a league mod allowed them to play as a rookie"
+                            : "Varsity veteran — Coach only in the Rookie League"
+                        }
+                      >
+                        {p.play_override ? "Veteran ✓ play" : "Veteran"}
+                      </span>
+                    )}
+                    <span
+                      className={`rank-badge ${p.role === "Banned"
+                        ? "rank-bronze"
+                        : p.role === "League Sub"
+                          ? "rank-silver"
+                          : "rank-gold"
+                        }`}
+                      style={{ fontSize: "0.75rem" }}
+                    >
+                      {p.role || "Player"}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>

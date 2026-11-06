@@ -133,8 +133,16 @@ func HandleDraftSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var p Player
-	if err := DB.First(&p, playerID).Error; err != nil || strings.TrimSpace(p.Role) == "" {
+	if err := DB.First(&p, playerID).Error; err != nil {
 		http.Error(w, "You must register before joining the draft", http.StatusBadRequest)
+		return
+	}
+	if !playerIsRegisteredIn(playerID, lg) {
+		http.Error(w, "You must register for this league before joining the draft", http.StatusBadRequest)
+		return
+	}
+	if playerIsBannedIn(playerID, lg) {
+		http.Error(w, "Your account is banned.", http.StatusForbidden)
 		return
 	}
 
@@ -153,6 +161,32 @@ func HandleDraftSignup(w http.ResponseWriter, r *http.Request) {
 	if kind == draftKindCoach && !coachDraftEnabled(lg) {
 		http.Error(w, "Coach signups are closed for the Rookie League right now.", http.StatusBadRequest)
 		return
+	}
+
+	// Veterans can't play, so they can't enter the player draft. If they sign up
+	// for one, put them straight into the coach pool (they can still create or
+	// join a team normally at any time). A league mod can lift this per player
+	// with the rookie play override.
+	if kind == draftKindPlayer && playerLockedToCoach(lg, playerID) {
+		if !coachDraftEnabled(lg) {
+			http.Error(w,
+				"Veterans can't play in the Rookie League. You can still create or join a team — ask a mod about coaching.",
+				http.StatusBadRequest)
+			return
+		}
+		kind = draftKindCoach
+	}
+
+	// Registered coaches don't play, so they only ever enter the coach draft —
+	// even if the client asked for the player draft.
+	if kind == draftKindPlayer && isRegisteredRookieCoach(playerID) {
+		if !coachDraftEnabled(lg) {
+			http.Error(w,
+				"You're registered as a coach, so you can only sign up for the coach draft — and coach signups are closed right now.",
+				http.StatusBadRequest)
+			return
+		}
+		kind = draftKindCoach
 	}
 
 	note := strings.TrimSpace(req.Note)
@@ -247,6 +281,7 @@ func HandleModListDraft(w http.ResponseWriter, r *http.Request) {
 		VarsityRating  int       `json:"varsity_rating"`
 		VarsityMatches int       `json:"varsity_matches"`
 		IsVeteran      bool      `json:"is_veteran"`
+		PlayOverride   bool      `json:"play_override"`
 	}
 
 	var rows []draftRow
@@ -269,7 +304,8 @@ func HandleModListDraft(w http.ResponseWriter, r *http.Request) {
 			rows[i].VarsityRating = s.Rating
 			rows[i].VarsityMatches = s.Matches
 		}
-		rows[i].IsVeteran = isMainLeagueVeteran(rows[i].PlayerID)
+		rows[i].IsVeteran = isVeteranInLeague(lg, rows[i].PlayerID)
+		rows[i].PlayOverride = playerPlayOverride(rows[i].PlayerID, lg)
 	}
 
 	respondJSON(w, map[string]any{
@@ -335,8 +371,8 @@ func HandleModAssignDraft(w http.ResponseWriter, r *http.Request) {
 
 	maxPlayers := leagueMaxTeamPlayers(team.League)
 	if maxPlayers > 0 {
-		var count int64
-		DB.Table("team_members").Where("team_id = ?", req.TeamID).Count(&count)
+		// Coaches don't consume a playing roster slot.
+		count := teamPlayingCount(req.TeamID)
 		if int(count) >= maxPlayers {
 			modJSONErr(w, http.StatusBadRequest,
 				fmt.Sprintf("team is full (%d/%d)", count, maxPlayers))
@@ -344,7 +380,19 @@ func HandleModAssignDraft(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := DB.Create(&TeamMember{TeamID: req.TeamID, PlayerID: s.PlayerID, Role: draftTeamRole(s.Kind)}).Error; err != nil {
+	// Rookie-league veterans only ever join as Coaches (they don't play).
+	assignRole := draftTeamRole(s.Kind)
+	if forced := leagueMemberRole(team.League, s.PlayerID); forced == "Coach" {
+		assignRole = "Coach"
+	}
+	if strings.EqualFold(assignRole, "Coach") {
+		if blocked, reason := coachRoleBlocked(req.TeamID); blocked {
+			modJSONErr(w, http.StatusBadRequest, reason)
+			return
+		}
+	}
+
+	if err := DB.Create(&TeamMember{TeamID: req.TeamID, PlayerID: s.PlayerID, Role: assignRole}).Error; err != nil {
 		modJSONErr(w, http.StatusInternalServerError, "failed to add player to team")
 		return
 	}
@@ -445,8 +493,8 @@ func HandleModTransferPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	maxPlayers := leagueMaxTeamPlayers(toTeam.League)
-	var toCount int64
-	DB.Table("team_members").Where("team_id = ?", toTeam.ID).Count(&toCount)
+	// Coaches don't occupy a playing slot.
+	toCount := teamPlayingCount(toTeam.ID)
 	if maxPlayers > 0 && int(toCount) >= maxPlayers {
 		modJSONErr(w, http.StatusBadRequest,
 			fmt.Sprintf("%s is full (%d/%d)", toTeam.Name, toCount, maxPlayers))
@@ -467,6 +515,15 @@ func HandleModTransferPlayer(w http.ResponseWriter, r *http.Request) {
 	fromTeamID := current.TeamID
 	wasLeader := roleRank(current.Role) <= 1 // Captain or Co-Captain
 
+	// Role on the new team, plus the one-coach-per-team rule.
+	moveRole := leagueMemberRole(toTeam.League, playerID)
+	if strings.EqualFold(moveRole, "Coach") {
+		if blocked, reason := coachRoleBlocked(toTeam.ID); blocked {
+			modJSONErr(w, http.StatusBadRequest, reason)
+			return
+		}
+	}
+
 	// Move: remove from the old team, add to the new one.
 	if err := DB.Where("team_id = ? AND player_id = ?", fromTeamID, playerID).
 		Delete(&TeamMember{}).Error; err != nil {
@@ -477,7 +534,7 @@ func HandleModTransferPlayer(w http.ResponseWriter, r *http.Request) {
 	if err := DB.Omit("Player").Create(&TeamMember{
 		TeamID:   toTeam.ID,
 		PlayerID: playerID,
-		Role:     "Member",
+		Role:     moveRole,
 	}).Error; err != nil {
 		// Put them back where they were so nothing is lost.
 		DB.Omit("Player").Create(&TeamMember{
@@ -601,7 +658,14 @@ func HandleModCreateTeamForDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	maxPlayers := leagueMaxTeamPlayers(league)
-	if maxPlayers > 0 && len(signups) > maxPlayers {
+	// Count only the signups that will actually play (veterans join as coaches).
+	playingSignups := 0
+	for _, s := range signups {
+		if leagueMemberRole(league, s.PlayerID) != "Coach" {
+			playingSignups++
+		}
+	}
+	if maxPlayers > 0 && playingSignups > maxPlayers {
 		modJSONErr(w, http.StatusBadRequest,
 			fmt.Sprintf("a team can hold at most %d players", maxPlayers))
 		return
@@ -632,7 +696,7 @@ func HandleModCreateTeamForDraft(w http.ResponseWriter, r *http.Request) {
 	if !req.Override && league == LeagueRookie && getEnv("ROOKIE_VETERAN_RULE_ENABLED", "true") == "true" {
 		veterans := 0
 		for _, s := range signups {
-			if isMainLeagueVeteran(s.PlayerID) {
+			if playerLockedToCoach(league, s.PlayerID) {
 				veterans++
 			}
 		}
@@ -675,6 +739,9 @@ func HandleModCreateTeamForDraft(w http.ResponseWriter, r *http.Request) {
 		role := "Member"
 		if captainID != 0 && s.PlayerID == captainID {
 			role = "Captain"
+		}
+		if forced := leagueMemberRole(league, s.PlayerID); forced == "Coach" {
+			role = "Coach"
 		}
 
 		if err := DB.Omit("Player").Create(&TeamMember{
@@ -844,7 +911,7 @@ func HandleModListDraftTeams(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			vet := isMainLeagueVeteran(pid)
+			vet := isVeteranInLeague(lg, pid)
 			if vet {
 				row.Veterans++
 			} else {
@@ -1004,6 +1071,10 @@ func roleRank(role string) int {
 // draftAddMember adds a draft signup to an existing team and closes the signup.
 func draftAddMember(teamID uint, league string, s DraftSignup) bool {
 	role := draftTeamRole(s.Kind)
+	// Rookie-league veterans only ever join as Coaches (they don't play).
+	if forced := leagueMemberRole(league, s.PlayerID); forced == "Coach" {
+		role = "Coach"
+	}
 	if err := DB.Omit("Player").Create(&TeamMember{
 		TeamID:   teamID,
 		PlayerID: s.PlayerID,
@@ -1089,17 +1160,21 @@ func HandleModAutoAssignDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Split the pool. Anyone who already found a team is just closed out.
+	// Veterans are never auto-placed as players: in the Rookie League they may
+	// only join as Coaches (via the coach draft), so they stay in the draft with
+	// a note telling mods to move them to the coach pool. A league mod can flip
+	// a specific veteran back to a playable player with the rookie play override.
 	var rooks, vets []DraftSignup
 	for _, s := range pending {
 		if playerOnTeamInLeague(s.PlayerID, lg) {
 			DB.Model(&DraftSignup{}).Where("id = ?", s.ID).Update("status", draftAssigned)
 			continue
 		}
-		if ruleOn && isMainLeagueVeteran(s.PlayerID) {
+		if playerLockedToCoach(lg, s.PlayerID) {
 			vets = append(vets, s)
-		} else {
-			rooks = append(rooks, s)
+			continue
 		}
+		rooks = append(rooks, s)
 	}
 
 	type teamSlot struct {
@@ -1115,10 +1190,9 @@ func HandleModAutoAssignDraft(w http.ResponseWriter, r *http.Request) {
 
 	slots := make([]teamSlot, 0, len(existing))
 	for _, t := range existing {
-		var total int64
-		DB.Table("team_members").Where("team_id = ?", t.ID).Count(&total)
-		v, _ := rookieRosterCounts(t.ID)
-		slots = append(slots, teamSlot{ID: t.ID, Name: t.Name, Total: int(total), Vets: v})
+		// Coaches don't occupy playing slots.
+		total := teamPlayingCount(t.ID)
+		slots = append(slots, teamSlot{ID: t.ID, Name: t.Name, Total: int(total), Vets: 0})
 	}
 
 	assignedExisting := 0
@@ -1255,6 +1329,48 @@ func HandleModAutoAssignDraft(w http.ResponseWriter, r *http.Request) {
 		), lg)
 	}
 
+	// Pass 4 — veterans. They may enter the draft like anyone else, they just
+	// can't play: each one is placed as a Coach on a team that doesn't have one
+	// yet (smallest roster first). They never consume a playing slot.
+	coachesPlaced := 0
+	if len(vets) > 0 {
+		type noCoachTeam struct {
+			ID      uint
+			Name    string
+			Players int
+		}
+		var coachTeams []noCoachTeam
+		DB.Raw(`
+			SELECT t.id, t.name,
+			       (SELECT COUNT(*) FROM team_members m
+			         WHERE m.team_id = t.id AND LOWER(TRIM(COALESCE(m.role,''))) <> 'coach') AS players
+			FROM teams t
+			WHERE t.league = ?
+			  AND COALESCE(t.status,'') <> 'Test'
+			  AND NOT EXISTS (
+			        SELECT 1 FROM team_members c
+			        WHERE c.team_id = t.id AND LOWER(c.role) = 'coach'
+			  )
+			ORDER BY players ASC, t.id ASC
+		`, lg).Scan(&coachTeams)
+
+		idx := 0
+		remainingVets := vets[:0]
+		for _, s := range vets {
+			if idx >= len(coachTeams) {
+				remainingVets = append(remainingVets, s)
+				continue
+			}
+			if draftAddMember(coachTeams[idx].ID, lg, s) {
+				coachesPlaced++
+				idx++
+				continue
+			}
+			remainingVets = append(remainingVets, s)
+		}
+		vets = remainingVets
+	}
+
 	// Whatever is left stays in the draft.
 	var leftoverNames []string
 	for _, s := range vets {
@@ -1270,6 +1386,9 @@ func HandleModAutoAssignDraft(w http.ResponseWriter, r *http.Request) {
 
 	msg := fmt.Sprintf("Placed %d player(s) into existing teams and created %d new team(s).",
 		assignedExisting, len(created))
+	if coachesPlaced > 0 {
+		msg += fmt.Sprintf(" %d veteran(s) placed as Coach.", coachesPlaced)
+	}
 	if len(leftoverNames) > 0 {
 		msg += fmt.Sprintf(" %d player(s) could not be placed under the roster rules and remain in the draft: %s.",
 			len(leftoverNames), strings.Join(leftoverNames, ", "))

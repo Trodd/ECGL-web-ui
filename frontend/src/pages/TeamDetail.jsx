@@ -7,6 +7,7 @@ import { E } from "../components/CustomEmoji";
 import TeamLogo from "../components/TeamLogo";
 import PlayerIdentity from "../components/PlayerIdentity";
 import TeamAvailability from "../components/TeamAvailability";
+import RoleBadge from "../components/RoleBadge";
 
 export default function TeamDetail() {
   const { id } = useParams();
@@ -315,7 +316,13 @@ export default function TeamDetail() {
 
         {roster.length ? (
           <ul className="list-group">
-            {roster.map(p => (
+            {[...roster]
+              .sort((a, b) => {
+                // Playing members first, coaches at the bottom of the roster.
+                const rank = (r) => (String(r.role || "").toLowerCase() === "coach" ? 1 : 0);
+                return rank(a) - rank(b);
+              })
+              .map(p => (
               <li
                 key={p.id}
                 className="list-group-item bg-black text-light d-flex justify-content-between align-items-center"
@@ -323,9 +330,7 @@ export default function TeamDetail() {
               >
                 <div className="d-flex align-items-center gap-2">
                   <PlayerIdentity player={p} size={26} />
-                  <span className={`badge bg-secondary`}>
-                    {p.role || "-"}
-                  </span>
+                  <RoleBadge role={p.role} />
                   {p.on_cooldown && (
                     <span className="badge bg-warning text-dark">
                       ⏳ Cooldown

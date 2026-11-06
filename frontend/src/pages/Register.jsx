@@ -29,6 +29,8 @@ export default function Register() {
   const [draft, setDraft] = useState(null);
   const [draftNote, setDraftNote] = useState("");
   const [draftBusy, setDraftBusy] = useState(false);
+  const [coach, setCoach] = useState(null);
+  const [coachBusy, setCoachBusy] = useState(false);
   // Tournaments close their team list once matches exist.
   const [tournamentStarted, setTournamentStarted] = useState(false);
 
@@ -131,6 +133,11 @@ export default function Register() {
       .catch(() => setDraft(null));
 
     axios
+      .get(`${urlBase}/api/coach/status`, { withCredentials: true })
+      .then((res) => setCoach(res.data || null))
+      .catch(() => setCoach(null));
+
+    axios
       .get(`${urlBase}/api/settings`, { withCredentials: true })
       .then((res) => setTournamentStarted(Boolean(res.data?.tournament_started)))
       .catch(() => setTournamentStarted(false));
@@ -144,6 +151,47 @@ export default function Register() {
       setDraft(res.data || null);
     } catch {
       setDraft(null);
+    }
+  }
+
+  // ── Rookie coach registration ──
+  async function refreshCoach() {
+    try {
+      const res = await axios.get(`${urlBase}/api/coach/status`, {
+        withCredentials: true,
+      });
+      setCoach(res.data || null);
+    } catch {
+      setCoach(null);
+    }
+  }
+
+  async function handleCoachRegister() {
+    if (coachBusy) return;
+    setCoachBusy(true);
+    try {
+      const res = await axios.post(`${urlBase}/api/coach/register`, {}, { withCredentials: true });
+      toast(res.data?.message || "✅ Registered as a coach.");
+      await refreshCoach();
+    } catch (err) {
+      toast(err.response?.data || "❌ Failed to register as a coach");
+    } finally {
+      setCoachBusy(false);
+    }
+  }
+
+  async function handleCoachUnregister() {
+    if (coachBusy) return;
+    setCoachBusy(true);
+    try {
+      await axios.post(`${urlBase}/api/coach/unregister`, {}, { withCredentials: true });
+      toast("Coach registration removed.");
+      await refreshCoach();
+      await refreshDraft();
+    } catch (err) {
+      toast(err.response?.data || "❌ Failed to remove coach registration");
+    } finally {
+      setCoachBusy(false);
     }
   }
 
@@ -495,9 +543,12 @@ export default function Register() {
             </div>
           )}
 
-          {getLeague() === "rookie" && !isLeagueSub && !isBanned && (
+          {getLeague() === "rookie" && !isBanned && (coach?.is_coach || !isLeagueSub) && (
             <div className="card bg-dark border-secondary p-4 mb-4">
-              <h5>📝 Rookie Draft <span className="badge bg-secondary ms-2">Rookie League</span></h5>
+              <h5>
+                📝 {coach?.is_coach ? "Coach Draft" : "Rookie Draft"}{" "}
+                <span className="badge bg-secondary ms-2">Rookie League</span>
+              </h5>
 
               {draft?.signed_up ? (
                 <>
@@ -522,9 +573,9 @@ export default function Register() {
               ) : (
                 <>
                   <p className="text-secondary small">
-                    Can't find a team? Enter the draft and a mod will assign you to
-                    an existing rookie team, or group you with other draft players
-                    onto a new one.
+                    {coach?.is_coach
+                      ? "Sign up for the coach draft and a mod will place you on a rookie team that still needs a coach."
+                      : "Can't find a team? Enter the draft and a mod will assign you to an existing rookie team, or group you with other draft players onto a new one."}
                   </p>
                   <textarea
                     className="form-control bg-dark text-light mb-2"
@@ -535,14 +586,29 @@ export default function Register() {
                     onChange={(e) => setDraftNote(e.target.value)}
                   />
                   <div className="d-flex flex-wrap gap-2">
-                    <button
-                      className="btn btn-info w-auto"
-                      onClick={() => handleDraftSignup("player")}
-                      disabled={draftBusy}
-                    >
-                      {draftBusy ? "Joining…" : "Enter the draft"}
-                    </button>
-                    {draft?.coach_draft_enabled && (
+                    {coach?.is_coach ? (
+                      <button
+                        className="btn btn-info w-auto"
+                        onClick={() => handleDraftSignup("coach")}
+                        disabled={draftBusy || !draft?.coach_draft_enabled}
+                        title={
+                          draft?.coach_draft_enabled
+                            ? "Enter the coach draft"
+                            : "Coach signups are closed right now"
+                        }
+                      >
+                        {draftBusy ? "Joining…" : "🧑‍🏫 Enter the coach draft"}
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-info w-auto"
+                        onClick={() => handleDraftSignup("player")}
+                        disabled={draftBusy}
+                      >
+                        {draftBusy ? "Joining…" : "Enter the draft"}
+                      </button>
+                    )}
+                    {!coach?.is_coach && draft?.coach_draft_enabled && (
                       <button
                         className="btn btn-outline-info w-auto"
                         onClick={() => handleDraftSignup("coach")}
@@ -553,6 +619,12 @@ export default function Register() {
                       </button>
                     )}
                   </div>
+                  {coach?.is_coach && !draft?.coach_draft_enabled && (
+                    <p className="text-secondary small mt-2 mb-0">
+                      Coach signups are closed right now — a mod will open them when teams
+                      need coaches.
+                    </p>
+                  )}
                 </>
               )}
 
@@ -561,6 +633,72 @@ export default function Register() {
                   ⏳ Roster lock is active — placements happen when rosters open.
                 </p>
               )}
+            </div>
+          )}
+
+          {getLeague() === "rookie" && !isBanned && (
+            <div className="card bg-dark border-secondary p-4 mb-4">
+              <h5>🧑‍🏫 Register as a Coach <span className="badge bg-secondary ms-2">Rookie League</span></h5>
+
+              {coach?.is_coach ? (
+                <>
+                  <div className="alert ecgl-alert-success small mb-2">
+                    {coach?.auto_coach
+                      ? "✅ You're a Rookie League coach automatically — Varsity veterans coach instead of playing. Join a team that doesn't have a coach yet, or sign up for the coach draft below."
+                      : "✅ You're registered as a Rookie League coach. Join a team that doesn't have a coach yet, or sign up for the coach draft above to be placed automatically."}
+                  </div>
+                  {(coach?.teams_without_coach || []).length > 0 && (
+                    <p className="text-secondary small mb-2">
+                      Teams looking for a coach:{" "}
+                      {coach.teams_without_coach.map((t) => t.name).join(", ")}
+                    </p>
+                  )}
+                  <button
+                    className="btn btn-outline-warning w-auto"
+                    onClick={handleCoachUnregister}
+                    disabled={coachBusy}
+                  >
+                    {coachBusy
+                      ? "Removing…"
+                      : coach?.auto_coach
+                        ? "Opt out of coaching"
+                        : "Remove coach registration"}
+                  </button>
+                </>
+              ) : coach?.is_veteran ? (
+                <>
+                  <div className="alert ecgl-alert-warning small mb-2">
+                    You opted out of coaching. Veterans can't play in the Rookie League, so a mod
+                    has to allow you to play before you can be placed as a roster player.
+                  </div>
+                  <button
+                    className="btn btn-info w-auto"
+                    onClick={handleCoachRegister}
+                    disabled={coachBusy}
+                  >
+                    {coachBusy ? "Registering…" : "Coach again"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-secondary small">
+                    Coaches don't play — they sit on a rookie roster, provide comms and guide their
+                    team. Only one coach per team.
+                  </p>
+                  <button
+                    className="btn btn-info w-auto"
+                    onClick={handleCoachRegister}
+                    disabled={coachBusy}
+                  >
+                    {coachBusy ? "Registering…" : "Register as coach"}
+                  </button>
+                </>
+              )}
+
+              <p className="text-secondary small mt-2 mb-0">
+                Coaches can still create or join a team normally — registering doesn't stop you
+                from doing anything else.
+              </p>
             </div>
           )}
         </div>

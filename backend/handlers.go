@@ -306,6 +306,21 @@ func userHasDiscordRole(discordIDStr string, roleID string) bool {
 	return false
 }
 
+// userHasDiscordRoleFresh bypasses the cache and asks Discord directly.
+// Used for state-changing mod actions so a just-revoked role can't be used.
+func userHasDiscordRoleFresh(discordIDStr string, roleID string) bool {
+	if strings.TrimSpace(roleID) == "" {
+		return false
+	}
+	roles, _ := discordMemberRolesLookupOpt(discordIDStr, true)
+	for _, r := range roles {
+		if r == roleID {
+			return true
+		}
+	}
+	return false
+}
+
 // --- Discord role cache ---
 //
 // Role lookups used to hit https://discord.com/api/v10/guilds/{g}/members/{u}
@@ -315,8 +330,13 @@ func userHasDiscordRole(discordIDStr string, roleID string) bool {
 // all) and REST is only a fallback, memoised for discordRolesTTL.
 const discordRolesTTL = 60 * time.Second
 
+// Negative results are cached briefly so a missing role/guild membership doesn't
+// re-hit Discord on every page load.
+const discordRolesNegativeTTL = 30 * time.Second
+
 type cachedDiscordRoles struct {
 	roles   []string
+	inGuild bool
 	expires time.Time
 }
 
@@ -324,76 +344,303 @@ var (
 	discordRolesMu    sync.Mutex
 	discordRolesCache = map[string]cachedDiscordRoles{}
 	discordRoleClient = &http.Client{Timeout: 5 * time.Second}
+	// Serialises REST fallbacks so a burst of parallel requests can't stampede
+	// Discord into a 429.
+	discordRolesFetchMu sync.Mutex
 )
 
-// discordMemberRoles returns the guild role ids for a Discord user id.
-func discordMemberRoles(discordIDStr string) []string {
-	guildID := getEnv("DISCORD_GUILD_ID", "")
-	discordIDStr = strings.TrimSpace(discordIDStr)
-	if guildID == "" || discordIDStr == "" {
-		return nil
+// discordAPIURL builds a Discord REST URL, honouring DISCORD_API_BASE for tests.
+func discordAPIURL(path string) string {
+	base := strings.TrimRight(getEnv("DISCORD_API_BASE", "https://discord.com/api/v10"), "/")
+	return base + path
+}
+
+// discordRESTGet performs an authorised bot GET, waiting out a 429 once.
+func discordRESTGet(url string) ([]byte, int, error) {
+	botToken := getEnv("DISCORD_BOT_TOKEN", "")
+	if botToken == "" {
+		return nil, 0, fmt.Errorf("no bot token")
 	}
 
-	key := guildID + ":" + discordIDStr
-
-	discordRolesMu.Lock()
-	if c, ok := discordRolesCache[key]; ok && time.Now().Before(c.expires) {
-		roles := c.roles
-		discordRolesMu.Unlock()
-		return roles
-	}
-	discordRolesMu.Unlock()
-
-	var roles []string
-	found := false
-
-	// 1) Gateway state — instant, no HTTP round-trip.
-	if discordSession != nil && discordSession.State != nil {
-		if m, err := discordSession.State.Member(guildID, discordIDStr); err == nil && m != nil {
-			roles = m.Roles
-			found = true
-		}
-	}
-
-	// 2) REST fallback (cached after the first success).
-	if !found {
-		botToken := getEnv("DISCORD_BOT_TOKEN", "")
-		if botToken == "" {
-			return nil
-		}
-
-		req, _ := http.NewRequest("GET",
-			fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordIDStr),
-			nil)
+	for attempt := 0; attempt < 2; attempt++ {
+		req, _ := http.NewRequest("GET", url, nil)
 		req.Header.Set("Authorization", "Bot "+botToken)
 
 		resp, err := discordRoleClient.Do(req)
 		if err != nil {
-			return nil
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != 200 {
-			return nil
+			return nil, 0, err
 		}
 
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, resp.StatusCode, readErr
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests && attempt == 0 {
+			// Respect retry_after (seconds), but never stall a request for long.
+			wait := 250 * time.Millisecond
+			var rl struct {
+				RetryAfter float64 `json:"retry_after"`
+			}
+			if json.Unmarshal(body, &rl) == nil && rl.RetryAfter > 0 {
+				wait = time.Duration(rl.RetryAfter*float64(time.Second)) + 50*time.Millisecond
+			}
+			if wait > time.Second {
+				wait = time.Second
+			}
+			time.Sleep(wait)
+			continue
+		}
+
+		return body, resp.StatusCode, nil
+	}
+
+	return nil, http.StatusTooManyRequests, fmt.Errorf("discord rate limited")
+}
+
+// discordMemberRoles returns the guild role ids for a Discord user id.
+//
+// Order of preference:
+//  1. the in-memory TTL cache,
+//  2. the bot's gateway state (no HTTP at all),
+//  3. one REST call (serialised, 429-aware) as a fallback.
+func discordMemberRoles(discordIDStr string) []string {
+	roles, _ := discordMemberRolesLookup(discordIDStr)
+	return roles
+}
+
+// discordMemberInGuild reports whether the user is in the guild (cached).
+func discordMemberInGuild(discordIDStr string) bool {
+	_, inGuild := discordMemberRolesLookup(discordIDStr)
+	return inGuild
+}
+
+// discordMemberRolesLookup returns the user's guild roles plus whether they are
+// a member of the guild at all.
+//
+// Order of preference:
+//  1. the bot's gateway state — always checked first because it's free (no HTTP)
+//     and, when the GuildMembers intent is enabled, it is updated the moment a
+//     role changes in Discord. That makes role removals take effect immediately
+//     instead of waiting out a TTL.
+//  2. the in-memory TTL cache (populated by REST results),
+//  3. one REST call (serialised, 429-aware) as a fallback.
+//
+// forceRefresh skips step 2 and always asks Discord — used for mod write actions
+// so a role revoked seconds ago can't still authorise a state change.
+func discordMemberRolesLookup(discordIDStr string) (roles []string, inGuild bool) {
+	return discordMemberRolesLookupOpt(discordIDStr, false)
+}
+
+func discordMemberRolesLookupOpt(discordIDStr string, forceRefresh bool) (roles []string, inGuild bool) {
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	discordIDStr = strings.TrimSpace(discordIDStr)
+	if guildID == "" || discordIDStr == "" {
+		return nil, false
+	}
+
+	key := guildID + ":" + discordIDStr
+
+	// 1) Gateway state — instant, no HTTP round-trip, and never stale.
+	if discordSession != nil && discordSession.State != nil {
+		if m, err := discordSession.State.Member(guildID, discordIDStr); err == nil && m != nil {
+			cacheDiscordRoles(key, m.Roles, true, discordRolesTTL)
+			return m.Roles, true
+		}
+	}
+
+	// 2) Cached REST result.
+	if !forceRefresh {
+		discordRolesMu.Lock()
+		if c, ok := discordRolesCache[key]; ok && time.Now().Before(c.expires) {
+			roles, inGuild := c.roles, c.inGuild
+			discordRolesMu.Unlock()
+			return roles, inGuild
+		}
+		discordRolesMu.Unlock()
+	}
+
+	// 3) REST fallback, one caller at a time.
+	discordRolesFetchMu.Lock()
+	defer discordRolesFetchMu.Unlock()
+
+	// Someone else may have filled the cache while we waited for the lock.
+	if !forceRefresh {
+		discordRolesMu.Lock()
+		if c, ok := discordRolesCache[key]; ok && time.Now().Before(c.expires) {
+			roles, inGuild := c.roles, c.inGuild
+			discordRolesMu.Unlock()
+			return roles, inGuild
+		}
+		discordRolesMu.Unlock()
+	}
+
+	body, status, err := discordRESTGet(
+		discordAPIURL(fmt.Sprintf("/guilds/%s/members/%s", guildID, discordIDStr)))
+	if err != nil {
+		return nil, false
+	}
+
+	switch status {
+	case http.StatusOK:
 		var member struct {
 			Roles []string `json:"roles"`
 		}
-		if json.NewDecoder(resp.Body).Decode(&member) != nil {
-			return nil
+		if json.Unmarshal(body, &member) != nil {
+			return nil, false
 		}
-		roles = member.Roles
+		cacheDiscordRoles(key, member.Roles, true, discordRolesTTL)
+		return member.Roles, true
+	case http.StatusNotFound:
+		// Not in the guild — remember it for a short while instead of retrying.
+		cacheDiscordRoles(key, nil, false, discordRolesNegativeTTL)
+		return nil, false
+	default:
+		log.Printf("⚠️ Discord role lookup for %s returned %d", discordIDStr, status)
+		return nil, false
 	}
+}
 
+func cacheDiscordRoles(key string, roles []string, inGuild bool, ttl time.Duration) {
 	discordRolesMu.Lock()
-	discordRolesCache[key] = cachedDiscordRoles{
-		roles:   roles,
-		expires: time.Now().Add(discordRolesTTL),
+	defer discordRolesMu.Unlock()
+	if len(discordRolesCache) > 5000 {
+		discordRolesCache = map[string]cachedDiscordRoles{}
 	}
-	discordRolesMu.Unlock()
+	discordRolesCache[key] = cachedDiscordRoles{roles: roles, inGuild: inGuild, expires: time.Now().Add(ttl)}
+}
 
-	return roles
+// Guild info (name/icon/member counts) cache — purely cosmetic data.
+var (
+	discordGuildInfoMu      sync.Mutex
+	discordGuildInfoBody    []byte
+	discordGuildInfoExpires time.Time
+)
+
+// --- Bulk guild member prefetch ---
+//
+// The privileged GuildMembers intent is unavailable to us (the app is past
+// 10,000 users and needs Discord review), so the gateway can't track members.
+// Instead we pull the whole member list with the plain REST endpoint
+// GET /guilds/{id}/members?limit=1000 — one call per 1000 members — and fill the
+// role cache from it. That's ONE request per refresh cycle for the entire guild
+// instead of one request per role check, which is what was causing the 429s.
+// Bulk guild member prefetch refresh interval. Tunable with
+// DISCORD_ROLE_REFRESH_SECONDS (default 30s) — one REST call per cycle covers
+// the whole guild, so this is cheap. Lower = fresher roles, more API calls.
+const discordMembersRefreshInterval = 30 * time.Second
+
+// discordMembersRefreshEvery returns the effective refresh interval.
+func discordMembersRefreshEvery() time.Duration {
+	secs := getEnvInt("DISCORD_ROLE_REFRESH_SECONDS", int(discordMembersRefreshInterval/time.Second))
+	if secs < 10 {
+		secs = 10
+	}
+	if secs > 600 {
+		secs = 600
+	}
+	return time.Duration(secs) * time.Second
+}
+
+var (
+	discordMemberRefreshMu sync.Mutex
+	discordMembersLastSync time.Time
+	discordMembersCount    int
+)
+
+// prefetchGuildMemberRoles pages through the guild member list and refreshes the
+// cached roles for every member. Safe to call concurrently.
+func prefetchGuildMemberRoles() {
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	if guildID == "" || getEnv("DISCORD_BOT_TOKEN", "") == "" {
+		return
+	}
+
+	discordMemberRefreshMu.Lock()
+	defer discordMemberRefreshMu.Unlock()
+
+	type member struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
+		Roles []string `json:"roles"`
+	}
+
+	after := ""
+	loaded := 0
+	for page := 0; page < 100; page++ {
+		url := discordAPIURL(fmt.Sprintf("/guilds/%s/members?limit=1000", guildID))
+		if after != "" {
+			url += "&after=" + after
+		}
+
+		body, status, err := discordRESTGet(url)
+		if err != nil {
+			log.Printf("⚠️ Guild member prefetch failed: %v", err)
+			return
+		}
+		if status != http.StatusOK {
+			log.Printf("⚠️ Guild member prefetch returned %d", status)
+			return
+		}
+
+		var members []member
+		if json.Unmarshal(body, &members) != nil {
+			return
+		}
+		if len(members) == 0 {
+			break
+		}
+
+		for _, m := range members {
+			if m.User.ID == "" {
+				continue
+			}
+			// Twice the refresh interval so entries are always replaced by the
+			// next prefetch rather than expiring in between.
+			cacheDiscordRoles(guildID+":"+m.User.ID, m.Roles, true, 2*discordMembersRefreshEvery())
+			loaded++
+		}
+
+		if len(members) < 1000 {
+			break
+		}
+		after = members[len(members)-1].User.ID
+	}
+
+	discordMembersLastSync = time.Now()
+	discordMembersCount = loaded
+}
+
+// StartDiscordRoleRefresher keeps the guild role cache warm in the background.
+func StartDiscordRoleRefresher() {
+	every := discordMembersRefreshEvery()
+	log.Printf("👥 Discord role cache refresh every %s", every)
+
+	// First pass shortly after boot so the UI is warm quickly.
+	go func() {
+		time.Sleep(2 * time.Second)
+		prefetchGuildMemberRoles()
+		log.Printf("👥 Discord role cache primed for %d member(s)", discordMembersCount)
+	}()
+
+	go func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for range ticker.C {
+			prefetchGuildMemberRoles()
+		}
+	}()
+}
+
+// invalidateDiscordRoles drops the cached roles for one user (call after a
+// role change so the UI picks it up immediately).
+func invalidateDiscordRoles(discordIDStr string) {
+	guildID := getEnv("DISCORD_GUILD_ID", "")
+	discordRolesMu.Lock()
+	delete(discordRolesCache, guildID+":"+strings.TrimSpace(discordIDStr))
+	discordRolesMu.Unlock()
 }
 
 // --- Players ---
@@ -435,6 +682,52 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 
 	players := make([]map[string]any, 0, len(rows))
 
+	// Rookie coach lookup: registered coaches + who currently holds a Coach slot.
+	registeredCoaches := map[int64]bool{}
+	coachTeams := map[int64]string{}
+	coachOptOut := map[int64]bool{}
+	coachOverride := map[int64]bool{}
+	{
+		var ids []int64
+		DB.Table("player_settings").Where("is_rookie_coach = TRUE").Pluck("player_id", &ids)
+		for _, id := range ids {
+			registeredCoaches[id] = true
+		}
+
+		// Veterans are coaches automatically — load the opt-outs and overrides
+		// in bulk so this stays one query each instead of one per player.
+		var optOutIDs []int64
+		DB.Table("player_settings").
+			Where("COALESCE(rookie_coach_opt_out, FALSE) = TRUE").
+			Pluck("player_id", &optOutIDs)
+		for _, id := range optOutIDs {
+			coachOptOut[id] = true
+		}
+
+		var overrideIDs []int64
+		DB.Table("player_league_roles").
+			Where("league = ? AND COALESCE(play_override, FALSE) = TRUE", LeagueRookie).
+			Pluck("player_id", &overrideIDs)
+		for _, id := range overrideIDs {
+			coachOverride[id] = true
+		}
+
+		type coachRow struct {
+			PlayerID int64
+			TeamName string
+		}
+		var coachRows []coachRow
+		DB.Raw(`
+			SELECT tm.player_id, t.name AS team_name
+			FROM team_members tm
+			JOIN teams t ON t.id = tm.team_id
+			WHERE t.league = ? AND LOWER(TRIM(COALESCE(tm.role, ''))) = 'coach'
+		`, LeagueRookie).Scan(&coachRows)
+		for _, c := range coachRows {
+			coachTeams[c.PlayerID] = c.TeamName
+		}
+	}
+
 	for _, r := range rows {
 		// Convert ID to string because Discord IDs are string-based
 		idStr := strconv.FormatInt(r.ID, 10)
@@ -443,16 +736,31 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 		isCaster := false
 		isMod := false
 
+		coachTeam := coachTeams[r.ID]
+		isVeteran := isVeteranInLeague(LeagueRookie, r.ID)
+
+		// Coach status: on a roster as a coach, self-registered, or a veteran who
+		// is a coach automatically (unless they opted out or a mod overrode them).
+		isCoach := coachTeam != "" || registeredCoaches[r.ID]
+		if !isCoach && !coachOptOut[r.ID] && !coachOverride[r.ID] &&
+			isVeteran && getEnv("ROOKIE_VETERAN_RULE_ENABLED", "true") == "true" {
+			isCoach = true
+		}
+
 		players = append(players, map[string]any{
-			"id":           idStr,
-			"username":     r.Username,
-			"display_name": r.DisplayName,
-			"avatar":       r.Avatar,
-			"role":         r.Role,
-			"device":       r.Device,
-			"timezone":     r.Timezone,
-			"is_caster":    isCaster,
-			"is_mod":       isMod,
+			"id":            idStr,
+			"username":      r.Username,
+			"display_name":  r.DisplayName,
+			"avatar":        r.Avatar,
+			"role":          r.Role,
+			"device":        r.Device,
+			"timezone":      r.Timezone,
+			"is_caster":     isCaster,
+			"is_mod":        isMod,
+			"is_coach":      isCoach,
+			"coach_team":    coachTeam,
+			"is_veteran":    isVeteran,
+			"play_override": coachOverride[r.ID],
 		})
 	}
 
@@ -1278,13 +1586,16 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🚫 Block banned players
-	if strings.EqualFold(player.Role, "Banned") {
+	// 🚫 Block banned players and League Subs (role is per league)
+	lg := leagueFromRequest(r)
+	if playerIsBannedIn(playerID, lg) {
 		http.Error(w, "Your account is banned from joining teams.", http.StatusForbidden)
 		return
 	}
-
-	lg := leagueFromRequest(r)
+	if playerIsLeagueSubIn(playerID, lg) {
+		http.Error(w, "League Subs cannot join a team roster.", http.StatusForbidden)
+		return
+	}
 
 	// 🚫 Draft-only league: players can't join teams directly, only the draft.
 	if !leagueAllowsTeamCreation(lg) {
@@ -1332,16 +1643,16 @@ func handleRequestJoinTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🚫 Prevent join if team is already full
-	var count int64
-	DB.Model(&TeamMember{}).Where("team_id = ?", team.ID).Count(&count)
+	// 🚫 Prevent join if the playing roster is already full (coaches don't count)
+	count := teamPlayingCount(team.ID)
 	maxPlayers := leagueMaxTeamPlayers(team.League)
-	if count >= int64(maxPlayers) {
+	if maxPlayers > 0 && count >= int64(maxPlayers) {
 		http.Error(w, fmt.Sprintf("This team already has the maximum of %d players.", maxPlayers), http.StatusForbidden)
 		return
 	}
 
-	// 🧑‍🤝‍🧑 Rookie-league composition: 1 main-league veteran per 3 new players.
+	// 🧑‍🤝‍🧑 Rookie-league composition: veterans are allowed on the roster, but
+	// only ever as Coaches (they don't play).
 	if ok, reason := canJoinRookieTeam(team.ID, playerID); !ok {
 		http.Error(w, reason, http.StatusForbidden)
 		return
@@ -1407,25 +1718,28 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🚫 Prevent banned players from creating a team
-	if strings.EqualFold(player.Role, "Banned") {
+	// 🚫 Prevent banned players from creating a team (role is per league)
+	lg := leagueFromRequest(r)
+	if playerIsBannedIn(playerID, lg) {
 		http.Error(w, "Your account is banned from creating teams.", http.StatusForbidden)
 		return
 	}
-
-	// 🚫 Prevent team creation when global roster lock is active
-	if isRosterLocked() {
-		http.Error(w, "Roster lock is active — team creation disabled", http.StatusForbidden)
+	if playerIsLeagueSubIn(playerID, lg) {
+		http.Error(w, "League Subs cannot own a team in this league.", http.StatusForbidden)
 		return
 	}
-
-	lg := leagueFromRequest(r)
 
 	// 🚫 League may be draft-only: players can't form their own teams.
 	if !leagueAllowsTeamCreation(lg) {
 		http.Error(w,
 			"Team creation is closed in this league — sign up for the draft and a mod will place you on a team.",
 			http.StatusForbidden)
+		return
+	}
+
+	// 🚫 Prevent team creation when global roster lock is active
+	if isRosterLocked() {
+		http.Error(w, "Roster lock is active — team creation disabled", http.StatusForbidden)
 		return
 	}
 
@@ -1576,11 +1890,24 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Action {
 	case "accept":
+		// Rookie-league veterans join as Coaches — roster members who don't play.
+		var joinTeam Team
+		DB.Select("league").First(&joinTeam, jr.TeamID)
+		acceptRole := leagueMemberRole(joinTeam.League, int64(jr.PlayerID))
+
+		// Only one coach per team.
+		if strings.EqualFold(acceptRole, "Coach") {
+			if blocked, reason := coachRoleBlocked(jr.TeamID); blocked {
+				http.Error(w, reason, http.StatusBadRequest)
+				return
+			}
+		}
+
 		// ✅ Add player to team_members safely
 		tm := TeamMember{
 			PlayerID: int64(jr.PlayerID),
 			TeamID:   jr.TeamID,
-			Role:     "Member",
+			Role:     acceptRole,
 		}
 		if err := DB.Create(&tm).Error; err != nil {
 			log.Printf("❌ Failed to add player %d to team %d: %v", jr.PlayerID, jr.TeamID, err)
@@ -1614,7 +1941,7 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// ✅ Log readable output
-		log.Printf("✅ %s added to %s as Member", display, teamName)
+		log.Printf("✅ %s added to %s as %s", display, teamName, acceptRole)
 
 		SendDiscordLog(
 			fmt.Sprintf(
@@ -1628,7 +1955,7 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 		// ✅ Log history (skip duplicates)
 		var existing PlayerHistory
 		err := DB.Where("player_id = ? AND team_id = ? AND season = ? AND role = ?",
-			jr.PlayerID, jr.TeamID, currentSeason, "Member").First(&existing).Error
+			jr.PlayerID, jr.TeamID, currentSeason, acceptRole).First(&existing).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			var team Team
 			DB.First(&team, jr.TeamID)
@@ -1636,7 +1963,7 @@ func HandleJoinRequestDecision(w http.ResponseWriter, r *http.Request) {
 				PlayerID:   int64(jr.PlayerID),
 				TeamID:     jr.TeamID,
 				TeamName:   team.Name,
-				Role:       "Member",
+				Role:       acceptRole,
 				Season:     currentSeason,
 				IsTeamJoin: true,
 			})
@@ -3573,12 +3900,35 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 
 	// --- Final Response
 	lstats := playerStatsForLeague(player, lg)
+
+	// Rookie coach status (coach role is rookie-only).
+	coachRole := ""
+	coachTeam := ""
+	{
+		var row struct {
+			Role string
+			Name string
+		}
+		DB.Raw(`
+			SELECT tm.role, t.name
+			FROM team_members tm
+			JOIN teams t ON t.id = tm.team_id
+			WHERE tm.player_id = ? AND t.league = ?
+			LIMIT 1
+		`, playerID, LeagueRookie).Scan(&row)
+		coachRole = strings.TrimSpace(row.Role)
+		if strings.EqualFold(coachRole, "coach") {
+			coachTeam = row.Name
+		}
+	}
+	isRookieCoach := isRegisteredRookieCoach(playerID) || coachTeam != ""
+
 	respondJSON(w, map[string]any{
 		"id":              strconv.FormatInt(player.ID, 10),
 		"username":        player.Username,
 		"display_name":    player.DisplayName,
 		"avatar":          player.Avatar,
-		"role":            player.Role,
+		"role":            playerRoleInLeague(playerID, lg),
 		"timezone":        player.Timezone,
 		"rating":          lstats.Rating,
 		"wins":            lstats.Wins,
@@ -3588,6 +3938,12 @@ func GetPlayerDetail(w http.ResponseWriter, r *http.Request) {
 		"current_team_id": team.ID,
 		"history":         history,
 		"archived_stats":  archived,
+		"is_rookie_coach": isRookieCoach,
+		"coach_team":      coachTeam,
+		"is_veteran":      isVeteranInLeague(LeagueRookie, playerID),
+		"play_override":   playerPlayOverride(playerID, LeagueRookie),
+		"locked_to_coach": playerLockedToCoach(LeagueRookie, playerID),
+		"league_role":     playerRoleInLeague(playerID, lg),
 	})
 }
 
@@ -3925,94 +4281,72 @@ func requireLeagueMod(w http.ResponseWriter, r *http.Request) (string, bool) {
 		return "", false
 	}
 
-	guildID := os.Getenv("DISCORD_GUILD_ID")
-	modRoleID := os.Getenv("DISCORD_LEAGUE_MOD_ROLE_ID")
-	botToken := os.Getenv("DISCORD_BOT_TOKEN")
-
-	if guildID == "" || modRoleID == "" || botToken == "" {
+	modRoleID := strings.TrimSpace(os.Getenv("DISCORD_LEAGUE_MOD_ROLE_ID"))
+	if getEnv("DISCORD_GUILD_ID", "") == "" || modRoleID == "" {
 		http.Error(w, "Server not configured for Discord role check", http.StatusInternalServerError)
 		return "", false
 	}
 
-	// --- Call Discord API ---
-	req, _ := http.NewRequest("GET",
-		fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordID),
-		nil)
-	req.Header.Set("Authorization", "Bot "+botToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("❌ Discord API request failed: %v", err)
-		http.Error(w, "Failed to reach Discord API", http.StatusInternalServerError)
-		return "", false
+	// Cached, gateway-first role lookup — no per-request Discord round-trip, so a
+	// mod panel firing a dozen API calls costs at most one Discord request.
+	// Reads may use the cache; anything that changes state verifies live, so a
+	// role removed in Discord can't still authorise a real action.
+	isRead := r.Method == http.MethodGet || r.Method == http.MethodHead
+	allowed := false
+	if isRead {
+		allowed = userHasDiscordRole(discordID, modRoleID)
+	} else {
+		allowed = userHasDiscordRoleFresh(discordID, modRoleID)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("❌ Discord returned %d: %s", resp.StatusCode, string(body))
+	if !allowed {
 		http.Error(w, "Failed to verify Discord role", http.StatusForbidden)
 		return "", false
 	}
 
-	var member struct {
-		User struct {
-			ID       string `json:"id"`
-			Username string `json:"username"`
-		} `json:"user"`
-		Roles []string `json:"roles"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&member); err != nil {
-		log.Printf("❌ Discord response parse error: %v", err)
-		http.Error(w, "Failed to parse Discord response", http.StatusInternalServerError)
-		return "", false
+	// Don't record audit entries for viewing the audit log itself.
+	if r.Method == http.MethodGet && r.URL.Path == "/api/mod/audit-logs" {
+		return discordID, true
 	}
 
-	//log.Printf("👤 Discord member: %s (%s)", member.User.Username, member.User.ID)
-	//log.Printf("🎭 Roles returned: %+v", member.Roles)
-	//log.Printf("🔎 Expecting League Mod role ID: %s", modRoleID)
+	// Console audit log for *all* mod actions (even those without Discord logs).
+	// The username comes from our own DB so we never need a second Discord call.
+	var actor struct {
+		Username    string
+		DisplayName string
+	}
+	DB.Table("players").Select("username, display_name").Where("id = ?", discordID).Limit(1).Scan(&actor)
+	username := strings.TrimSpace(actor.Username)
+	if username == "" {
+		username = strings.TrimSpace(actor.DisplayName)
+	}
 
-	for _, role := range member.Roles {
-		if role == modRoleID {
-			// Don't record audit entries for viewing the audit log itself.
-			if r.Method == http.MethodGet && r.URL.Path == "/api/mod/audit-logs" {
-				return discordID, true
-			}
-			// Console audit log for *all* mod actions (even those without Discord logs)
-			// Use RequestURI to include query string when present.
-			username := strings.TrimSpace(member.User.Username)
-			action := modActionLabel(r)
-			target := modTargetSummary(r)
-			RecordModAudit(ModAuditEntry{
-				Time:          time.Now(),
-				Action:        action,
-				Method:        r.Method,
-				Path:          r.URL.Path,
-				RequestURI:    r.URL.RequestURI(),
-				Target:        target,
-				ActorID:       discordID,
-				ActorUsername: username,
-			})
-			if username != "" {
-				if target != "" {
-					log.Printf("🧰 [MOD] %s — %s %s — %s (by %s / %s)", action, r.Method, r.URL.RequestURI(), target, username, discordID)
-				} else {
-					log.Printf("🧰 [MOD] %s — %s %s (by %s / %s)", action, r.Method, r.URL.RequestURI(), username, discordID)
-				}
-			} else {
-				if target != "" {
-					log.Printf("🧰 [MOD] %s — %s %s — %s (by %s)", action, r.Method, r.URL.RequestURI(), target, discordID)
-				} else {
-					log.Printf("🧰 [MOD] %s — %s %s (by %s)", action, r.Method, r.URL.RequestURI(), discordID)
-				}
-			}
-			return discordID, true
+	action := modActionLabel(r)
+	target := modTargetSummary(r)
+	RecordModAudit(ModAuditEntry{
+		Time:          time.Now(),
+		Action:        action,
+		Method:        r.Method,
+		Path:          r.URL.Path,
+		RequestURI:    r.URL.RequestURI(),
+		Target:        target,
+		ActorID:       discordID,
+		ActorUsername: username,
+	})
+	if username != "" {
+		if target != "" {
+			log.Printf("🧰 [MOD] %s — %s %s — %s (by %s / %s)", action, r.Method, r.URL.RequestURI(), target, username, discordID)
+		} else {
+			log.Printf("🧰 [MOD] %s — %s %s (by %s / %s)", action, r.Method, r.URL.RequestURI(), username, discordID)
+		}
+	} else {
+		if target != "" {
+			log.Printf("🧰 [MOD] %s — %s %s — %s (by %s)", action, r.Method, r.URL.RequestURI(), target, discordID)
+		} else {
+			log.Printf("🧰 [MOD] %s — %s %s (by %s)", action, r.Method, r.URL.RequestURI(), discordID)
 		}
 	}
 
-	log.Printf("🚫 User %s missing League Mod role %s", discordID, modRoleID)
-	http.Error(w, "Forbidden: missing League Mod role", http.StatusForbidden)
-	return "", false
+	return discordID, true
 }
 
 // requireDev checks if the user has the DISCORD_DEV_ROLE_ID role.
@@ -4024,44 +4358,15 @@ func requireDev(w http.ResponseWriter, r *http.Request) (string, bool) {
 		return "", false
 	}
 
-	guildID := os.Getenv("DISCORD_GUILD_ID")
-	devRoleID := os.Getenv("DISCORD_DEV_ROLE_ID")
-	botToken := os.Getenv("DISCORD_BOT_TOKEN")
-
-	if guildID == "" || devRoleID == "" || botToken == "" {
+	devRoleID := strings.TrimSpace(os.Getenv("DISCORD_DEV_ROLE_ID"))
+	if getEnv("DISCORD_GUILD_ID", "") == "" || devRoleID == "" {
 		http.Error(w, "Server not configured for dev role check", http.StatusInternalServerError)
 		return "", false
 	}
 
-	req, _ := http.NewRequest("GET",
-		fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordID),
-		nil)
-	req.Header.Set("Authorization", "Bot "+botToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		http.Error(w, "Failed to reach Discord API", http.StatusInternalServerError)
-		return "", false
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		http.Error(w, "Failed to verify Discord role", http.StatusForbidden)
-		return "", false
-	}
-
-	var member struct {
-		Roles []string `json:"roles"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&member); err != nil {
-		http.Error(w, "Failed to parse Discord response", http.StatusInternalServerError)
-		return "", false
-	}
-
-	for _, role := range member.Roles {
-		if role == devRoleID {
-			return discordID, true
-		}
+	// Cached, gateway-first lookup — no Discord round-trip per request.
+	if userHasDiscordRole(discordID, devRoleID) {
+		return discordID, true
 	}
 
 	http.Error(w, "Forbidden: missing Dev role", http.StatusForbidden)
@@ -6336,10 +6641,20 @@ func ModAddPlayerToTeam(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Normalize role
+	// Normalize role. Rookie-league veterans and registered coaches are always
+	// Coaches — they can be on the roster but they don't play.
 	role := strings.TrimSpace(req.Role)
 	if role == "" {
 		role = "Member"
+	}
+	if leagueMemberRole(team.League, pid) == "Coach" {
+		role = "Coach"
+	}
+	if strings.EqualFold(role, "Coach") {
+		if blocked, reason := coachRoleBlocked(req.TeamID); blocked {
+			http.Error(w, reason, http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Insert new team membership
@@ -10486,27 +10801,8 @@ func HandleCheckDiscordMembership(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	guildID := getEnv("DISCORD_GUILD_ID", "")
-	botToken := getEnv("DISCORD_BOT_TOKEN", "")
-
-	if guildID == "" || botToken == "" {
-		respondJSON(w, map[string]any{"in_guild": false})
-		return
-	}
-
-	url := fmt.Sprintf("https://discord.com/api/v10/guilds/%s/members/%s", guildID, discordIDStr)
-
-	req2, _ := http.NewRequest("GET", url, nil)
-	req2.Header.Set("Authorization", "Bot "+botToken)
-
-	resp, err := http.DefaultClient.Do(req2)
-	if err != nil {
-		respondJSON(w, map[string]any{"in_guild": false})
-		return
-	}
-
 	respondJSON(w, map[string]any{
-		"in_guild": resp.StatusCode == 200,
+		"in_guild": discordMemberInGuild(discordIDStr),
 	})
 }
 
@@ -10520,25 +10816,8 @@ func HandleGetDiscordServerInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch guild info
-	url := fmt.Sprintf("https://discord.com/api/v10/guilds/%s?with_counts=true", guildID)
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("Authorization", "Bot "+botToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		http.Error(w, "Discord API error", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		log.Println("Discord error:", string(body))
-		http.Error(w, "Discord API returned error", http.StatusInternalServerError)
-		return
-	}
-
+	// Fetch guild info (cached — the member/online counts don't need to be live,
+	// and this endpoint was being called on every modal open).
 	var guild struct {
 		Name   string `json:"name"`
 		Icon   string `json:"icon"`
@@ -10548,9 +10827,34 @@ func HandleGetDiscordServerInfo(w http.ResponseWriter, r *http.Request) {
 		ApproximatePresenceCount int `json:"approximate_presence_count"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&guild); err != nil {
-		http.Error(w, "Failed to decode guild data", http.StatusInternalServerError)
-		return
+	discordGuildInfoMu.Lock()
+	cachedBody := discordGuildInfoBody
+	cachedOK := time.Now().Before(discordGuildInfoExpires)
+	discordGuildInfoMu.Unlock()
+
+	if cachedOK && len(cachedBody) > 0 {
+		_ = json.Unmarshal(cachedBody, &guild)
+	} else {
+		url := fmt.Sprintf("https://discord.com/api/v10/guilds/%s?with_counts=true", guildID)
+		body, status, err := discordRESTGet(url)
+		if err != nil {
+			http.Error(w, "Discord API error", http.StatusInternalServerError)
+			return
+		}
+		if status != 200 {
+			log.Println("Discord error:", string(body))
+			http.Error(w, "Discord API returned error", http.StatusInternalServerError)
+			return
+		}
+		if err := json.Unmarshal(body, &guild); err != nil {
+			http.Error(w, "Failed to decode guild data", http.StatusInternalServerError)
+			return
+		}
+
+		discordGuildInfoMu.Lock()
+		discordGuildInfoBody = body
+		discordGuildInfoExpires = time.Now().Add(5 * time.Minute)
+		discordGuildInfoMu.Unlock()
 	}
 
 	// Build URLs
@@ -10931,6 +11235,10 @@ func syncMemberRoles(
 			}
 		}
 	}
+
+	// Roles just changed — drop the memoised copy so the next request (e.g. the
+	// caster/mod tab check) reflects it immediately instead of up to a minute later.
+	invalidateDiscordRoles(fmt.Sprintf("%d", playerID))
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -10972,6 +11280,7 @@ var settingsKeys = []string{
 	"ROOKIE_VETERAN_MAX_GAMES",
 	"ROOKIE_TEAM_CREATION_ENABLED",
 	"ROOKIE_COACH_DRAFT_ENABLED",
+	"ROOKIE_COACH_ROLE_CHANGE_REMOVES",
 	"ROOKIE_LEAGUE_PUBLIC",
 	"ARENA_MODE_ENABLED",
 	"DISCORD_INVITE_URL",
@@ -11090,18 +11399,40 @@ func persistEnvFile() error {
 // RULES SECTIONS
 // =============================================================================
 
-// GET /api/rules — public, returns all rule sections ordered
+// GET /api/rules — public. Hidden sections are only returned to staff when they
+// explicitly ask for them (?include_hidden=1), which the rules editor does.
 func HandleGetRules(w http.ResponseWriter, r *http.Request) {
+	lg := leagueForRules(r)
+
+	includeHidden := r.URL.Query().Get("include_hidden") == "1" && sessionIsStaff(r)
+
+	q := DB.Where("league = ?", lg)
+	if !includeHidden {
+		q = q.Where("COALESCE(hidden, FALSE) = FALSE")
+	}
+
 	var sections []RuleSection
-	DB.Order("sort_order ASC, id ASC").Find(&sections)
+	q.Order("sort_order ASC, id ASC").Find(&sections)
 	respondJSON(w, sections)
 }
 
-// POST /api/mod/rules — save all rule sections (replace all)
+// leagueForRules resolves the league for the rules endpoints. Unlike most
+// endpoints an explicit ?league= wins over the header, so the settings page can
+// edit a league's rules without switching the whole app.
+func leagueForRules(r *http.Request) string {
+	if v := strings.TrimSpace(r.URL.Query().Get("league")); v != "" {
+		return normalizeLeague(v)
+	}
+	return leagueFromRequest(r)
+}
+
+// POST /api/mod/rules — save all rule sections for one league (replace all)
 func HandleSaveRules(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireLeagueMod(w, r); !ok {
 		return
 	}
+
+	lg := leagueForRules(r)
 
 	var incoming []RuleSection
 	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
@@ -11109,17 +11440,18 @@ func HandleSaveRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Replace all sections in a transaction
+	// Replace this league's sections in a transaction. Other leagues are untouched.
 	tx := DB.Begin()
-	tx.Where("1 = 1").Delete(&RuleSection{})
+	tx.Where("league = ?", lg).Delete(&RuleSection{})
 	for i, s := range incoming {
 		s.ID = 0
+		s.League = lg
 		s.SortOrder = i
 		tx.Create(&s)
 	}
 	tx.Commit()
 
-	respondJSON(w, map[string]string{"status": "ok"})
+	respondJSON(w, map[string]string{"status": "ok", "league": lg})
 }
 
 // ===========================================================================

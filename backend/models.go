@@ -322,9 +322,13 @@ type ModAuditLog struct {
 // --- Rules Sections (editable by mods) ---
 type RuleSection struct {
 	ID        uint   `gorm:"primaryKey" json:"id"`
+	League    string `json:"league" gorm:"default:'main';index"`
 	Title     string `json:"title"`
 	Content   string `json:"content" gorm:"type:text"`
 	SortOrder int    `json:"sort_order" gorm:"default:0"`
+	// Hidden sections stay in the editor (and keep their content) but are not
+	// served to the public rules page.
+	Hidden bool `json:"hidden" gorm:"default:false"`
 }
 
 // --- Highlight Clips (montage on home page) ---
