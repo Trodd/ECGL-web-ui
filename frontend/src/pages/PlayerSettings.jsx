@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { toast } from "../toast";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
 import { ROLE_OPTIONS, DEVICE_OPTIONS, TIMEZONE_GROUPS } from "../profileOptions";
@@ -64,8 +65,6 @@ export default function PlayerSettings() {
   const [teams, setTeams] = useState([]);
   const [notifyTypes, setNotifyTypes] = useState([]);
   const [cooldown, setCooldown] = useState(null);
-  const [profileMsg, setProfileMsg] = useState("");
-  const [prefsMsg, setPrefsMsg] = useState("");
   const [overlayToken, setOverlayToken] = useState("");
   const [busy, setBusy] = useState("");
 
@@ -122,7 +121,7 @@ export default function PlayerSettings() {
   async function saveProfile() {
     if (!profile) return;
     setBusy("profile");
-    setProfileMsg("");
+    toast("");
     try {
       const res = await fetch(`${urlBase}/api/player/settings`, {
         method: "POST",
@@ -135,10 +134,10 @@ export default function PlayerSettings() {
         }),
       });
       if (!res.ok) throw new Error(await res.text());
-      setProfileMsg("✅ Profile saved.");
+      toast("✅ Profile saved.");
       loadSettings();
     } catch (err) {
-      setProfileMsg("❌ " + (err.message || "Failed to save profile"));
+      toast("❌ " + (err.message || "Failed to save profile"));
     } finally {
       setBusy("");
     }
@@ -148,7 +147,7 @@ export default function PlayerSettings() {
     const next = { ...(prefs || {}), ...patch };
     setPrefs(next);
     setBusy("prefs");
-    setPrefsMsg("");
+    toast("");
     try {
       const res = await fetch(`${urlBase}/api/player/settings`, {
         method: "POST",
@@ -160,10 +159,10 @@ export default function PlayerSettings() {
       const data = await res.json();
       setPrefs(data.prefs);
       cachePrefs(data.prefs);
-      setPrefsMsg("✅ Saved.");
-      setTimeout(() => setPrefsMsg(""), 2500);
+      toast("✅ Saved.");
+      setTimeout(() => toast(""), 2500);
     } catch (err) {
-      setPrefsMsg("❌ " + (err.message || "Failed to save"));
+      toast("❌ " + (err.message || "Failed to save"));
     } finally {
       setBusy("");
     }
@@ -189,9 +188,9 @@ export default function PlayerSettings() {
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setOverlayToken(data.overlay_token || "");
-      setPrefsMsg("✅ New token generated.");
+      toast("✅ New token generated.");
     } catch (err) {
-      setPrefsMsg("❌ " + (err.message || "Failed to rotate token"));
+      toast("❌ " + (err.message || "Failed to rotate token"));
     } finally {
       setBusy("");
     }
@@ -394,7 +393,6 @@ export default function PlayerSettings() {
             <button className="btn btn-success btn-sm" onClick={saveProfile} disabled={busy === "profile"}>
               {busy === "profile" ? "Saving…" : "Save profile"}
             </button>
-            {profileMsg && <span className="small text-info">{profileMsg}</span>}
           </div>
 
           {teams.length > 0 && (
@@ -458,7 +456,6 @@ export default function PlayerSettings() {
               );
             })}
           </div>
-          {prefsMsg && <div className="small text-info mt-2">{prefsMsg}</div>}
         </div>
       )}
 
@@ -511,7 +508,6 @@ export default function PlayerSettings() {
             <label className="form-check-label small text-light">Reduce motion & glow effects</label>
           </div>
 
-          {prefsMsg && <div className="small text-info">{prefsMsg}</div>}
         </div>
       )}
 
@@ -577,7 +573,6 @@ export default function PlayerSettings() {
             ⬇ Download my data (JSON)
           </a>
 
-          {prefsMsg && <div className="small text-info mt-2">{prefsMsg}</div>}
         </div>
       )}
 

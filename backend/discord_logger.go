@@ -258,12 +258,13 @@ func StartMatchChannelScheduler(session *discordgo.Session) {
 	}()
 
 	// Periodic cleanup of duplicate/orphaned match channels (and stale DB
-	// references) — runs once shortly after startup, then every 5 minutes.
+	// references) — runs shortly after startup, then every minute so a deleted
+	// match's channel disappears without needing a backend restart.
 	go func() {
-		time.Sleep(10 * time.Second)
+		time.Sleep(3 * time.Second)
 		cleanupOrphanMatchChannels(session)
 
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
 
 		for {

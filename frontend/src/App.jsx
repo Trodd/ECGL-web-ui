@@ -24,6 +24,8 @@ import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import "./styles.css";
 import { getApiUrl } from "./config";
 import { LEAGUES, getLeague, setLeague, leagueLink } from "./league";
+import ToastHost from "./components/ToastHost";
+import { toast } from "./toast";
 import DevToolbar from "./components/DevToolbar";
 import { E } from "./components/CustomEmoji";
 
@@ -323,6 +325,53 @@ function App() {
       .catch(() => setShowFinals(null));
 
   }, []);
+
+  // ─── Surface pending captain actions as toasts on login ───────────────
+  // Schedule proposals / submitted scores are only ever sent to the teams'
+  // captains, so anyone with one waiting needs to act. Shown once per browser
+  // session (tracked in sessionStorage) so navigation doesn't re-toast them.
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const ACTIONABLE = ["schedule_proposed", "score_submitted"];
+
+    fetch(`${getApiUrl()}/api/notifications`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+
+        let seen = [];
+        try {
+          seen = JSON.parse(sessionStorage.getItem("ecgl_toasted_notifs") || "[]");
+          if (!Array.isArray(seen)) seen = [];
+        } catch {
+          seen = [];
+        }
+
+        const pending = (data.notifications || []).filter(
+          (n) => !n.read && ACTIONABLE.includes(n.type) && !seen.includes(n.id)
+        );
+
+        // Oldest first so the newest ends up lowest in the stack.
+        pending
+          .slice()
+          .reverse()
+          .forEach((n) => {
+            toast(`🔔 ${n.title} — ${n.message}`, "info", {
+              link: n.link,
+              duration: 8000,
+            });
+            seen.push(n.id);
+          });
+
+        if (pending.length > 0) {
+          try {
+            sessionStorage.setItem("ecgl_toasted_notifs", JSON.stringify(seen.slice(-200)));
+          } catch { /* ignore */ }
+        }
+      })
+      .catch(() => {});
+  }, [user?.id]);
 
   // Poll notification count
   useEffect(() => {
@@ -897,6 +946,9 @@ function App() {
       {(user?.can_impersonate || user?.is_dev) && user?.dev_mode && (
         <DevToolbar user={user} />
       )}
+
+      {/* Site-wide pop toasts (replaces alert() / inline banners) */}
+      <ToastHost />
     </div>
   );
 }

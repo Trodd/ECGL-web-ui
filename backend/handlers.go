@@ -4990,9 +4990,23 @@ func HandleModDeleteMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete the match and any associated data (scores, results, etc.)
-	if err := DB.Delete(&match).Error; err != nil {
-		log.Printf("❌ Failed to delete match %d: %v", req.MatchID, err)
+	// 🧹 Tear down the match's private Discord channels immediately. Without
+	// this the text/voice channels were left behind and only removed (if at
+	// all) by the orphan sweeper — which skips anything outside
+	// MATCH_CHANNEL_CATEGORY_ID.
+	//
+	// The delete is serialised with channel creation (same mutex the scheduler
+	// uses) so a tick that already loaded this match can't recreate the channel
+	// right after we remove it.
+	matchChannelMu.Lock()
+	if discordSession != nil {
+		deleteMatchChannel(discordSession, &match)
+	}
+	deleteErr := DB.Delete(&match).Error
+	matchChannelMu.Unlock()
+
+	if deleteErr != nil {
+		log.Printf("❌ Failed to delete match %d: %v", req.MatchID, deleteErr)
 		http.Error(w, "failed to delete match", http.StatusInternalServerError)
 		return
 	}

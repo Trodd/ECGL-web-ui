@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "../toast";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { getApiUrl } from "../config";
@@ -157,7 +158,7 @@ export default function TeamDetail() {
   // 🔸 SEND CHALLENGE REQUEST
   // ───────────────────────────────────────────────
   async function handleChallengeRequest() {
-    if (!myTeamID || !team?.id) return alert("Invalid team selection.");
+    if (!myTeamID || !team?.id) return toast("Invalid team selection.");
 
     try {
       await axios.post(
@@ -169,9 +170,9 @@ export default function TeamDetail() {
         { withCredentials: true }
       );
 
-      alert("Challenge request sent!");
+      toast("Challenge request sent!");
     } catch (err) {
-      alert(err.response?.data || "Failed to send challenge request.");
+      toast(err.response?.data || "Failed to send challenge request.");
     }
   }
 

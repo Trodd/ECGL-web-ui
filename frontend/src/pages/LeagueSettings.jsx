@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
+import { toast } from "../toast";
 import { getApiUrl } from "../config";
 import { LEAGUES, getLeague, setLeague, leagueLabel, leagueLink } from "../league";
 import { E } from "../components/CustomEmoji";
@@ -199,7 +200,6 @@ export default function LeagueSettings() {
     const [original, setOriginal] = useState({});
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [message, setMessage] = useState(null);
     const [clearingLogs, setClearingLogs] = useState(false);
     // 🧪 Dev test-match tool
     const [devTeams, setDevTeams] = useState([]);
@@ -245,7 +245,7 @@ export default function LeagueSettings() {
             })
             .catch((err) => {
                 const msg = err.response?.data || "Failed to load settings. Do you have the Dev role?";
-                setMessage({ type: "danger", text: msg });
+                toast(msg, "danger");
                 setLoading(false);
             });
     }, []);
@@ -260,7 +260,7 @@ export default function LeagueSettings() {
 
     const handleSave = async () => {
         setSaving(true);
-        setMessage(null);
+        
 
         // Only send changed keys
         const changed = {};
@@ -277,13 +277,13 @@ export default function LeagueSettings() {
             // Season changes affect the season shown across the whole site,
             // which is cached when the page loads — reload so it refreshes.
             if ("CURRENT_SEASON" in changed || "CURRENT_SEASON_ROOKIE" in changed) {
-                setMessage({ type: "success", text: "Season updated — refreshing…" });
+                toast("Season updated — refreshing…", "success");
                 setTimeout(() => window.location.reload(), 700);
             } else {
-                setMessage({ type: "success", text: "Settings saved successfully! Restart the server for some changes to take full effect." });
+                toast("Settings saved successfully! Restart the server for some changes to take full effect.", "success");
             }
         } catch (err) {
-            setMessage({ type: "danger", text: err.response?.data || "Failed to save settings." });
+            toast(err.response?.data || "Failed to save settings.", "danger");
         } finally {
             setSaving(false);
         }
@@ -291,7 +291,7 @@ export default function LeagueSettings() {
 
     const handleReset = () => {
         setSettings({ ...original });
-        setMessage(null);
+        
     };
 
     // Switch which league's settings are shown (also switches the app league).
@@ -303,7 +303,7 @@ export default function LeagueSettings() {
         setLeague(id);
         setViewLeague(id);
         setSettings({ ...original });
-        setMessage(null);
+        
     };
 
     const handleClearLogs = async () => {
@@ -311,9 +311,9 @@ export default function LeagueSettings() {
         try {
             setClearingLogs(true);
             await axios.delete(`${getApiUrl()}/api/mod/audit-logs`, { withCredentials: true });
-            setMessage({ type: "success", text: "Audit logs cleared." });
+            toast("Audit logs cleared.", "success");
         } catch (err) {
-            setMessage({ type: "danger", text: "Failed to clear audit logs." });
+            toast("Failed to clear audit logs.", "danger");
         } finally {
             setClearingLogs(false);
         }
@@ -382,27 +382,27 @@ export default function LeagueSettings() {
         const reset = confirm("Archive current season and reset everything?");
         try {
             await axios.post(`${getApiUrl()}/api/mod/season/archive`, { reset_after: reset }, { withCredentials: true });
-            setMessage({ type: "success", text: "Archived season data" });
+            toast("Archived season data", "success");
         } catch (err) {
-            setMessage({ type: "danger", text: "Failed to archive season" });
+            toast("Failed to archive season", "danger");
         }
     };
 
     const handleResetLeaderboard = async () => {
         try {
             await axios.post(`${getApiUrl()}/api/mod/leaderboard/reset`, {}, { withCredentials: true });
-            setMessage({ type: "success", text: "Reset leaderboards" });
+            toast("Reset leaderboards", "success");
         } catch (err) {
-            setMessage({ type: "danger", text: "Failed to reset leaderboards" });
+            toast("Failed to reset leaderboards", "danger");
         }
     };
 
     const handleResetPlayerLeaderboard = async () => {
         try {
             const res = await axios.post(`${getApiUrl()}/api/mod/reset_player_leaderboard`, {}, { withCredentials: true });
-            setMessage({ type: "success", text: res.data.message || "Player leaderboard reset!" });
+            toast(res.data.message || "Player leaderboard reset!", "success");
         } catch (err) {
-            setMessage({ type: "danger", text: "Failed to reset player leaderboard" });
+            toast("Failed to reset player leaderboard", "danger");
         }
     };
 
@@ -411,10 +411,10 @@ export default function LeagueSettings() {
             const seasonRes = await axios.get(`${getApiUrl()}/api/season`, { withCredentials: true });
             const season = seasonRes.data?.season ?? "Preseason";
             await axios.post(`${getApiUrl()}/api/mod/player/archive-all`, { season }, { withCredentials: true });
-            setMessage({ type: "success", text: `Archived all player stats for Season ${season}` });
+            toast(`Archived all player stats for Season ${season}`, "success");
         } catch (err) {
             console.error("Archive failed:", err);
-            setMessage({ type: "danger", text: "Failed to archive player stats" });
+            toast("Failed to archive player stats", "danger");
         }
     };
 
@@ -425,9 +425,9 @@ export default function LeagueSettings() {
                 credentials: "include",
             });
             const data = await res.json();
-            setMessage({ type: "success", text: `Archived ${data.archived} teams successfully` });
+            toast(`Archived ${data.archived} teams successfully`, "success");
         } catch (err) {
-            setMessage({ type: "danger", text: "Failed to archive team stats" });
+            toast("Failed to archive team stats", "danger");
         }
     };
 
@@ -435,10 +435,10 @@ export default function LeagueSettings() {
         if (!confirm("Sync all player Discord roles?")) return;
         try {
             await axios.post(`${getApiUrl()}/api/mod/sync-roles`, {}, { withCredentials: true });
-            setMessage({ type: "success", text: "Discord roles synced successfully!" });
+            toast("Discord roles synced successfully!", "success");
         } catch (err) {
             console.error("Sync roles failed:", err);
-            setMessage({ type: "danger", text: "Failed to sync Discord roles" });
+            toast("Failed to sync Discord roles", "danger");
         }
     };
 
@@ -465,11 +465,6 @@ export default function LeagueSettings() {
                 ))}
             </ul>
 
-            {message && (
-                <div className={`alert alert-${message.type} py-2`} role="alert">
-                    {message.text}
-                </div>
-            )}
 
             {[
                 viewLeague === "rookie"
@@ -759,7 +754,7 @@ export default function LeagueSettings() {
                     <h5 className="mb-0" style={{ color: "var(--text-primary)" }}>▶ Clips</h5>
                 </div>
                 <div className="card-body">
-                    <ClipsManager urlBase={getApiUrl()} setMsg={(text) => setMessage({ type: text.startsWith("✅") ? "success" : text.startsWith("❌") ? "danger" : "info", text })} />
+                    <ClipsManager urlBase={getApiUrl()} setMsg={(text) => toast(text)} />
                 </div>
             </div>
 
@@ -912,7 +907,6 @@ function RulesEditor() {
     const [original, setOriginal] = useState([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [message, setMessage] = useState(null);
 
     useEffect(() => {
         axios.get(`${getApiUrl()}/api/rules`)
@@ -958,13 +952,13 @@ function RulesEditor() {
 
     const handleSave = async () => {
         setSaving(true);
-        setMessage(null);
+        
         try {
             await axios.post(`${getApiUrl()}/api/mod/rules`, sections, { withCredentials: true });
             setOriginal(JSON.stringify(sections));
-            setMessage({ type: "success", text: "Rules saved!" });
+            toast("Rules saved!", "success");
         } catch (err) {
-            setMessage({ type: "danger", text: err.response?.data || "Failed to save rules." });
+            toast(err.response?.data || "Failed to save rules.", "danger");
         } finally {
             setSaving(false);
         }
@@ -984,11 +978,6 @@ function RulesEditor() {
                 Indent sub-items with <code>&nbsp;&nbsp;- sub item</code>
             </p>
 
-            {message && (
-                <div className={`alert alert-${message.type} py-2`} role="alert">
-                    {message.text}
-                </div>
-            )}
 
             {sections.map((section, idx) => (
                 <div

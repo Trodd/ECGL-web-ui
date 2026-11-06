@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { toast } from "../toast";
 import axios from "axios";
 import DiscordRequiredModal from "../components/DiscordRequiredModal";
 import { getApiUrl } from "../config";
@@ -158,7 +159,7 @@ export default function Register() {
       setDraftNote("");
       await refreshDraft();
     } catch (err) {
-      alert(err.response?.data || "❌ Failed to join the draft");
+      toast(err.response?.data || "❌ Failed to join the draft");
     } finally {
       setDraftBusy(false);
     }
@@ -175,7 +176,7 @@ export default function Register() {
       );
       await refreshDraft();
     } catch (err) {
-      alert(err.response?.data || "❌ Failed to withdraw from the draft");
+      toast(err.response?.data || "❌ Failed to withdraw from the draft");
     } finally {
       setDraftBusy(false);
     }
@@ -222,7 +223,7 @@ export default function Register() {
       setMe(meRes.data);
       setTeam(teamRes.data?.team || null);
 
-      alert("✅ Registered successfully");
+      toast("✅ Registered successfully");
     } catch (err) {
       console.error("Register failed:", err);
 
@@ -231,7 +232,7 @@ export default function Register() {
         return;
       }
 
-      alert(err.response?.data || "❌ Failed to register");
+      toast(err.response?.data || "❌ Failed to register");
     } finally {
       setIsSubmitting(false);
     }
@@ -248,13 +249,13 @@ export default function Register() {
       );
       window.location.reload();
     } catch {
-      alert("❌ Failed to unregister");
+      toast("❌ Failed to unregister");
       setIsUnregistering(false);
     }
   }
 
   async function handleCreateTeam() {
-    if (!newTeamName.trim()) return alert("Enter a team name");
+    if (!newTeamName.trim()) return toast("Enter a team name");
     if (isCreatingTeam) return;
     setIsCreatingTeam(true);
 
@@ -275,7 +276,7 @@ export default function Register() {
       setTeam(teamRes.data?.team || null);
       setNewTeamName("");
     } catch {
-      alert("❌ Failed to create team");
+      toast("❌ Failed to create team");
     } finally {
       setIsCreatingTeam(false);
     }
@@ -285,11 +286,11 @@ export default function Register() {
     const t = teams.find(
       (x) => x.name.toLowerCase() === name.toLowerCase()
     );
-    if (!t) return alert("Team not found");
+    if (!t) return toast("Team not found");
 
     try {
       if (rosterLocked)
-        return alert("⏳ Roster lock is active.");
+        return toast("⏳ Roster lock is active.");
 
       await axios.post(
         `${urlBase}/api/team/request`,
@@ -297,10 +298,10 @@ export default function Register() {
         { withCredentials: true }
       );
 
-      alert(`✅ Join request sent to ${t.name}`);
+      toast(`✅ Join request sent to ${t.name}`);
       setTeamQuery("");
     } catch {
-      alert("❌ Failed to request join");
+      toast("❌ Failed to request join");
     }
   }
 

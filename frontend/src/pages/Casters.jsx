@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "../toast";
 import axios from "axios";
 import { Link } from "react-router-dom";
 import { getApiUrl } from "../config";
@@ -64,7 +65,6 @@ export default function Casters() {
     const [meLoading, setMeLoading] = useState(true);
     const [firstLoad, setFirstLoad] = useState(true);
     const [matches, setMatches] = useState([]);
-    const [msg, setMsg] = useState("");
     const [busy, setBusy] = useState("");
     const [assignFor, setAssignFor] = useState(null); // { match, slot }
     const [playerQuery, setPlayerQuery] = useState("");
@@ -113,7 +113,7 @@ export default function Casters() {
             );
         } catch (err) {
             setMatches([]);
-            setMsg("❌ " + (err.response?.data || "Failed to load matches"));
+            toast("❌ " + (err.response?.data || "Failed to load matches"));
         } finally {
             setLoading(false);
             setFirstLoad(false);
@@ -134,7 +134,7 @@ export default function Casters() {
     }, []);
 
     useEffect(() => {
-        setMsg("");
+        toast("");
         // Debounce typing so we don't hammer the API on every keystroke.
         const delay = search.trim() ? 250 : 0;
         const t = setTimeout(() => loadMatches(view, search), delay);
@@ -145,17 +145,17 @@ export default function Casters() {
 
     async function claim(match, slot) {
         setBusy(`${match.id}:${slot}`);
-        setMsg("");
+        toast("");
         try {
             const res = await axios.post(
                 `${urlBase}/api/casters/assign`,
                 { match_id: match.id, slot },
                 { withCredentials: true }
             );
-            setMsg("✅ " + (res.data?.message || "Slot claimed."));
+            toast("✅ " + (res.data?.message || "Slot claimed."));
             await loadMatches(view, search);
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to claim slot"));
+            toast("❌ " + (err.response?.data || "Failed to claim slot"));
         } finally {
             setBusy("");
         }
@@ -163,19 +163,19 @@ export default function Casters() {
 
     async function assign(match, slot, player) {
         setBusy(`${match.id}:${slot}`);
-        setMsg("");
+        toast("");
         try {
             const res = await axios.post(
                 `${urlBase}/api/casters/assign`,
                 { match_id: match.id, slot, player_id: String(player.id) },
                 { withCredentials: true }
             );
-            setMsg("✅ " + (res.data?.message || "Slot assigned."));
+            toast("✅ " + (res.data?.message || "Slot assigned."));
             setAssignFor(null);
             setPlayerQuery("");
             await loadMatches(view, search);
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to assign slot"));
+            toast("❌ " + (err.response?.data || "Failed to assign slot"));
         } finally {
             setBusy("");
         }
@@ -183,17 +183,17 @@ export default function Casters() {
 
     async function release(match, slot) {
         setBusy(`${match.id}:${slot}`);
-        setMsg("");
+        toast("");
         try {
             const res = await axios.post(
                 `${urlBase}/api/casters/release`,
                 { match_id: match.id, slot },
                 { withCredentials: true }
             );
-            setMsg("✅ " + (res.data?.message || "Slot released."));
+            toast("✅ " + (res.data?.message || "Slot released."));
             await loadMatches(view, search);
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to release slot"));
+            toast("❌ " + (err.response?.data || "Failed to release slot"));
         } finally {
             setBusy("");
         }
@@ -204,16 +204,16 @@ export default function Casters() {
     async function goLive(match) {
         if (!confirm(`Announce ${match.team_a} vs ${match.team_b} as LIVE?`)) return;
         setBusy(`live:${match.id}`);
-        setMsg("");
+        toast("");
         try {
             const res = await axios.post(
                 `${urlBase}/api/match/go-live`,
                 { match_id: match.id },
                 { withCredentials: true }
             );
-            setMsg("✅ " + (res.data?.message || "Go-live announcement sent."));
+            toast("✅ " + (res.data?.message || "Go-live announcement sent."));
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to announce go live"));
+            toast("❌ " + (err.response?.data || "Failed to announce go live"));
         } finally {
             setBusy("");
         }
@@ -222,7 +222,7 @@ export default function Casters() {
     // Pick the stream channel used by Go Live for this match.
     async function setStream(match, url) {
         setBusy(`stream:${match.id}`);
-        setMsg("");
+        toast("");
         try {
             await axios.post(
                 `${urlBase}/api/casters/stream`,
@@ -230,9 +230,9 @@ export default function Casters() {
                 { withCredentials: true }
             );
             await loadMatches(view, search);
-            setMsg(url ? "✅ Stream channel set." : "Stream channel cleared.");
+            toast(url ? "✅ Stream channel set." : "Stream channel cleared.");
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to set stream channel"));
+            toast("❌ " + (err.response?.data || "Failed to set stream channel"));
         } finally {
             setBusy("");
         }
@@ -241,7 +241,7 @@ export default function Casters() {
     // Pick the series format (Best of N) announced for this match.
     async function setMatchType(match, value) {
         setBusy(`type:${match.id}`);
-        setMsg("");
+        toast("");
         try {
             await axios.post(
                 `${urlBase}/api/casters/match-type`,
@@ -249,9 +249,9 @@ export default function Casters() {
                 { withCredentials: true }
             );
             await loadMatches(view, search);
-            setMsg(`✅ Match type set to ${value || "default"}.`);
+            toast(`✅ Match type set to ${value || "default"}.`);
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to set match type"));
+            toast("❌ " + (err.response?.data || "Failed to set match type"));
         } finally {
             setBusy("");
         }
@@ -260,16 +260,16 @@ export default function Casters() {
     // Pings both teams in the match's private Discord channel.
     async function crewReady(match) {
         setBusy(`crew:${match.id}`);
-        setMsg("");
+        toast("");
         try {
             const res = await axios.post(
                 `${urlBase}/api/casters/crew-ready`,
                 { match_id: match.id },
                 { withCredentials: true }
             );
-            setMsg("✅ " + (res.data?.message || "Crew-ready message sent."));
+            toast("✅ " + (res.data?.message || "Crew-ready message sent."));
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to send crew-ready message"));
+            toast("❌ " + (err.response?.data || "Failed to send crew-ready message"));
         } finally {
             setBusy("");
         }
@@ -383,18 +383,6 @@ export default function Casters() {
                 </div>
             )}
 
-            {msg && (
-                <div
-                    className={`alert ${msg.startsWith("✅")
-                            ? "ecgl-alert-success"
-                            : msg.startsWith("⚠️")
-                                ? "ecgl-alert-warning"
-                                : "alert-danger"
-                        } small py-2`}
-                >
-                    {msg}
-                </div>
-            )}
 
             {matches.length === 0 && (
                 <p className="text-secondary">

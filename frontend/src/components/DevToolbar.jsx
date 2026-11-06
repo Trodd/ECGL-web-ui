@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "../toast";
 import { getApiUrl } from "../config";
 
 export default function DevToolbar({ user }) {
@@ -32,7 +33,7 @@ export default function DevToolbar({ user }) {
             })
             .catch(() => {
                 setBusy(false);
-                alert("❌ Failed to impersonate");
+                toast("❌ Failed to impersonate");
             });
     }
 
@@ -49,7 +50,7 @@ export default function DevToolbar({ user }) {
             })
             .catch(() => {
                 setBusy(false);
-                alert("❌ Failed to stop impersonating");
+                toast("❌ Failed to stop impersonating");
             });
     }
 

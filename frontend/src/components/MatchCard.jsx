@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "../toast";
 import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "./CustomEmoji";
@@ -10,7 +11,6 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
         match.date ? new Date(match.date).toISOString().slice(0, 16) : ""
     );
     const [scores, setScores] = useState({});
-    const [msg, setMsg] = useState("");
     const [editing, setEditing] = useState(false);
 
     const isTeamA = match.team_a_id === team.id;
@@ -41,11 +41,11 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                 { match_id: match.id, team_id: team.id },
                 { withCredentials: true }
             );
-            setMsg("✅ Match time confirmed!");
+            toast("✅ Match time confirmed!");
             await loadTeam();
         } catch (err) {
             console.error(err);
-            setMsg("❌ Failed to confirm match time.");
+            toast("❌ Failed to confirm match time.");
         }
     }
 
@@ -62,10 +62,10 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                 team_id: teamID,
             });
 
-            alert("Sub request sent!");
+            toast("Sub request sent!");
         } catch (err) {
             console.error("Sub ping failed:", err);
-            alert("Failed to send sub request.");
+            toast("Failed to send sub request.");
         }
     };
 
@@ -129,7 +129,7 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
 
     // --- Schedule / Edit Match Time ---
     async function handleSchedule() {
-        if (!localDate) return setMsg("⚠️ Please pick a date and time first.");
+        if (!localDate) return toast("⚠️ Please pick a date and time first.");
         try {
             const utc = new Date(localDate).toISOString();
             await axios.post(
@@ -137,11 +137,11 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                 { match_id: match.id, team_id: team.id, date: utc },
                 { withCredentials: true }
             );
-            setMsg("✅ Match time requested. Waiting for opponent confirmation.");
+            toast("✅ Match time requested. Waiting for opponent confirmation.");
             setEditing(false);
             await loadTeam();
         } catch {
-            setMsg("❌ Failed to request match time.");
+            toast("❌ Failed to request match time.");
         }
     }
 
@@ -186,11 +186,11 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                 { match_id: match.id, team_id: team.id },
                 { withCredentials: true }
             );
-            setMsg("✅ Scores confirmed — waiting for opponent.");
+            toast("✅ Scores confirmed — waiting for opponent.");
             setTimeout(() => loadTeam(), 2000);
         } catch (err) {
             console.error(err);
-            setMsg("❌ Failed to confirm scores.");
+            toast("❌ Failed to confirm scores.");
         }
     }
 
@@ -423,18 +423,6 @@ export default function MatchCard({ match, team, urlBase, loadTeam, myRole, aren
                     </div>
                 )}
 
-                {msg && (
-                    <div
-                        className={`small mt-2 ${msg.startsWith("✅")
-                            ? "text-success"
-                            : msg.startsWith("⚠️")
-                                ? "text-warning"
-                                : "text-danger"
-                            }`}
-                    >
-                        {msg}
-                    </div>
-                )}
             </div>
         </div>
     );

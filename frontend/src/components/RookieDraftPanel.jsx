@@ -1,4 +1,5 @@
 import { Fragment, useState, useEffect } from "react";
+import { toast } from "../toast";
 import axios from "axios";
 import PlayerIdentity from "./PlayerIdentity";
 import { leagueLink } from "../league";
@@ -18,7 +19,6 @@ export default function RookieDraftPanel({ urlBase }) {
     const [groupForce, setGroupForce] = useState(false);
     const [busyId, setBusyId] = useState(0);
     const [loading, setLoading] = useState(true);
-    const [msg, setMsg] = useState("");
     const [rosters, setRosters] = useState([]);
     const [maxSlots, setMaxSlots] = useState(0);
     const [draggingId, setDraggingId] = useState(0);
@@ -33,14 +33,14 @@ export default function RookieDraftPanel({ urlBase }) {
                 withCredentials: true,
             });
             setRows(Array.isArray(draftRes.data?.draft) ? draftRes.data.draft : []);
-            setMsg("");
+            toast("");
         } catch (err) {
             const status = err.response?.status;
             const detail =
                 typeof err.response?.data === "string"
                     ? err.response.data.trim()
                     : err.response?.data?.error || "";
-            setMsg(
+            toast(
                 `❌ Failed to load the draft${status ? ` (${status})` : ""}${detail ? `: ${detail}` : " — is the backend up to date?"}`
             );
             setRows([]);
@@ -66,7 +66,7 @@ export default function RookieDraftPanel({ urlBase }) {
     async function assignToTeam(row, teamID) {
         if (!row || !teamID) return;
         setBusyId(row.id);
-        setMsg("");
+        toast("");
         try {
             await axios.post(
                 `${urlBase}/api/mod/draft/assign`,
@@ -74,10 +74,10 @@ export default function RookieDraftPanel({ urlBase }) {
                 { withCredentials: true }
             );
             const teamName = rosters.find((t) => t.id === teamID)?.name || "a team";
-            setMsg(`✅ Assigned ${row.display_name || row.username} to ${teamName}.`);
+            toast(`✅ Assigned ${row.display_name || row.username} to ${teamName}.`);
             await load();
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to assign player"));
+            toast("❌ " + (err.response?.data || "Failed to assign player"));
         } finally {
             setBusyId(0);
         }
@@ -86,17 +86,17 @@ export default function RookieDraftPanel({ urlBase }) {
     async function transferPlayer(playerID, toTeamID) {
         if (!playerID || !toTeamID) return;
         setBusyId(-2);
-        setMsg("");
+        toast("");
         try {
             const res = await axios.post(
                 `${urlBase}/api/mod/draft/transfer`,
                 { player_id: String(playerID), to_team_id: toTeamID, override: groupForce },
                 { withCredentials: true }
             );
-            setMsg("✅ " + (res.data?.message || "Player moved."));
+            toast("✅ " + (res.data?.message || "Player moved."));
             await load();
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to move player"));
+            toast("❌ " + (err.response?.data || "Failed to move player"));
         } finally {
             setBusyId(0);
         }
@@ -105,17 +105,17 @@ export default function RookieDraftPanel({ urlBase }) {
     async function releaseToDraft(playerID) {
         if (!playerID) return;
         setBusyId(-2);
-        setMsg("");
+        toast("");
         try {
             const res = await axios.post(
                 `${urlBase}/api/mod/draft/release`,
                 { player_id: String(playerID) },
                 { withCredentials: true }
             );
-            setMsg("✅ " + (res.data?.message || "Player returned to the draft."));
+            toast("✅ " + (res.data?.message || "Player returned to the draft."));
             await load();
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to return player to the draft"));
+            toast("❌ " + (err.response?.data || "Failed to return player to the draft"));
         } finally {
             setBusyId(0);
         }
@@ -124,7 +124,7 @@ export default function RookieDraftPanel({ urlBase }) {
     async function handleCreateGroup() {
         const ids = rows.filter((r) => selected[r.id]).map((r) => r.id);
         if (ids.length === 0) {
-            setMsg("⚠️ Select at least one player first.");
+            toast("⚠️ Select at least one player first.");
             return;
         }
         // Blank name → the server generates a unique adjective + noun name.
@@ -142,14 +142,14 @@ export default function RookieDraftPanel({ urlBase }) {
                 { withCredentials: true }
             );
             const created = res.data?.team || name || "new team";
-            setMsg(`✅ Created team ${created} with ${ids.length} drafted player(s).`);
+            toast(`✅ Created team ${created} with ${ids.length} drafted player(s).`);
             setGroupName("");
             setCaptain("");
             setSelected({});
             setGroupForce(false);
             await load();
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Failed to create team"));
+            toast("❌ " + (err.response?.data || "Failed to create team"));
         } finally {
             setBusyId(0);
         }
@@ -162,10 +162,10 @@ export default function RookieDraftPanel({ urlBase }) {
             });
             if (res.data?.name) {
                 setGroupName(res.data.name);
-                setMsg("");
+                toast("");
             }
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Could not generate a name"));
+            toast("❌ " + (err.response?.data || "Could not generate a name"));
         }
     }
 
@@ -176,7 +176,7 @@ export default function RookieDraftPanel({ urlBase }) {
             : rows.filter((r) => r.kind !== "coach");
 
         if (pool.length === 0) {
-            setMsg(`⚠️ There are no pending ${isCoachRun ? "coach " : ""}signups to assign.`);
+            toast(`⚠️ There are no pending ${isCoachRun ? "coach " : ""}signups to assign.`);
             return;
         }
 
@@ -196,11 +196,11 @@ export default function RookieDraftPanel({ urlBase }) {
                 { override: groupForce, kind: isCoachRun ? "coach" : "player" },
                 { withCredentials: true }
             );
-            setMsg("✅ " + (res.data?.message || "Auto-assign complete."));
+            toast("✅ " + (res.data?.message || "Auto-assign complete."));
             setSelected({});
             await load();
         } catch (err) {
-            setMsg("❌ " + (err.response?.data || "Auto-assign failed"));
+            toast("❌ " + (err.response?.data || "Auto-assign failed"));
         } finally {
             setBusyId(0);
         }
@@ -277,18 +277,6 @@ export default function RookieDraftPanel({ urlBase }) {
                 )}
             </div>
 
-            {msg && (
-                <div
-                    className={`alert ${msg.startsWith("✅")
-                            ? "ecgl-alert-success"
-                            : msg.startsWith("⚠️")
-                                ? "ecgl-alert-warning"
-                                : "alert-danger"
-                        } small`}
-                >
-                    {msg}
-                </div>
-            )}
 
             {loading && <p className="text-secondary small">Loading draft…</p>}
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "../toast";
 import axios from "axios";
 import MatchCard from "../components/MatchCard";
 import { getApiUrl } from "../config";
@@ -17,7 +18,6 @@ export default function MyTeam() {
   });
   const [loading, setLoading] = useState(true);
   const [confirmLeave, setConfirmLeave] = useState(false);
-  const [msg, setMsg] = useState("");
   const [selectedSeason, setSelectedSeason] = useState("All");
   const [currentSeason, setCurrentSeason] = useState("Preseason");
   const [newTeamName, setNewTeamName] = useState("");
@@ -128,7 +128,7 @@ export default function MyTeam() {
         requests: [],
         myRole: "",
       });
-      setMsg("⚠️ Failed to load team data.");
+      toast("⚠️ Failed to load team data.");
     } finally {
       setLoading(false);
     }
@@ -269,7 +269,7 @@ export default function MyTeam() {
       await loadTeam();
     } catch (err) {
       console.error("❌ Failed to update request:", err);
-      alert("Failed to update request");
+      toast("Failed to update request");
     }
   }
 
@@ -284,7 +284,7 @@ export default function MyTeam() {
       await loadTeam();
     } catch (err) {
       console.error("Kick failed:", err);
-      alert("❌ Failed to kick player");
+      toast("❌ Failed to kick player");
     }
   }
 
@@ -296,12 +296,12 @@ export default function MyTeam() {
         { team_id: team.id },
         { withCredentials: true }
       );
-      alert("✅ You have left the team.");
+      toast("✅ You have left the team.");
       setConfirmLeave(false);
       await loadTeam();
     } catch (err) {
       console.error("Leave failed:", err);
-      alert("❌ Failed to leave team");
+      toast("❌ Failed to leave team");
     }
   }
 
@@ -316,7 +316,7 @@ export default function MyTeam() {
       await loadTeam();
     } catch (err) {
       console.error("Promote failed:", err);
-      alert("❌ Failed to promote player");
+      toast("❌ Failed to promote player");
     }
   }
 
@@ -330,7 +330,7 @@ export default function MyTeam() {
 
       loadTeam();  // reload MyTeam data
     } catch (err) {
-      alert("Error updating challenge: " + err.response?.data);
+      toast("Error updating challenge: " + err.response?.data);
     }
   }
 
@@ -438,19 +438,6 @@ export default function MyTeam() {
           </div>
         )}
 
-        {/* STATUS MSG */}
-        {msg && (
-          <div
-            className={`alert mt-3 mb-0 ${msg.startsWith("✅")
-              ? "alert-success"
-              : msg.startsWith("⚠️")
-                ? "alert-warning"
-                : "alert-danger"
-              }`}
-          >
-            {msg}
-          </div>
-        )}
       </div>
 
 
@@ -577,11 +564,11 @@ export default function MyTeam() {
                             { withCredentials: true }
                           );
                           setNewTeamName("");
-                          setMsg("✅ Team renamed!");
+                          toast("✅ Team renamed!");
                           await loadTeam();
                         } catch (err) {
                           const errMsg = err.response?.data || "Failed to rename team";
-                          setMsg(`⚠️ ${errMsg}`);
+                          toast(`⚠️ ${errMsg}`);
                         }
                       }}
                     >
@@ -612,7 +599,7 @@ export default function MyTeam() {
                             );
                             await loadTeam();
                           } catch {
-                            alert("Failed to update team status");
+                            toast("Failed to update team status");
                           }
                         }}
                       />
@@ -649,7 +636,7 @@ export default function MyTeam() {
                             );
                             await loadTeam();
                           } catch {
-                            alert("Failed to update join settings");
+                            toast("Failed to update join settings");
                           }
                         }}
                       />
@@ -678,13 +665,13 @@ export default function MyTeam() {
                           const next = e.target.checked;
 
                           if (!globalChallengesEnabled) {
-                            return alert("🚫 League mods have globally disabled challenge matches.");
+                            return toast("🚫 League mods have globally disabled challenge matches.");
                           }
                           if (team?.status !== "Active") {
-                            return alert("🚫 Your team must be active to enable challenges.");
+                            return toast("🚫 Your team must be active to enable challenges.");
                           }
                           if (!isCaptain) {
-                            return alert("⛔ Only the captain or co-captain can toggle this.");
+                            return toast("⛔ Only the captain or co-captain can toggle this.");
                           }
 
                           try {
@@ -695,7 +682,7 @@ export default function MyTeam() {
                             );
                             setAllowChallenges(next);
                           } catch {
-                            alert("Failed to update challenge setting");
+                            toast("Failed to update challenge setting");
                           }
                         }}
                       />

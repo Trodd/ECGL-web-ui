@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "../toast";
 import axios from "axios";
 
 export default function CastModal({
@@ -57,7 +58,7 @@ export default function CastModal({
             onClose();
         } catch (err) {
             console.error("Failed to save cast:", err);
-            alert(err.response?.data || "Failed to save cast.");
+            toast(err.response?.data || "Failed to save cast.");
         }
     }
 
@@ -69,7 +70,7 @@ export default function CastModal({
             onClose();
         } catch (err) {
             console.error("Failed to remove cast:", err);
-            alert("Failed to remove cast.");
+            toast("Failed to remove cast.");
         }
     }
 

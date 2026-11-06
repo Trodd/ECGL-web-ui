@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { toast } from "../toast";
 import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
@@ -10,7 +11,6 @@ export default function LeagueMod() {
     const urlBase = getApiUrl();
     const [me, setMe] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [msg, setMsg] = useState("");
     const [rosterStatus, setRosterStatus] = useState(null);
     const [week, setWeek] = useState("");
     const [matchID, setMatchID] = useState("");
@@ -161,7 +161,7 @@ export default function LeagueMod() {
 
             } catch (err) {
                 console.error("❌ Failed to load player stats:", err);
-                setMsg("⚠️ Could not load player stats.");
+                toast("⚠️ Could not load player stats.");
             }
         }
 
@@ -188,7 +188,7 @@ export default function LeagueMod() {
 
             } catch (err) {
                 console.error("❌ Failed to load team stats:", err);
-                setMsg("⚠️ Could not load team stats.");
+                toast("⚠️ Could not load team stats.");
             }
         }
 
@@ -280,7 +280,7 @@ export default function LeagueMod() {
                 loadFinals();
             } catch (err) {
                 console.error("❌ Failed to load lists:", err);
-                setMsg("⚠️ Failed to load team/match data.");
+                toast("⚠️ Failed to load team/match data.");
             }
         }
         if (season) loadLists();
@@ -299,7 +299,7 @@ export default function LeagueMod() {
             console.log("✅ Refreshed team list");
         } catch (err) {
             console.error("❌ Failed to load teams:", err);
-            setMsg("⚠️ Failed to refresh teams.");
+            toast("⚠️ Failed to refresh teams.");
         }
     }
 
@@ -346,8 +346,8 @@ export default function LeagueMod() {
     };
 
     const handleAddPlayer = async () => {
-        if (!teamID) return setMsg("⚠️ Select a team first.");
-        if (!addPlayerID) return setMsg("⚠️ Select a player first.");
+        if (!teamID) return toast("⚠️ Select a team first.");
+        if (!addPlayerID) return toast("⚠️ Select a player first.");
 
         await safePost(
             "/api/mod/team/add-player",
@@ -393,7 +393,7 @@ export default function LeagueMod() {
     };
 
     const handleAdjustTeamStats = async () => {
-        if (!teamID) return setMsg("⚠️ Select a team first.");
+        if (!teamID) return toast("⚠️ Select a team first.");
 
         await safePost(
             "/api/mod/team/adjust-stats",
@@ -415,7 +415,7 @@ export default function LeagueMod() {
     };
 
     const handleAdjustPlayerStats = async () => {
-        if (!playerID) return setMsg("⚠️ Select a player first.");
+        if (!playerID) return toast("⚠️ Select a player first.");
 
         await safePost(
             "/api/mod/player/adjust-stats",
@@ -446,13 +446,13 @@ export default function LeagueMod() {
             );
 
             if (res.data.success) {
-                alert("Team’s challenge matches have been reset!");
+                toast("Team’s challenge matches have been reset!");
             } else {
-                alert("Failed to reset challenges.");
+                toast("Failed to reset challenges.");
             }
         } catch (err) {
             console.error(err);
-            alert("Error resetting challenges.");
+            toast("Error resetting challenges.");
         }
     };
 
@@ -471,14 +471,14 @@ export default function LeagueMod() {
             const res = await axios.post(`${urlBase}${endpoint}`, payload, {
                 withCredentials: true,
             });
-            setMsg(`✅ ${successMsg}`);
+            toast(`✅ ${successMsg}`);
             console.log(res.data);
 
             // 🔁 Refresh team list after certain mod actions
             if (shouldReload) await loadTeams();
         } catch (err) {
             console.error("❌ API error:", err.response?.data || err.message);
-            setMsg("❌ Request failed — check console for details.");
+            toast("❌ Request failed — check console for details.");
         }
     }
 
@@ -491,13 +491,13 @@ export default function LeagueMod() {
                 {},
                 { withCredentials: true }
             );
-            setMsg(lock ? "✅ All rosters locked" : "✅ All rosters unlocked");
+            toast(lock ? "✅ All rosters locked" : "✅ All rosters unlocked");
             const res = await axios.get(`${urlBase}/api/mod/roster/status`, { withCredentials: true });
             setRosterStatus(!!res.data?.locked);
             await loadTeams();
         } catch (err) {
             console.error("❌ API error:", err.response?.data || err.message);
-            setMsg("❌ Request failed — check console for details.");
+            toast("❌ Request failed — check console for details.");
         }
     }
 
@@ -511,9 +511,9 @@ export default function LeagueMod() {
                 { withCredentials: true }
             );
 
-            alert("🏁 Finals archived successfully");
+            toast("🏁 Finals archived successfully");
         } catch (err) {
-            alert(err.response?.data || "Failed to archive finals");
+            toast(err.response?.data || "Failed to archive finals");
         }
     }
 
@@ -532,7 +532,7 @@ export default function LeagueMod() {
     // ===========================================================
     const handlePreviewWeek = async () => {
         if (!week || isNaN(week)) {
-            setMsg("⚠️ Please enter a valid week number first.");
+            toast("⚠️ Please enter a valid week number first.");
             return;
         }
 
@@ -546,19 +546,19 @@ export default function LeagueMod() {
                 setPreviewSeason(res.data.season || currentSeason || "1");
                 setPreviewSeed(res.data.seed || null); // ✅ save deterministic seed
                 setShowPreview(true);
-                setMsg(`✅ Preview generated for Week ${week}.`);
+                toast(`✅ Preview generated for Week ${week}.`);
             } else {
-                setMsg("⚠️ No matches returned from preview.");
+                toast("⚠️ No matches returned from preview.");
             }
         } catch (err) {
             console.error("❌ Preview failed:", err);
-            setMsg("❌ Failed to load preview.");
+            toast("❌ Failed to load preview.");
         }
     };
 
     const handlePublishWeek = async () => {
         if (!previewWeek || previewMatches.length === 0)
-            return setMsg("⚠️ Preview or edit matches before publishing.");
+            return toast("⚠️ Preview or edit matches before publishing.");
 
         await safePost(
             "/api/mod/matches/generate",
@@ -571,7 +571,7 @@ export default function LeagueMod() {
     };
 
     const handleForceSchedule = async () => {
-        if (!matchID) return setMsg("⚠️ Select a match first.");
+        if (!matchID) return toast("⚠️ Select a match first.");
 
         // Get any valid team to satisfy backend requirement
         const actingTeam = teams.length > 0 ? teams[0].id : 1;
@@ -586,7 +586,7 @@ export default function LeagueMod() {
 
     const handleForfeit = async () => {
         if (!matchID || !teamID)
-            return setMsg("⚠️ Select both a match and the winning team first.");
+            return toast("⚠️ Select both a match and the winning team first.");
 
         await safePost(
             "/api/mod/match/forfeit", // ✅ mod route
@@ -596,7 +596,7 @@ export default function LeagueMod() {
     };
 
     const handleDoubleForfeit = async () => {
-        if (!matchID) return setMsg("⚠️ Select a match first.");
+        if (!matchID) return toast("⚠️ Select a match first.");
 
         await safePost(
             "/api/mod/match/double-forfeit", // ✅ mod route
@@ -606,7 +606,7 @@ export default function LeagueMod() {
     };
 
     const handleResetMatch = async () => {
-        if (!matchID) return setMsg("⚠️ Select a match first.");
+        if (!matchID) return toast("⚠️ Select a match first.");
 
         await safePost(
             "/api/mod/match/reset", // ✅ mod route
@@ -616,7 +616,7 @@ export default function LeagueMod() {
     };
 
     const handleDeleteMatch = async () => {
-        if (!matchID) return setMsg("⚠️ Select a match first.");
+        if (!matchID) return toast("⚠️ Select a match first.");
 
         await safePost(
             "/api/mod/match/delete", // ✅ mod route
@@ -627,7 +627,7 @@ export default function LeagueMod() {
 
     // --- SCORE TOOLS ---
     const handleForceSubmitScores = async () => {
-        if (!matchID) return setMsg("⚠️ Select a match first.");
+        if (!matchID) return toast("⚠️ Select a match first.");
         await safePost(
             "/api/match/submit-score",
             { match_id: parseInt(matchID), team_id: 0, maps: [] },
@@ -636,7 +636,7 @@ export default function LeagueMod() {
     };
 
     const handleEditScores = async () => {
-        if (!matchID) return setMsg("⚠️ Select a match first.");
+        if (!matchID) return toast("⚠️ Select a match first.");
         await safePost(
             "/api/mod/match/edit-score",
             { match_id: parseInt(matchID) },
@@ -645,7 +645,7 @@ export default function LeagueMod() {
     };
 
     const handleAdjustRating = async () => {
-        if (!teamID) return setMsg("⚠️ Select a team first.");
+        if (!teamID) return toast("⚠️ Select a team first.");
         await safePost(
             "/api/mod/team/adjust-rating",
             { team_id: parseInt(teamID), delta: 25 },
@@ -655,7 +655,7 @@ export default function LeagueMod() {
 
     // --- TEAM / PLAYER / DATA TOOLS (same as before) ---
     const handleRenameTeam = async () => {
-        if (!teamID) return setMsg("⚠️ Select a team first.");
+        if (!teamID) return toast("⚠️ Select a team first.");
         const newName = prompt("Enter new team name:");
         if (!newName) return;
         await safePost(
@@ -667,7 +667,7 @@ export default function LeagueMod() {
     };
 
     const handleDisbandTeam = async () => {
-        if (!teamID) return setMsg("⚠️ Select a team first.");
+        if (!teamID) return toast("⚠️ Select a team first.");
         await safePost(
             "/api/mod/team/disband",
             { team_id: parseInt(teamID) },
@@ -677,7 +677,7 @@ export default function LeagueMod() {
     };
 
     const handleLockTeam = async () => {
-        if (!teamID) return setMsg("⚠️ Select a team first.");
+        if (!teamID) return toast("⚠️ Select a team first.");
         await safePost(
             "/api/mod/team/lock",
             { team_id: parseInt(teamID) },
@@ -688,7 +688,7 @@ export default function LeagueMod() {
 
     const handleKickPlayer = async () => {
         if (!teamID || !playerID)
-            return setMsg("⚠️ Select team and enter player ID.");
+            return toast("⚠️ Select team and enter player ID.");
         await safePost(
             "/api/team/kick",
             { team_id: parseInt(teamID), player_id: playerID },
@@ -697,12 +697,12 @@ export default function LeagueMod() {
     };
 
     const handleBanPlayer = async () => {
-        if (!playerID) return setMsg("⚠️ Enter player ID first.");
+        if (!playerID) return toast("⚠️ Enter player ID first.");
         await safePost("/api/mod/player/ban", { player_id: playerID }, `Banned player ${playerID}`);
     };
 
     const handleUnbanPlayer = async () => {
-        if (!playerID) return setMsg("⚠️ Enter player ID first.");
+        if (!playerID) return toast("⚠️ Enter player ID first.");
         await safePost("/api/mod/player/unban", { player_id: playerID }, `Unbanned player ${playerID}`);
     };
 
@@ -717,18 +717,6 @@ export default function LeagueMod() {
                     Season {season || "?"} • Admin tools for ECGL moderators
                 </p>
 
-                {msg && (
-                    <div
-                        className={`alert ${msg.startsWith("✅")
-                            ? "alert-success"
-                            : msg.startsWith("⚠️")
-                                ? "alert-warning"
-                                : "alert-danger"
-                            } small`}
-                    >
-                        {msg}
-                    </div>
-                )}
 
                 <div className="card bg-dark border-secondary shadow-sm">
                     <div className="card-header bg-dark border-secondary pb-0">
@@ -857,7 +845,7 @@ export default function LeagueMod() {
                                                         className="btn btn-outline-success btn-sm"
                                                         onClick={() => {
                                                             if (!newMatchA || !newMatchB || newMatchA === newMatchB) {
-                                                                setMsg("⚠️ Please select two different teams.");
+                                                                toast("⚠️ Please select two different teams.");
                                                                 return;
                                                             }
                                                             const exists = previewMatches.some(
@@ -866,7 +854,7 @@ export default function LeagueMod() {
                                                                     (m.team_a === newMatchB && m.team_b === newMatchA)
                                                             );
                                                             if (exists) {
-                                                                setMsg("⚠️ That matchup already exists.");
+                                                                toast("⚠️ That matchup already exists.");
                                                                 return;
                                                             }
                                                             setPreviewMatches((prev) => {
@@ -885,7 +873,7 @@ export default function LeagueMod() {
                                                             });
                                                             setNewMatchA("");
                                                             setNewMatchB("");
-                                                            setMsg("✅ Added custom matchup.");
+                                                            toast("✅ Added custom matchup.");
                                                         }}
                                                     >
                                                         ➕ Add
@@ -991,7 +979,7 @@ export default function LeagueMod() {
                                         <button
                                             className="btn btn-outline-danger btn-sm"
                                             onClick={async () => {
-                                                if (!week) return setMsg("⚠️ Enter a week number first.");
+                                                if (!week) return toast("⚠️ Enter a week number first.");
                                                 if (
                                                     !confirm(
                                                         `⚠️ This will permanently delete all matches in Week ${week}. Continue?`
@@ -1006,10 +994,10 @@ export default function LeagueMod() {
                                                         { withCredentials: true }
                                                     );
                                                     console.log(res.data);
-                                                    setMsg(`✅ Cleared all matches for Week ${week}`);
+                                                    toast(`✅ Cleared all matches for Week ${week}`);
                                                 } catch (err) {
                                                     console.error(err);
-                                                    setMsg("❌ Failed to clear matches.");
+                                                    toast("❌ Failed to clear matches.");
                                                 }
                                             }}
                                         >
@@ -1061,7 +1049,7 @@ export default function LeagueMod() {
                                             disabled={!newMatchA || !newMatchB || newMatchA === newMatchB}
                                             onClick={async () => {
                                                 if (!newMatchA || !newMatchB || newMatchA === newMatchB) {
-                                                    setMsg("⚠️ Please select two different teams.");
+                                                    toast("⚠️ Please select two different teams.");
                                                     return;
                                                 }
 
@@ -1071,7 +1059,7 @@ export default function LeagueMod() {
                                                         { team_a: newMatchA, team_b: newMatchB },
                                                         { withCredentials: true }
                                                     );
-                                                    setMsg(`✅ Added ${res.data.match_code} successfully.`);
+                                                    toast(`✅ Added ${res.data.match_code} successfully.`);
                                                     setNewMatchA("");
                                                     setNewMatchB("");
 
@@ -1098,7 +1086,7 @@ export default function LeagueMod() {
                                                     setMatches(matchList);
                                                 } catch (err) {
                                                     console.error("❌ Failed to add match:", err);
-                                                    setMsg("❌ Failed to add additional match.");
+                                                    toast("❌ Failed to add additional match.");
                                                 }
                                             }}
                                         >
@@ -1125,7 +1113,7 @@ export default function LeagueMod() {
                                                 "This will ping EVERYONE on all unscheduled match teams in the general channel. Continue?"
                                             )) return;
 
-                                            setMsg("📣 Sending ping...");
+                                            toast("📣 Sending ping...");
 
                                             try {
                                                 const res = await axios.post(
@@ -1135,13 +1123,13 @@ export default function LeagueMod() {
                                                 );
 
                                                 if (res.data.created > 0) {
-                                                    setMsg(`✅ Pinged ${res.data.created} unscheduled matches in general channel!`);
+                                                    toast(`✅ Pinged ${res.data.created} unscheduled matches in general channel!`);
                                                 } else {
-                                                    setMsg(`ℹ️ ${res.data.message || "No unscheduled matches found."}`);
+                                                    toast(`ℹ️ ${res.data.message || "No unscheduled matches found."}`);
                                                 }
                                             } catch (err) {
                                                 console.error("Failed to ping unscheduled matches:", err);
-                                                setMsg("❌ Failed to send ping: " + (err.response?.data || err.message));
+                                                toast("❌ Failed to send ping: " + (err.response?.data || err.message));
                                             }
                                         }}
                                     >
@@ -1431,13 +1419,13 @@ export default function LeagueMod() {
 
                                                             await axios.post(`${urlBase}/mod/match/set-maps`, payload, { withCredentials: true });
 
-                                                            setMsg(
+                                                            toast(
                                                                 `✅ Saved map scores for ${match.match_code}: ${match.team_a} vs ${match.team_b}`
                                                             );
                                                             setMapScores({ map1a: "", map1b: "", map2a: "", map2b: "", map3a: "", map3b: "" });
                                                         } catch (err) {
                                                             console.error("❌ Failed to save map scores:", err);
-                                                            setMsg("❌ Failed to save map scores.");
+                                                            toast("❌ Failed to save map scores.");
                                                         }
                                                     }}
                                                 >
@@ -1489,7 +1477,7 @@ export default function LeagueMod() {
                                             onChange={(e) => {
                                                 const id = Number(e.target.value);
                                                 setTeamID(isNaN(id) ? 0 : id);
-                                                setMsg("");
+                                                toast("");
                                             }}
                                             style={{ maxWidth: 260 }}
                                         >
@@ -1567,7 +1555,7 @@ export default function LeagueMod() {
                                                             className="btn btn-outline-info btn-sm"
                                                             onClick={async () => {
                                                                 if (!newTeamName.trim())
-                                                                    return setMsg("⚠️ Enter a new name first.");
+                                                                    return toast("⚠️ Enter a new name first.");
                                                                 await safePost(
                                                                     "/api/mod/team/rename",
                                                                     { team_id: teamID, new_name: newTeamName.trim() },
@@ -1909,7 +1897,7 @@ export default function LeagueMod() {
                                         <button
                                             className="btn btn-outline-success btn-sm"
                                             onClick={async () => {
-                                                if (!teamID) return setMsg("⚠️ Select a team first.");
+                                                if (!teamID) return toast("⚠️ Select a team first.");
                                                 await safePost(
                                                     "/api/mod/team/set-active",
                                                     { team_id: parseInt(teamID) },
@@ -1952,7 +1940,7 @@ export default function LeagueMod() {
                                         <button
                                             className="btn btn-outline-warning btn-sm"
                                             onClick={async () => {
-                                                if (!teamID) return setMsg("⚠️ Select a team first.");
+                                                if (!teamID) return toast("⚠️ Select a team first.");
                                                 await safePost(
                                                     "/api/mod/team/set-inactive",
                                                     { team_id: teamID },
@@ -2185,7 +2173,7 @@ export default function LeagueMod() {
                                             disabled={!playerID}
                                             onClick={async () => {
                                                 if (!playerID) {
-                                                    setMsg("⚠️ Select a player first.");
+                                                    toast("⚠️ Select a player first.");
                                                     return;
                                                 }
 
@@ -2196,10 +2184,10 @@ export default function LeagueMod() {
                                                         { withCredentials: true }
                                                     );
 
-                                                    setMsg(`✅ Removed cooldown for player #${playerID}`);
+                                                    toast(`✅ Removed cooldown for player #${playerID}`);
                                                 } catch (err) {
                                                     console.error("❌ Failed to remove cooldown:", err);
-                                                    setMsg("❌ Failed to remove player cooldown");
+                                                    toast("❌ Failed to remove player cooldown");
                                                 }
                                             }}
                                         >
@@ -2357,7 +2345,7 @@ export default function LeagueMod() {
                                                             matches: Number(pMatches),
                                                         }
                                                     );
-                                                    alert("✔ Player stats updated!");
+                                                    toast("✔ Player stats updated!");
                                                 }}
                                             >
                                                 💾 Save Player Stats
@@ -2372,16 +2360,6 @@ export default function LeagueMod() {
                             <div className="text-light">
 
                                 {/* STATUS MESSAGE */}
-                                {msg && (
-                                    <div
-                                        className={`alert ${msg.startsWith("✅") ? "alert-success" :
-                                            msg.startsWith("⚠️") ? "alert-warning" :
-                                                "alert-danger"
-                                            } small mb-3`}
-                                    >
-                                        {msg}
-                                    </div>
-                                )}
 
                                 {/* ================================ */}
                                 {/* SECTION: BRACKET TOOLS */}
