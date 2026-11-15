@@ -123,7 +123,49 @@ const MAIN_SETTING_GROUPS = [
             { key: "DEV_MODE", label: "Dev Mode", type: "toggle" },
         ],
     },
+    ticketSettingsGroup("", "Varsity"),
 ];
+
+// Support-ticket settings for one league. Varsity uses the bare keys, the
+// Rookie League the `_ROOKIE` suffixed ones (see backend/tickets.go).
+function ticketSettingsGroup(suffix, leagueName) {
+    return {
+        label: `${leagueName} Support Tickets`,
+        action: "ticket_panel",
+        keys: [
+            {
+                key: `TICKETS_ENABLED${suffix}`,
+                label: "Tickets Enabled",
+                type: "toggle",
+                hint: `On: members can open ${leagueName} tickets from the panel. Off: the panel stays up but new tickets are refused.`,
+            },
+            {
+                key: `TICKET_PANEL_CHANNEL_ID${suffix}`,
+                label: "Ticket Panel Channel",
+                type: "discord_channel",
+                hint: "Where the ticket buttons (Player / Team / Match Issue / Other) are posted. Changing it moves the panel automatically when you save.",
+            },
+            {
+                key: `TICKET_CATEGORY_ID${suffix}`,
+                label: "Ticket Category",
+                type: "discord_category",
+                hint: "New private ticket channels are created inside this category.",
+            },
+            {
+                key: `TICKET_TRANSCRIPT_CHANNEL_ID${suffix}`,
+                label: "Transcript Channel",
+                type: "discord_channel",
+                hint: "Closed tickets are logged here. Blank = the match transcript channel.",
+            },
+            {
+                key: `TICKET_SUPPORT_ROLE_ID${suffix}`,
+                label: "Support Role (optional)",
+                type: "discord_role",
+                hint: "Extra role that can see, answer and close tickets, and is pinged on new ones. League Mods always have access.",
+            },
+        ],
+    };
+}
 
 const ROOKIE_SETTING_GROUPS = [
     {
@@ -198,7 +240,54 @@ const ROOKIE_SETTING_GROUPS = [
             },
         ],
     },
+    ticketSettingsGroup("_ROOKIE", "Rookie League"),
 ];
+
+// Dropdown of Discord channels / categories / roles for a settings key. Falls
+// back to a plain ID box when the bot's channel list couldn't be loaded.
+function DiscordPicker({ type, value, onChange, discord }) {
+    const style = {
+        background: "var(--bg-elevated)",
+        border: "1px solid var(--border-default)",
+        color: "var(--text-primary)",
+    };
+
+    if (!discord) {
+        return (
+            <input
+                type="text"
+                className="form-control form-control-sm"
+                style={style}
+                placeholder={type === "discord_role" ? "Role ID" : "Channel ID"}
+                value={value || ""}
+                onChange={(e) => onChange(e.target.value.trim())}
+            />
+        );
+    }
+
+    const items =
+        type === "discord_category"
+            ? discord.categories || []
+            : type === "discord_role"
+            ? discord.roles || []
+            : discord.text_channels || [];
+    const known = !value || items.some((i) => i.id === value);
+    const prefix = type === "discord_role" ? "@" : type === "discord_category" ? "📁 " : "#";
+
+    return (
+        <select className="form-select form-select-sm" style={style} value={value || ""} onChange={(e) => onChange(e.target.value)}>
+            <option value="">— Not set —</option>
+            {!known && <option value={value}>Unknown ({value})</option>}
+            {items.map((i) => (
+                <option key={i.id} value={i.id}>
+                    {prefix}
+                    {i.name}
+                    {i.parent_name ? `  (${i.parent_name})` : ""}
+                </option>
+            ))}
+        </select>
+    );
+}
 
 export default function LeagueSettings() {
     const [settings, setSettings] = useState({});
@@ -230,6 +319,17 @@ export default function LeagueSettings() {
         }
         window.addEventListener("ecgl-league-changed", onLeague);
         return () => window.removeEventListener("ecgl-league-changed", onLeague);
+    }, []);
+
+    // Discord channels/categories/roles for the ticket pickers (null = unavailable).
+    const [discord, setDiscord] = useState(null);
+    const [postingPanel, setPostingPanel] = useState(false);
+
+    useEffect(() => {
+        axios
+            .get(`${getApiUrl()}/api/mod/discord/channels`, { withCredentials: true })
+            .then((res) => setDiscord(res.data || null))
+            .catch(() => setDiscord(null));
     }, []);
 
     // Teams for the dev test-match picker.
@@ -309,6 +409,26 @@ export default function LeagueSettings() {
         setViewLeague(id);
         setSettings({ ...original });
         
+    };
+
+    // (Re)post the Open Ticket panel for the league being viewed.
+    const handlePostTicketPanel = async () => {
+        if (hasChanges()) {
+            toast("Save your settings first — the panel uses the saved channel.", "warning");
+            return;
+        }
+        setPostingPanel(true);
+        try {
+            await axios.post(`${getApiUrl()}/api/mod/tickets/panel`, {}, {
+                withCredentials: true,
+                headers: { "X-ECGL-League": viewLeague },
+            });
+            toast(`${leagueLabel(viewLeague)} ticket panel posted.`, "success");
+        } catch (err) {
+            toast(err.response?.data || "Failed to post ticket panel.", "danger");
+        } finally {
+            setPostingPanel(false);
+        }
     };
 
     const handleClearLogs = async () => {
@@ -507,6 +627,13 @@ export default function LeagueSettings() {
                                                     value={settings[key] || ""}
                                                     onChange={(val) => handleChange(key, val)}
                                                 />
+                                            ) : type.startsWith("discord_") ? (
+                                                <DiscordPicker
+                                                    type={type}
+                                                    value={settings[key] || ""}
+                                                    onChange={(val) => handleChange(key, val)}
+                                                    discord={discord}
+                                                />
                                             ) : type === "select" ? (
                                                 <select
                                                     className="form-select form-select-sm"
@@ -540,6 +667,26 @@ export default function LeagueSettings() {
                                         </div>
                                     </div>
                                 ))}
+                                {group.action === "ticket_panel" && (
+                                    <div className="d-flex align-items-center gap-2 flex-wrap pt-2" style={{ borderTop: "1px solid var(--border-default)" }}>
+                                        <button
+                                            type="button"
+                                            className="btn btn-sm btn-outline-primary"
+                                            onClick={handlePostTicketPanel}
+                                            disabled={postingPanel}
+                                        >
+                                            {postingPanel ? "Posting…" : "🎫 Post / Refresh Ticket Panel"}
+                                        </button>
+                                        <small style={{ color: "var(--text-tertiary)" }}>
+                                            Replaces the existing panel message with a fresh one in the panel channel.
+                                        </small>
+                                    </div>
+                                )}
+                                {group.action === "ticket_panel" && !discord && (
+                                    <small className="d-block mt-2" style={{ color: "var(--text-tertiary)" }}>
+                                        Couldn't load the Discord channel list — paste IDs instead (right-click → Copy ID in Discord).
+                                    </small>
+                                )}
                             </div>
                         </div>
                     ))}

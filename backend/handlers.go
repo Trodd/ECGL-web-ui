@@ -11228,6 +11228,17 @@ var settingsKeys = []string{
 	"TLS_HOST",
 	"DEV_MODE",
 	"YOUTUBE_PLAYLIST_ID",
+	// Support tickets, per league (see tickets.go)
+	"TICKETS_ENABLED",
+	"TICKET_PANEL_CHANNEL_ID",
+	"TICKET_CATEGORY_ID",
+	"TICKET_TRANSCRIPT_CHANNEL_ID",
+	"TICKET_SUPPORT_ROLE_ID",
+	"TICKETS_ENABLED_ROOKIE",
+	"TICKET_PANEL_CHANNEL_ID_ROOKIE",
+	"TICKET_CATEGORY_ID_ROOKIE",
+	"TICKET_TRANSCRIPT_CHANNEL_ID_ROOKIE",
+	"TICKET_SUPPORT_ROLE_ID_ROOKIE",
 }
 
 // GET /api/mod/settings — returns current settings values
@@ -11262,11 +11273,16 @@ func HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		allowed[k] = true
 	}
 
-	for key, val := range incoming {
+	for key := range incoming {
 		if !allowed[key] {
 			http.Error(w, fmt.Sprintf("Key %q is not configurable", key), http.StatusBadRequest)
 			return
 		}
+	}
+
+	prev := map[string]string{}
+	for key, val := range incoming {
+		prev[key] = os.Getenv(key)
 		os.Setenv(key, val)
 
 		// The main-league season is cached in a package variable at startup and
@@ -11283,6 +11299,9 @@ func HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to save settings", http.StatusInternalServerError)
 		return
 	}
+
+	// Post/move ticket panels whose channel changed.
+	go syncTicketPanelsAfterSettings(prev)
 
 	respondJSON(w, map[string]any{"success": true})
 }

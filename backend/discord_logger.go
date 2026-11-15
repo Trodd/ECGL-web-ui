@@ -1192,33 +1192,10 @@ func isInteractionMod(i *discordgo.InteractionCreate) bool {
 // transcriptMatchChannel fetches all messages from a channel, builds a .txt
 // transcript file, and posts it with a match info embed to the transcript channel.
 func transcriptMatchChannel(s *discordgo.Session, sourceChannelID, transcriptChannelID string, m *Match) {
-	// Fetch all messages (up to 100 per request)
-	var allMessages []*discordgo.Message
-	beforeID := ""
-
-	for {
-		msgs, err := s.ChannelMessages(sourceChannelID, 100, beforeID, "", "")
-		if err != nil {
-			log.Printf("❌ Failed to fetch messages from %s: %v", sourceChannelID, err)
-			break
-		}
-		if len(msgs) == 0 {
-			break
-		}
-		allMessages = append(allMessages, msgs...)
-		beforeID = msgs[len(msgs)-1].ID
-		if len(msgs) < 100 {
-			break
-		}
-	}
-
+	// All messages, oldest first.
+	allMessages := fetchChannelMessages(s, sourceChannelID)
 	if len(allMessages) == 0 {
 		return
-	}
-
-	// Reverse messages so they're in chronological order
-	for i, j := 0, len(allMessages)-1; i < j; i, j = i+1, j-1 {
-		allMessages[i], allMessages[j] = allMessages[j], allMessages[i]
 	}
 
 	// Load team names

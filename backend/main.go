@@ -770,6 +770,9 @@ func main() {
 	// 🔹 REGISTER COIN FLIP SELECT MENU HANDLER
 	RegisterCoinFlipHandler(dg)
 
+	// 🔹 REGISTER SUPPORT TICKET HANDLERS (per-league panel, modal, close)
+	RegisterTicketHandlers(dg)
+
 	// Open Discord gateway
 	if err := dg.Open(); err != nil {
 		// A privileged intent that hasn't been enabled in the Discord developer
@@ -817,6 +820,9 @@ func main() {
 
 	// 🔄 One-time sync: backfill avatars for all players from Discord
 	go syncPlayerAvatars(dg)
+
+	// 🎫 Bring each league's ticket panel up to date (edits in place)
+	go RefreshTicketPanels(dg)
 
 	r := mux.NewRouter()
 
@@ -967,6 +973,8 @@ func main() {
 	r.HandleFunc("/api/mod/tournament/match", HandleModAddTournamentMatch).Methods("POST")
 	r.HandleFunc("/api/mod/settings", HandleGetSettings).Methods("GET")
 	r.HandleFunc("/api/mod/settings", HandleUpdateSettings).Methods("POST")
+	r.HandleFunc("/api/mod/discord/channels", HandleListDiscordChannels).Methods("GET")
+	r.HandleFunc("/api/mod/tickets/panel", HandlePostTicketPanel).Methods("POST")
 	r.HandleFunc("/api/rules", HandleGetRules).Methods("GET")
 	r.HandleFunc("/api/mod/rules", HandleSaveRules).Methods("POST")
 	r.HandleFunc("/api/tools/archive-team-stats", HandleArchiveTeamStats).Methods("POST")
