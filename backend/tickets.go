@@ -18,7 +18,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -145,15 +144,6 @@ type Ticket struct {
 	ClosedAt    *time.Time `json:"closed_at"`
 }
 
-// TicketPanel remembers where each league's Open Ticket panel was posted so it
-// can be replaced (not duplicated) when the panel channel changes.
-type TicketPanel struct {
-	League    string `gorm:"primaryKey"`
-	ChannelID string
-	MessageID string
-	UpdatedAt time.Time
-}
-
 // Serialises ticket creation so numbering and the one-open-ticket rule hold.
 var ticketMu sync.Mutex
 
@@ -268,10 +258,11 @@ func ticketUpdateNotice(s *discordgo.Session, i *discordgo.InteractionCreate, co
 
 // ticketFollowup sends an ephemeral V2 follow-up to a deferred interaction,
 // falling back to plain text if Discord rejects the V2 payload.
-func ticketFollowup(s *discordgo.Session, i *discordgo.InteractionCreate, color int, text string) {
+func ticketFollowup(s *discordgo.Session, i *discordgo.InteractionCreate, color int, text string, extra ...discordgo.MessageComponent) {
+	comps := append([]discordgo.MessageComponent{v2Text(text)}, extra...)
 	_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
 		Flags:      v2Ephemeral,
-		Components: []discordgo.MessageComponent{v2Container(color, v2Text(text))},
+		Components: []discordgo.MessageComponent{v2Container(color, comps...)},
 	})
 	if err != nil {
 		log.Printf("⚠️ ticket V2 followup failed, sending plain: %v", err)
@@ -1231,37 +1222,23 @@ PANEL
 ====================================================
 */
 
-// postTicketPanel (re)posts a league's Open Ticket panel in its panel channel,
-// removing the previous panel message wherever it was.
-func postTicketPanel(s *discordgo.Session, league string) (string, error) {
+// ticketPanelSpec describes a league's ticket panel for the shared panel
+// helpers in discord_panels.go.
+func ticketPanelSpec(league string) panelSpec {
 	league = normalizeLeague(league)
-	if s == nil {
-		return "", fmt.Errorf("discord bot is not connected")
-	}
 	cfg := loadTicketConfig(league)
-
-	var panel TicketPanel
-	hasOld := DB.Where("league = ?", league).First(&panel).Error == nil
-	if hasOld && panel.ChannelID != "" && panel.MessageID != "" {
-		_ = s.ChannelMessageDelete(panel.ChannelID, panel.MessageID)
+	return panelSpec{
+		Key:       "tickets_" + league,
+		Name:      ticketLeagueName(league) + " ticket panel",
+		ChannelID: cfg.PanelChannelID,
+		Enabled:   cfg.Enabled,
+		Build:     func() []discordgo.MessageComponent { return ticketPanelContent(league) },
 	}
+}
 
-	if cfg.PanelChannelID == "" {
-		DB.Where("league = ?", league).Delete(&TicketPanel{})
-		return "", fmt.Errorf("no ticket panel channel is set for the %s", ticketLeagueName(league))
-	}
-
-	msg, err := s.ChannelMessageSendComplex(cfg.PanelChannelID, &discordgo.MessageSend{
-		Flags:      v2Flag,
-		Components: ticketPanelContent(league),
-	})
-	if err != nil {
-		return "", fmt.Errorf("could not post panel in <#%s>: %w", cfg.PanelChannelID, err)
-	}
-
-	panel = TicketPanel{League: league, ChannelID: cfg.PanelChannelID, MessageID: msg.ID, UpdatedAt: time.Now()}
-	DB.Save(&panel)
-	return cfg.PanelChannelID, nil
+// postTicketPanel (re)posts a league's ticket panel in its panel channel.
+func postTicketPanel(s *discordgo.Session, league string) (string, error) {
+	return postPanel(s, ticketPanelSpec(league))
 }
 
 // ticketPanelContent builds the V2 panel: a header, then one section per
@@ -1286,139 +1263,6 @@ func ticketPanelContent(league string) []discordgo.MessageComponent {
 		v2Text("-# 🔒 Only you and the League Mods can see your ticket. One open ticket per person per league."),
 	)
 	return []discordgo.MessageComponent{v2Container(colorNeutral, comps...)}
-}
-
-// isDiscordGone reports whether a REST error means the message/channel no
-// longer exists (as opposed to a transient failure we shouldn't act on).
-func isDiscordGone(err error) bool {
-	var rest *discordgo.RESTError
-	if !errors.As(err, &rest) {
-		return false
-	}
-	if rest.Message != nil {
-		switch rest.Message.Code {
-		case discordgo.ErrCodeUnknownMessage, discordgo.ErrCodeUnknownChannel:
-			return true
-		}
-	}
-	return rest.Response != nil && rest.Response.StatusCode == http.StatusNotFound
-}
-
-// refreshTicketPanel brings a league's panel up to date with the current
-// code: edits the existing message in place (no new post, no notification),
-// moves it if the panel channel setting changed, and posts a fresh one if the
-// old message was deleted. Leagues with no panel channel are left alone.
-func refreshTicketPanel(s *discordgo.Session, league string) {
-	league = normalizeLeague(league)
-	cfg := loadTicketConfig(league)
-	if cfg.PanelChannelID == "" {
-		return
-	}
-
-	var panel TicketPanel
-	hasPanel := DB.Where("league = ?", league).First(&panel).Error == nil && panel.MessageID != ""
-
-	// Never posted: only post if tickets are switched on for this league.
-	if !hasPanel {
-		if !cfg.Enabled {
-			return
-		}
-		if _, err := postTicketPanel(s, league); err != nil {
-			log.Printf("⚠️ ticket panel (%s): %v", league, err)
-		} else {
-			log.Printf("🎫 Posted %s ticket panel", ticketLeagueName(league))
-		}
-		return
-	}
-
-	// Channel setting changed while we were down: move the panel.
-	if panel.ChannelID != cfg.PanelChannelID {
-		if _, err := postTicketPanel(s, league); err != nil {
-			log.Printf("⚠️ ticket panel move (%s): %v", league, err)
-		}
-		return
-	}
-
-	// Look at the current message first: a classic (pre-V2) panel can't be
-	// edited into a V2 one, so it's replaced once instead.
-	existing, err := s.ChannelMessage(panel.ChannelID, panel.MessageID)
-	if err == nil && existing.Flags&v2Flag == 0 {
-		if _, err := postTicketPanel(s, league); err != nil {
-			log.Printf("⚠️ ticket panel upgrade (%s): %v", league, err)
-		} else {
-			log.Printf("🎫 Upgraded %s ticket panel to Components V2", ticketLeagueName(league))
-		}
-		return
-	}
-	if err == nil {
-		components := ticketPanelContent(league)
-		_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
-			ID:         panel.MessageID,
-			Channel:    panel.ChannelID,
-			Flags:      v2Flag,
-			Components: &components,
-		})
-	}
-	switch {
-	case err == nil:
-		DB.Model(&panel).Update("updated_at", time.Now())
-		log.Printf("🎫 Refreshed %s ticket panel", ticketLeagueName(league))
-	case isDiscordGone(err):
-		// Someone deleted the panel message — put a new one up.
-		if _, err := postTicketPanel(s, league); err != nil {
-			log.Printf("⚠️ ticket panel repost (%s): %v", league, err)
-		} else {
-			log.Printf("🎫 %s ticket panel was missing — posted a new one", ticketLeagueName(league))
-		}
-	default:
-		// Transient error: leave it be rather than risk a duplicate panel.
-		log.Printf("⚠️ ticket panel refresh (%s): %v", league, err)
-	}
-}
-
-// RefreshTicketPanels updates every league's panel; called on startup.
-func RefreshTicketPanels(s *discordgo.Session) {
-	if s == nil {
-		return
-	}
-	for _, league := range []string{LeagueMain, LeagueRookie} {
-		refreshTicketPanel(s, league)
-	}
-}
-
-// syncTicketPanelsAfterSettings reposts panels whose channel was changed (or
-// whose league just had tickets switched on without a panel yet).
-func syncTicketPanelsAfterSettings(prev map[string]string) {
-	if discordSession == nil {
-		return
-	}
-	for _, league := range []string{LeagueMain, LeagueRookie} {
-		suffix := ""
-		if league == LeagueRookie {
-			suffix = "_ROOKIE"
-		}
-		chKey, enKey := "TICKET_PANEL_CHANNEL_ID"+suffix, "TICKETS_ENABLED"+suffix
-
-		before, changed := prev[chKey]
-		channelChanged := changed && strings.TrimSpace(before) != leagueEnv("TICKET_PANEL_CHANNEL_ID", league)
-
-		var count int64
-		DB.Model(&TicketPanel{}).Where("league = ?", league).Count(&count)
-		_, enabledChanged := prev[enKey]
-		justEnabled := enabledChanged && leagueEnv("TICKETS_ENABLED", league) == "true" && count == 0
-
-		if !channelChanged && !justEnabled {
-			continue
-		}
-		if leagueEnv("TICKET_PANEL_CHANNEL_ID", league) == "" && count == 0 {
-			continue
-		}
-		if ch, err := postTicketPanel(discordSession, league); err != nil {
-			log.Printf("⚠️ ticket panel (%s): %v", league, err)
-		} else {
-			log.Printf("🎫 Posted %s ticket panel in %s", ticketLeagueName(league), ch)
-		}
-	}
 }
 
 /*

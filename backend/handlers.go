@@ -11239,6 +11239,11 @@ var settingsKeys = []string{
 	"TICKET_CATEGORY_ID_ROOKIE",
 	"TICKET_TRANSCRIPT_CHANNEL_ID_ROOKIE",
 	"TICKET_SUPPORT_ROLE_ID_ROOKIE",
+	// Rookie draft signup panel in Discord (see draft_panel.go)
+	"ROOKIE_DRAFT_PANEL_CHANNEL_ID",
+	"ROOKIE_DRAFT_COMMAND_ENABLED",
+	"ROOKIE_DRAFT_COMMAND_COOLDOWN_MINUTES",
+	"ROOKIE_DRAFT_SIGNUP_COOLDOWN_MINUTES",
 }
 
 // GET /api/mod/settings — returns current settings values
@@ -11300,8 +11305,8 @@ func HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Post/move ticket panels whose channel changed.
-	go syncTicketPanelsAfterSettings(prev)
+	// Post/move/refresh bot panels (tickets, draft) affected by this save.
+	go syncDiscordPanelsAfterSettings(prev)
 
 	respondJSON(w, map[string]any{"success": true})
 }

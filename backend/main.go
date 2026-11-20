@@ -18,13 +18,11 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/oauth2"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // --- Utils
@@ -374,105 +372,12 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only members of the Discord server may register.
-	if req.Device == "" {
-		http.Error(w, "Please select a device", http.StatusBadRequest)
+	displayName, _ := session.Values["display_name"].(string)
+	player, uerr := registerPlayer(discordID, req.Username, displayName, req.Role, req.Device, req.Timezone, leagueFromRequest(r))
+	if uerr != nil {
+		http.Error(w, uerr.Error(), uerr.status)
 		return
 	}
-
-	switch strings.ToLower(req.Role) {
-	case "player":
-		req.Role = "Player"
-	case "league sub":
-		req.Role = "League Sub"
-	default:
-		http.Error(w, "Invalid role", http.StatusBadRequest)
-		return
-	}
-
-	player := Player{
-		ID:          discordID,
-		Username:    req.Username,
-		DisplayName: session.Values["display_name"].(string),
-		Role:        req.Role,
-		Device:      req.Device,
-		Timezone:    req.Timezone,
-	}
-
-	// ✅ Default rating
-	if player.Rating == 0 {
-		player.Rating = getEnvInt("DEFAULT_PLAYER_RATING", 800)
-	}
-
-	// 🛡️ Detect if this is a real signup vs a duplicate submit.
-	// If the player already exists with the same role/device/timezone,
-	// treat it as a no-op so we don't double-ping Discord or re-apply roles.
-	var existing Player
-	alreadyRegistered := false
-	if err := DB.First(&existing, discordID).Error; err == nil {
-		if strings.EqualFold(existing.Role, req.Role) &&
-			strings.EqualFold(existing.Device, req.Device) &&
-			strings.EqualFold(existing.Timezone, req.Timezone) &&
-			strings.TrimSpace(existing.Role) != "" {
-			alreadyRegistered = true
-		}
-	}
-
-	// ✅ Upsert player row
-	if err := DB.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"username", "role", "device", "timezone"}),
-	}).Create(&player).Error; err != nil {
-		if pgErr, ok := err.(*pgconn.PgError); ok {
-			log.Printf("❌ Postgres error: Code=%s Detail=%s Message=%s", pgErr.Code, pgErr.Detail, pgErr.Message)
-		}
-		http.Error(w, "Database error", http.StatusInternalServerError)
-		return
-	}
-
-	DB.First(&player, discordID)
-
-	// Store the role for the ACTIVE league (players.role stays as the primary
-	// global value used by Discord role sync).
-	registerLeague := leagueFromRequest(r)
-	_ = setPlayerRoleInLeague(discordID, registerLeague, player.Role)
-
-	// Re-sync Discord roles so the Rookie League player/sub role follows the
-	// league they just registered for.
-	go syncDiscordRolesForPlayer(discordID)
-
-	// A coach whose registration role changed loses their coaching slot.
-	if !alreadyRegistered && existing.ID != 0 {
-		enforceCoachRoleChange(discordID, existing.Role, player.Role)
-	}
-
-	if !alreadyRegistered {
-		// ⭐ Discord role handling — only on first signup or role change
-		rolePlayer := os.Getenv("DISCORD_PLAYER_ROLE_ID")
-		roleSub := os.Getenv("DISCORD_LEAGUE_SUB_ROLE_ID")
-
-		// Cleanup previous roles
-		go DiscordRemoveRole(discordIDStr, rolePlayer)
-		go DiscordRemoveRole(discordIDStr, roleSub)
-
-		// Assign correct role
-		if req.Role == "Player" {
-			go DiscordAddRole(discordIDStr, rolePlayer)
-		}
-		if req.Role == "League Sub" {
-			go DiscordAddRole(discordIDStr, roleSub)
-		}
-
-		// Log registration
-		SendDiscordLog(
-			fmt.Sprintf("🟢 **<@%s>** has signed up as a **%s** in timezone **%s**",
-				discordIDStr, player.Role, player.Timezone,
-			),
-		)
-	}
-
-	player.Registered = true
-
 	respondJSON(w, player)
 }
 
@@ -589,6 +494,11 @@ func handleUnregister(w http.ResponseWriter, r *http.Request) {
 		log.Printf("❌ Failed to clear player registration: %v", err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
+	}
+
+	// Blank per-league roles too (bans kept) so no league still counts them as registered.
+	if err := clearLeagueRolesOnUnregister(discordID); err != nil {
+		log.Printf("⚠️ Failed to clear league roles on unregister: %v", err)
 	}
 
 	// ⭐ Remove Player / Sub roles after unregister
@@ -773,6 +683,9 @@ func main() {
 	// 🔹 REGISTER SUPPORT TICKET HANDLERS (per-league panel, modal, close)
 	RegisterTicketHandlers(dg)
 
+	// 🔹 REGISTER ROOKIE DRAFT PANEL HANDLERS (sign up / status / withdraw)
+	RegisterDraftPanelHandlers(dg)
+
 	// Open Discord gateway
 	if err := dg.Open(); err != nil {
 		// A privileged intent that hasn't been enabled in the Discord developer
@@ -821,8 +734,8 @@ func main() {
 	// 🔄 One-time sync: backfill avatars for all players from Discord
 	go syncPlayerAvatars(dg)
 
-	// 🎫 Bring each league's ticket panel up to date (edits in place)
-	go RefreshTicketPanels(dg)
+	// 📌 Bring bot panels (tickets, draft signup) up to date (edits in place)
+	go RefreshDiscordPanels(dg)
 
 	r := mux.NewRouter()
 
@@ -975,6 +888,7 @@ func main() {
 	r.HandleFunc("/api/mod/settings", HandleUpdateSettings).Methods("POST")
 	r.HandleFunc("/api/mod/discord/channels", HandleListDiscordChannels).Methods("GET")
 	r.HandleFunc("/api/mod/tickets/panel", HandlePostTicketPanel).Methods("POST")
+	r.HandleFunc("/api/mod/draft/panel", HandlePostDraftPanel).Methods("POST")
 	r.HandleFunc("/api/rules", HandleGetRules).Methods("GET")
 	r.HandleFunc("/api/mod/rules", HandleSaveRules).Methods("POST")
 	r.HandleFunc("/api/tools/archive-team-stats", HandleArchiveTeamStats).Methods("POST")

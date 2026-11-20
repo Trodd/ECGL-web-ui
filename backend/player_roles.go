@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"strings"
 	"time"
 )
@@ -66,9 +67,60 @@ func playerIsBannedIn(playerID int64, league string) bool {
 	return strings.EqualFold(playerRoleInLeague(playerID, league), "Banned")
 }
 
-// playerIsRegisteredIn reports whether the player finished registration for a league.
+// playerIsRegisteredIn reports whether the player is registered for a league:
+// they hold a role there AND still have a global role. Unregistering clears
+// the global role (with device/timezone), so a leftover league role on its own
+// must not count as registered.
+//
+// Deliberately NOT requiring device/timezone: many long-standing players
+// registered before device was collected and have it blank — they are still
+// real, rostered players.
 func playerIsRegisteredIn(playerID int64, league string) bool {
-	return strings.TrimSpace(playerRoleInLeague(playerID, league)) != ""
+	if strings.TrimSpace(playerRoleInLeague(playerID, league)) == "" {
+		return false
+	}
+	var p Player
+	if err := DB.Select("role").First(&p, playerID).Error; err != nil {
+		return false
+	}
+	return strings.TrimSpace(p.Role) != ""
+}
+
+// clearLeagueRolesOnUnregister blanks a player's per-league roles when they
+// unregister, so no league still treats them as registered (draft signups,
+// Discord role sync). Bans are kept, and the rows stay so mod overrides
+// (play_override / force_veteran) survive a re-register.
+func clearLeagueRolesOnUnregister(playerID int64) error {
+	return DB.Exec(`
+		UPDATE player_league_roles SET role = '', updated_at = NOW()
+		WHERE player_id = ? AND COALESCE(role, '') <> '' AND role <> 'Banned'
+	`, playerID).Error
+}
+
+// clearStaleLeagueRoles is a one-time cleanup for players who unregistered
+// before clearLeagueRolesOnUnregister existed: their global role was cleared
+// but their league roles were left behind. Only a blank global role counts —
+// a missing device alone does not (see playerIsRegisteredIn).
+func clearStaleLeagueRoles() {
+	const name = "clear_stale_league_roles_v2"
+	if migrationApplied(name) {
+		return
+	}
+	res := DB.Exec(`
+		UPDATE player_league_roles plr SET role = '', updated_at = NOW()
+		FROM players p
+		WHERE p.id = plr.player_id
+		  AND COALESCE(plr.role, '') <> '' AND plr.role <> 'Banned'
+		  AND COALESCE(p.role, '') = ''
+	`)
+	if res.Error != nil {
+		log.Printf("⚠️ %s: %v", name, res.Error)
+		return
+	}
+	log.Printf("🧹 Cleared %d leftover league role(s) from unregistered players", res.RowsAffected)
+	if err := markMigrationApplied(name); err != nil {
+		log.Printf("⚠️ %s marker: %v", name, err)
+	}
 }
 
 // playerPlayOverride reports whether a league mod allowed this player to play as a

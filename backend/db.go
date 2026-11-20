@@ -53,7 +53,7 @@ func InitDB() {
 		&Match{}, &MatchScore{}, &PlayerHistory{}, &CastLog{}, &CastLogMulti{}, &MatchRoster{}, &FinalsTeam{}, &TeamArchive{}, &FinalsArchive{},
 		&ModAuditLog{}, &LeagueSettings{}, &RuleSection{}, &Clip{}, &Notification{}, &PlayerAvailability{}, &PlayerLeagueStats{},
 		&DraftSignup{}, &CastAssignment{}, &PlayerSettings{}, &PlayerLeagueRole{},
-		&Ticket{}, &TicketPanel{},
+		&Ticket{}, &DiscordPanel{},
 	)
 	if err != nil {
 		log.Fatal("❌ Migration failed:", err)
@@ -61,6 +61,8 @@ func InitDB() {
 
 	ensureSettingsSchema()
 	ensureLeagueSchema()
+	migrateTicketPanelsTable()
+	clearStaleLeagueRoles()
 
 	sqlDB, _ := DB.DB()
 	sqlDB.SetMaxIdleConns(10)

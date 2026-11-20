@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -126,41 +127,62 @@ func HandleDraftSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lg := leagueFromRequest(r)
-	if lg != LeagueRookie {
-		http.Error(w, "Draft signup is only available for the Rookie League", http.StatusBadRequest)
-		return
-	}
-
-	var p Player
-	if err := DB.First(&p, playerID).Error; err != nil {
-		http.Error(w, "You must register before joining the draft", http.StatusBadRequest)
-		return
-	}
-	if !playerIsRegisteredIn(playerID, lg) {
-		http.Error(w, "You must register for this league before joining the draft", http.StatusBadRequest)
-		return
-	}
-	if playerIsBannedIn(playerID, lg) {
-		http.Error(w, "Your account is banned.", http.StatusForbidden)
-		return
-	}
-
-	if playerOnTeamInLeague(playerID, lg) {
-		http.Error(w, "You are already on a Rookie League team", http.StatusBadRequest)
-		return
-	}
-
 	var req struct {
 		Note string `json:"note"`
 		Kind string `json:"kind"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	kind := draftKindOf(req.Kind)
-	if kind == draftKindCoach && !coachDraftEnabled(lg) {
-		http.Error(w, "Coach signups are closed for the Rookie League right now.", http.StatusBadRequest)
+	s, err := joinDraft(playerID, leagueFromRequest(r), req.Kind, req.Note)
+	if err != nil {
+		http.Error(w, err.Error(), err.status)
 		return
+	}
+	respondJSON(w, map[string]any{"success": true, "signup": s})
+}
+
+// userError is a user-facing failure (draft, registration…) plus the HTTP
+// status the website should answer with.
+type userError struct {
+	msg    string
+	status int
+}
+
+func (e *userError) Error() string { return e.msg }
+
+func userErr(status int, msg string) *userError { return &userError{msg: msg, status: status} }
+
+// draftEligibleKind checks whether a player may enter a league's draft and
+// returns the draft kind they'll actually be entered as (veterans and
+// registered coaches are moved to the coach draft). Shared by the website and
+// the Discord draft panel so both apply exactly the same rules.
+func draftEligibleKind(playerID int64, lg, requestedKind string) (string, *userError) {
+	if lg != LeagueRookie {
+		return "", userErr(http.StatusBadRequest, "Draft signup is only available for the Rookie League")
+	}
+	var p Player
+	if err := DB.First(&p, playerID).Error; err != nil {
+		return "", userErr(http.StatusBadRequest, "You must register before joining the draft")
+	}
+	if !playerIsRegisteredIn(playerID, lg) {
+		return "", userErr(http.StatusBadRequest, "You must register for this league before joining the draft")
+	}
+	if playerIsBannedIn(playerID, lg) {
+		return "", userErr(http.StatusForbidden, "Your account is banned.")
+	}
+	if playerOnTeamInLeague(playerID, lg) {
+		return "", userErr(http.StatusBadRequest, "You are already on a Rookie League team")
+	}
+
+	// Re-signup cooldown after leaving the draft (stops join/leave spam).
+	if wait := draftRejoinWait(playerID, lg); wait > 0 {
+		return "", userErr(http.StatusTooManyRequests,
+			fmt.Sprintf("You left the draft recently — you can sign up again in %s.", humanWait(wait)))
+	}
+
+	kind := draftKindOf(requestedKind)
+	if kind == draftKindCoach && !coachDraftEnabled(lg) {
+		return "", userErr(http.StatusBadRequest, "Coach signups are closed for the Rookie League right now.")
 	}
 
 	// Veterans can't play, so they can't enter the player draft. If they sign up
@@ -169,10 +191,8 @@ func HandleDraftSignup(w http.ResponseWriter, r *http.Request) {
 	// with the rookie play override.
 	if kind == draftKindPlayer && playerLockedToCoach(lg, playerID) {
 		if !coachDraftEnabled(lg) {
-			http.Error(w,
-				"Veterans can't play in the Rookie League. You can still create or join a team — ask a mod about coaching.",
-				http.StatusBadRequest)
-			return
+			return "", userErr(http.StatusBadRequest,
+				"Veterans can't play in the Rookie League. You can still create or join a team — ask a mod about coaching.")
 		}
 		kind = draftKindCoach
 	}
@@ -181,15 +201,83 @@ func HandleDraftSignup(w http.ResponseWriter, r *http.Request) {
 	// even if the client asked for the player draft.
 	if kind == draftKindPlayer && isRegisteredRookieCoach(playerID) {
 		if !coachDraftEnabled(lg) {
-			http.Error(w,
-				"You're registered as a coach, so you can only sign up for the coach draft — and coach signups are closed right now.",
-				http.StatusBadRequest)
-			return
+			return "", userErr(http.StatusBadRequest,
+				"You're registered as a coach, so you can only sign up for the coach draft — and coach signups are closed right now.")
 		}
 		kind = draftKindCoach
 	}
+	return kind, nil
+}
 
-	note := strings.TrimSpace(req.Note)
+const draftRejoinDefaultCooldown = 10 * time.Minute
+
+// draftRejoinCooldown is ROOKIE_DRAFT_SIGNUP_COOLDOWN_MINUTES (blank = 10,
+// 0 = off): how long a player who left the draft must wait to sign up again.
+func draftRejoinCooldown() time.Duration {
+	v := strings.TrimSpace(os.Getenv("ROOKIE_DRAFT_SIGNUP_COOLDOWN_MINUTES"))
+	if v == "" {
+		return draftRejoinDefaultCooldown
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return draftRejoinDefaultCooldown
+	}
+	return time.Duration(n) * time.Minute
+}
+
+// draftRejoinWait returns how long until the player may sign up again (0 =
+// now). Only applies after the player withdrew themselves; updating a note
+// while still signed up, first signups, and mod actions are never blocked.
+// Based on the stored withdraw time, so it survives restarts.
+func draftRejoinWait(playerID int64, lg string) time.Duration {
+	cd := draftRejoinCooldown()
+	if cd <= 0 {
+		return 0
+	}
+	var s DraftSignup
+	if DB.Select("status", "updated_at").
+		Where("player_id = ? AND league = ?", playerID, lg).First(&s).Error != nil {
+		return 0
+	}
+	if s.Status != draftWithdrawn {
+		return 0
+	}
+	if left := time.Until(s.UpdatedAt.Add(cd)); left > 0 {
+		return left
+	}
+	return 0
+}
+
+// humanWait: "about 7 minutes", "1 minute", "less than a minute".
+func humanWait(d time.Duration) string {
+	mins := int((d + time.Minute - 1) / time.Minute) // round up
+	switch {
+	case d < time.Minute:
+		return "less than a minute"
+	case mins == 1:
+		return "1 minute"
+	case mins < 60:
+		return fmt.Sprintf("%d minutes", mins)
+	default:
+		h := mins / 60
+		if h == 1 {
+			return "about 1 hour"
+		}
+		return fmt.Sprintf("about %d hours", h)
+	}
+}
+
+// joinDraft enters (or re-enters) a player into a league's draft.
+func joinDraft(playerID int64, lg, requestedKind, note string) (DraftSignup, *userError) {
+	kind, derr := draftEligibleKind(playerID, lg, requestedKind)
+	if derr != nil {
+		return DraftSignup{}, derr
+	}
+
+	var p Player
+	DB.First(&p, playerID)
+
+	note = strings.TrimSpace(note)
 	if len(note) > 300 {
 		note = note[:300]
 	}
@@ -209,12 +297,10 @@ func HandleDraftSignup(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		if err := DB.Create(&s).Error; err != nil {
-			http.Error(w, "Failed to join the draft", http.StatusInternalServerError)
-			return
+			return DraftSignup{}, userErr(http.StatusInternalServerError, "Failed to join the draft")
 		}
 	} else if err := DB.Save(&s).Error; err != nil {
-		http.Error(w, "Failed to join the draft", http.StatusInternalServerError)
-		return
+		return DraftSignup{}, userErr(http.StatusInternalServerError, "Failed to join the draft")
 	}
 
 	if kind == draftKindCoach {
@@ -222,8 +308,7 @@ func HandleDraftSignup(w http.ResponseWriter, r *http.Request) {
 	} else {
 		LogGeneral(fmt.Sprintf("📝 **%s** entered the **Rookie League draft**", draftPlayerLabel(p)), lg)
 	}
-
-	respondJSON(w, map[string]any{"success": true, "signup": s})
+	return s, nil
 }
 
 // POST /api/draft/withdraw
@@ -233,26 +318,29 @@ func HandleDraftWithdraw(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if err := withdrawFromDraft(playerID, leagueFromRequest(r)); err != nil {
+		http.Error(w, err.Error(), err.status)
+		return
+	}
+	respondJSON(w, map[string]any{"success": true})
+}
 
-	lg := leagueFromRequest(r)
-
+// withdrawFromDraft takes a player's pending signup out of a league's draft.
+func withdrawFromDraft(playerID int64, lg string) *userError {
 	res := DB.Model(&DraftSignup{}).
 		Where("player_id = ? AND league = ? AND status = ?", playerID, lg, draftPending).
 		Update("status", draftWithdrawn)
 	if res.Error != nil {
-		http.Error(w, "Failed to withdraw", http.StatusInternalServerError)
-		return
+		return userErr(http.StatusInternalServerError, "Failed to withdraw")
 	}
 	if res.RowsAffected == 0 {
-		http.Error(w, "You are not in the draft", http.StatusNotFound)
-		return
+		return userErr(http.StatusNotFound, "You are not in the draft")
 	}
 
 	var p Player
 	DB.First(&p, playerID)
 	LogGeneral(fmt.Sprintf("↩️ **%s** withdrew from the **Rookie League draft**", draftPlayerLabel(p)), lg)
-
-	respondJSON(w, map[string]any{"success": true})
+	return nil
 }
 
 // --- Mod endpoints ----------------------------------------------------------

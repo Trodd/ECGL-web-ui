@@ -390,6 +390,10 @@ func RegisterSlashCommands(dg *discordgo.Session) {
 			Name:        "coinflip",
 			Description: "Flip a coin for the current match (match channel only)",
 		},
+		{
+			Name:        "draftsignup",
+			Description: "Post the Rookie League draft signup buttons in this channel",
+		},
 	}
 
 	currentNames := map[string]bool{}
@@ -536,6 +540,8 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		handleTeamSlashCommand(s, i, data)
 	case "addsub":
 		handleAddSubSlashCommand(s, i, data)
+	case "draftsignup":
+		handleDraftSignupSlashCommand(s, i)
 	case "coinflip":
 		handleCoinFlipSlashCommand(s, i, data)
 	}

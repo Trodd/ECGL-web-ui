@@ -240,8 +240,52 @@ const ROOKIE_SETTING_GROUPS = [
             },
         ],
     },
+    {
+        label: "Rookie Draft Signup (Discord)",
+        action: "draft_panel",
+        keys: [
+            {
+                key: "ROOKIE_DRAFT_PANEL_CHANNEL_ID",
+                label: "Draft Panel Channel",
+                type: "discord_channel",
+                hint: "Where the bot posts the Rookie League draft signup panel (Join Draft, Coach Signup, My Status). Changing it moves the panel when you save; blank = no panel. The Coach Signup button follows \"Allow Coach Draft Signups\" above.",
+            },
+            {
+                key: "ROOKIE_DRAFT_COMMAND_ENABLED",
+                label: "Members Can Use /draftsignup",
+                type: "toggle",
+                hint: "On: anyone can type /draftsignup to post the signup buttons in any channel. Off: only League Mods can.",
+            },
+            {
+                key: "ROOKIE_DRAFT_COMMAND_COOLDOWN_MINUTES",
+                label: "/draftsignup Cooldown (minutes)",
+                type: "number",
+                hint: "After the signup is posted, that person AND that channel wait this long before it can be posted again. Blank = 10, 0 = no cooldown. League Mods skip the cooldown.",
+            },
+            {
+                key: "ROOKIE_DRAFT_SIGNUP_COOLDOWN_MINUTES",
+                label: "Re-signup Cooldown (minutes)",
+                type: "number",
+                hint: "After a player leaves the draft, how long before they can sign up again — on the website and in Discord. Stops join/leave spam. Blank = 10, 0 = no cooldown. Editing your note while signed up, first-time signups and mod placements are never blocked.",
+            },
+        ],
+    },
     ticketSettingsGroup("_ROOKIE", "Rookie League"),
 ];
+
+// Discord bot panels that can be (re)posted from a settings card.
+const PANEL_ACTIONS = {
+    ticket_panel: {
+        url: "/api/mod/tickets/panel",
+        label: "🎫 Post / Refresh Ticket Panel",
+        done: (league) => `${league} ticket panel posted.`,
+    },
+    draft_panel: {
+        url: "/api/mod/draft/panel",
+        label: "📝 Post / Refresh Draft Panel",
+        done: () => "Rookie League draft panel posted.",
+    },
+};
 
 // Dropdown of Discord channels / categories / roles for a settings key. Falls
 // back to a plain ID box when the bot's channel list couldn't be loaded.
@@ -411,21 +455,23 @@ export default function LeagueSettings() {
         
     };
 
-    // (Re)post the Open Ticket panel for the league being viewed.
-    const handlePostTicketPanel = async () => {
+    // (Re)post a Discord bot panel (tickets / draft) for the league being viewed.
+    const handlePostPanel = async (action) => {
+        const panel = PANEL_ACTIONS[action];
+        if (!panel) return;
         if (hasChanges()) {
             toast("Save your settings first — the panel uses the saved channel.", "warning");
             return;
         }
         setPostingPanel(true);
         try {
-            await axios.post(`${getApiUrl()}/api/mod/tickets/panel`, {}, {
+            await axios.post(`${getApiUrl()}${panel.url}`, {}, {
                 withCredentials: true,
                 headers: { "X-ECGL-League": viewLeague },
             });
-            toast(`${leagueLabel(viewLeague)} ticket panel posted.`, "success");
+            toast(panel.done(leagueLabel(viewLeague)), "success");
         } catch (err) {
-            toast(err.response?.data || "Failed to post ticket panel.", "danger");
+            toast(err.response?.data || "Failed to post the panel.", "danger");
         } finally {
             setPostingPanel(false);
         }
@@ -667,22 +713,22 @@ export default function LeagueSettings() {
                                         </div>
                                     </div>
                                 ))}
-                                {group.action === "ticket_panel" && (
+                                {PANEL_ACTIONS[group.action] && (
                                     <div className="d-flex align-items-center gap-2 flex-wrap pt-2" style={{ borderTop: "1px solid var(--border-default)" }}>
                                         <button
                                             type="button"
                                             className="btn btn-sm btn-outline-primary"
-                                            onClick={handlePostTicketPanel}
+                                            onClick={() => handlePostPanel(group.action)}
                                             disabled={postingPanel}
                                         >
-                                            {postingPanel ? "Posting…" : "🎫 Post / Refresh Ticket Panel"}
+                                            {postingPanel ? "Posting…" : PANEL_ACTIONS[group.action].label}
                                         </button>
                                         <small style={{ color: "var(--text-tertiary)" }}>
                                             Replaces the existing panel message with a fresh one in the panel channel.
                                         </small>
                                     </div>
                                 )}
-                                {group.action === "ticket_panel" && !discord && (
+                                {PANEL_ACTIONS[group.action] && !discord && (
                                     <small className="d-block mt-2" style={{ color: "var(--text-tertiary)" }}>
                                         Couldn't load the Discord channel list — paste IDs instead (right-click → Copy ID in Discord).
                                     </small>
