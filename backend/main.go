@@ -711,7 +711,6 @@ func main() {
 	defer dg.Close()
 
 	log.Println("🤖 Discord bot connected (prefix commands enabled)")
-
 	// Confirm the gateway state actually carries members — that's what makes
 	// role checks free and instantly accurate.
 	if guildID := getEnv("DISCORD_GUILD_ID", ""); guildID != "" {
@@ -736,6 +735,13 @@ func main() {
 
 	// 📌 Bring bot panels (tickets, draft signup) up to date (edits in place)
 	go RefreshDiscordPanels(dg)
+
+	// 📊 Echo Combat stats (echocombat.com) — used for Rookie League fairness.
+	if echoStatsEnabled() {
+		log.Println("📊 Echo Combat stats enabled (echocombat.com)")
+	} else {
+		log.Println("📊 Echo Combat stats disabled — set ECHOCOMBAT_API_KEY in .env")
+	}
 
 	r := mux.NewRouter()
 
@@ -882,6 +888,8 @@ func main() {
 	r.HandleFunc("/api/mod/rookie/play-override", HandleSetRookiePlayOverride).Methods("POST")
 	r.HandleFunc("/api/mod/rookie/veterans", HandleListRookieVeterans).Methods("GET")
 	r.HandleFunc("/api/mod/rookie/veteran-flag", HandleSetRookieVeteranFlag).Methods("POST")
+	r.HandleFunc("/api/mod/rookie/echo-stats", HandleGetEchoStats).Methods("GET")
+	r.HandleFunc("/api/mod/rookie/echo-stats/batch", HandleGetEchoStatsBatch).Methods("GET")
 	r.HandleFunc("/api/mod/tournament/generate", HandleModGenerateTournament).Methods("POST")
 	r.HandleFunc("/api/mod/tournament/match", HandleModAddTournamentMatch).Methods("POST")
 	r.HandleFunc("/api/mod/settings", HandleGetSettings).Methods("GET")
@@ -943,8 +951,8 @@ func main() {
 	api.HandleFunc("/draft/signup", HandleDraftSignup).Methods("POST")
 	api.HandleFunc("/draft/withdraw", HandleDraftWithdraw).Methods("POST")
 
-	// Caster production board (caster role enforced in the handlers)
-	api.HandleFunc("/casters/matches", HandleGetCasterMatches).Methods("GET")
+	// Caster production board — public read, caster role enforced on writes
+	api.HandleFunc("/casters/matches", HandleGetCasterMatches).Methods("GET", "OPTIONS")
 	api.HandleFunc("/casters/assign", HandleAssignCastSlot).Methods("POST")
 	api.HandleFunc("/casters/release", HandleReleaseCastSlot).Methods("POST")
 	api.HandleFunc("/casters/crew-ready", HandleCasterCrewReady).Methods("POST")
@@ -956,6 +964,7 @@ func main() {
 	api.HandleFunc("/players", GetPlayers).Methods("GET")
 	api.HandleFunc("/me", handleMe).Methods("GET")
 	api.HandleFunc("/player/{id:[0-9]+}", GetPlayerDetail).Methods("GET")
+	api.HandleFunc("/player/{id:[0-9]+}/echo-stats", HandleGetPlayerEchoStats).Methods("GET")
 	api.HandleFunc("/player/availability", GetPlayerAvailability).Methods("GET")
 	api.HandleFunc("/player/availability", SavePlayerAvailability).Methods("POST")
 	api.HandleFunc("/player/settings", GetPlayerSettings).Methods("GET")

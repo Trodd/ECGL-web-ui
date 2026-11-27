@@ -111,10 +111,25 @@ type castSlotInfo struct {
 
 // GET /api/casters/matches
 // Only matches where BOTH teams confirmed a schedule, and that aren't finished.
+//
+// PUBLIC: this feed is consumed by external cast overlays, so it needs no
+// login. If the caller *is* logged in we still fill in the per-user `is_mine`
+// flags; anonymous callers just get false.
 func HandleGetCasterMatches(w http.ResponseWriter, r *http.Request) {
-	me, ok := requireCaster(w, r)
-	if !ok {
+	// CORS — let overlays on other origins read the feed.
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
 		return
+	}
+
+	me := ""
+	if session, err := store.Get(r, "session"); err == nil {
+		if id, ok := session.Values["discord_id"].(string); ok {
+			me = strings.TrimSpace(id)
+		}
 	}
 
 	lg := leagueFromRequest(r)
@@ -130,6 +145,8 @@ func HandleGetCasterMatches(w http.ResponseWriter, r *http.Request) {
 		TeamA         string
 		TeamBID       uint
 		TeamB         string
+		TeamARating   int
+		TeamBRating   int
 		MapCount      int
 	}
 
@@ -145,6 +162,8 @@ func HandleGetCasterMatches(w http.ResponseWriter, r *http.Request) {
 		       m.status, m.scheduled_date,
 		       m.team_a_id, t1.name AS team_a,
 		       m.team_b_id, t2.name AS team_b,
+		       COALESCE(t1.rating, 0) AS team_a_rating,
+		       COALESCE(t2.rating, 0) AS team_b_rating,
 		       (SELECT COUNT(*) FROM match_scores ms WHERE ms.match_id = m.id) AS map_count
 		FROM matches m
 		JOIN teams t1 ON t1.id = m.team_a_id
@@ -206,17 +225,35 @@ func HandleGetCasterMatches(w http.ResponseWriter, r *http.Request) {
 		ScheduledDate *time.Time     `json:"scheduled_date"`
 		TeamAID       uint           `json:"team_a_id"`
 		TeamA         string         `json:"team_a"`
+		TeamARank     *int           `json:"team_a_rank"`
+		TeamARating   int            `json:"team_a_rating"`
+		TeamADivision string         `json:"team_a_division"`
+		TeamATier     string         `json:"team_a_tier"`
+		TeamATierText string         `json:"team_a_tier_text"`
 		TeamBID       uint           `json:"team_b_id"`
 		TeamB         string         `json:"team_b"`
+		TeamBRank     *int           `json:"team_b_rank"`
+		TeamBRating   int            `json:"team_b_rating"`
+		TeamBDivision string         `json:"team_b_division"`
+		TeamBTier     string         `json:"team_b_tier"`
+		TeamBTierText string         `json:"team_b_tier_text"`
 		StreamChannel string         `json:"stream_channel"`
 		MatchType     string         `json:"match_type"`
 		Slots         []castSlotInfo `json:"slots"`
 	}
 
+	// Leaderboard positions for this league (test teams get placeholder ranks).
+	ranks := teamRankMap(lg)
+
 	out := make([]matchOut, 0, len(rows))
 
 	for _, m := range rows {
 		slots := make([]castSlotInfo, 0, len(castSlots))
+
+		// Division / tier from each team's rating (always present, even for
+		// teams still in placement).
+		aDivision, aTier := GetDivisionTier(m.TeamARating)
+		bDivision, bTier := GetDivisionTier(m.TeamBRating)
 
 		var assigns []CastAssignment
 		DB.Where("match_id = ?", m.ID).Find(&assigns)
@@ -254,8 +291,18 @@ func HandleGetCasterMatches(w http.ResponseWriter, r *http.Request) {
 			ScheduledDate: m.ScheduledDate,
 			TeamAID:       m.TeamAID,
 			TeamA:         m.TeamA,
+			TeamARank:     rankPtr(ranks, m.TeamAID),
+			TeamARating:   m.TeamARating,
+			TeamADivision: aDivision,
+			TeamATier:     aTier,
+			TeamATierText: strings.TrimSpace(aDivision + " " + aTier),
 			TeamBID:       m.TeamBID,
 			TeamB:         m.TeamB,
+			TeamBRank:     rankPtr(ranks, m.TeamBID),
+			TeamBRating:   m.TeamBRating,
+			TeamBDivision: bDivision,
+			TeamBTier:     bTier,
+			TeamBTierText: strings.TrimSpace(bDivision + " " + bTier),
 			StreamChannel: castStreamFor(m.ID),
 			MatchType:     castMatchTypeOrDefault(m.ID, m.MapCount),
 			Slots:         slots,

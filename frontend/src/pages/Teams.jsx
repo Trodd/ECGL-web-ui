@@ -65,7 +65,7 @@ export default function Teams() {
 
   return (
     <div className="d-flex justify-content-center">
-      <div style={{ width: "100%", maxWidth: 680 }}>
+      <div className="ecgl-page-wide">
         <div className="card bg-dark border-secondary p-4 shadow-sm">
           <h2 className="mb-3"><E n="team" /> Teams</h2>
 

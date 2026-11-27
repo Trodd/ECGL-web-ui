@@ -189,18 +189,38 @@ func HandleCasterBotMatches(w http.ResponseWriter, r *http.Request) {
 }
 
 // teamRankMap returns team id → leaderboard position for a league.
+//
+// Test teams are not on the real leaderboard, but external feeds and overlays
+// expect a rank for every team, so they get placeholder positions after the
+// real board (N+1, N+2, …) instead of a null.
 func teamRankMap(league string) map[uint]int {
+	lg := normalizeLeague(league)
+
 	var ids []uint
 	DB.Table("teams").
-		Where("league = ?", normalizeLeague(league)).
+		Where("league = ?", lg).
 		Where("COALESCE(status, '') <> 'Test'").
 		Order("rating DESC, wins DESC, losses ASC").
 		Pluck("id", &ids)
 
-	out := make(map[uint]int, len(ids))
+	out := make(map[uint]int, len(ids)+8)
 	for i, id := range ids {
 		out[id] = i + 1
 	}
+
+	var testIDs []uint
+	DB.Table("teams").
+		Where("league = ?", lg).
+		Where("status = 'Test'").
+		Order("rating DESC, id ASC").
+		Pluck("id", &testIDs)
+
+	next := len(ids) + 1
+	for _, id := range testIDs {
+		out[id] = next
+		next++
+	}
+
 	return out
 }
 
@@ -214,31 +234,48 @@ func rankPtr(ranks map[uint]int, teamID uint) *int {
 
 // teamStanding is a team's leaderboard snapshot for a league.
 type teamStanding struct {
+	ID       uint   `json:"id"`
+	Name     string `json:"name"`
+	LogoURL  string `json:"logo_url"`
 	Rank     *int   `json:"rank"`
+	RankText string `json:"rank_text"`
 	Rating   int    `json:"rating"`
 	Wins     int    `json:"wins"`
 	Losses   int    `json:"losses"`
 	Matches  int    `json:"matches"`
 	Division string `json:"division"`
 	Tier     string `json:"tier"`
+	// TierText is the display label, e.g. "Diamond II".
+	TierText  string `json:"tier_text"`
+	Placement bool   `json:"placement"`
 }
 
 // buildStanding returns rank/rating info for a team using a precomputed rank map.
-func buildStanding(ranks map[uint]int, t Team) teamStanding {
+// baseURL is used to make the logo absolute (pass "" to skip it).
+func buildStanding(ranks map[uint]int, t Team, baseURL ...string) teamStanding {
 	placementMatches := getEnvInt("PLACEMENT_MATCHES", 3)
 
 	s := teamStanding{
+		ID:      t.ID,
+		Name:    t.Name,
 		Rank:    rankPtr(ranks, t.ID),
 		Rating:  t.Rating,
 		Wins:    t.Wins,
 		Losses:  t.Losses,
 		Matches: t.Matches,
 	}
-	if s.Matches < placementMatches {
-		s.Division = "Placement"
-	} else {
-		s.Division, s.Tier = GetDivisionTier(t.Rating)
+	if len(baseURL) > 0 && strings.TrimSpace(baseURL[0]) != "" {
+		s.LogoURL = absoluteTeamLogo(baseURL[0], t)
 	}
+	if s.Rank != nil {
+		s.RankText = fmt.Sprintf("#%d", *s.Rank)
+	}
+	// Always report the division/tier the rating sits in — "Placement" is a
+	// separate flag, not a replacement for the name, so overlays always have a
+	// tier label to show.
+	s.Division, s.Tier = GetDivisionTier(t.Rating)
+	s.TierText = strings.TrimSpace(s.Division + " " + s.Tier)
+	s.Placement = s.Matches < placementMatches
 	return s
 }
 

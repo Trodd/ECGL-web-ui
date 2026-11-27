@@ -223,7 +223,7 @@ export default function MatchDetail() {
     }
 
     return (
-        <div className="mx-auto text-light" style={{ maxWidth: 920 }}>
+        <div className="text-light">
 
             {/* ================= HEADER ================= */}
             <div className="d-flex justify-content-between align-items-center mb-3">

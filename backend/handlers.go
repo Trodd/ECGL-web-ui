@@ -3521,6 +3521,7 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 	// Standings (leaderboard rank + rating for both teams)
 	// ------------------------------------------------------------
 	ranks := teamRankMap(match.League)
+	siteBase := strings.TrimRight(getEnv("FRONTEND_URL", "https://ecgleague.com"), "/")
 
 	// ------------------------------------------------------------
 	// Cast crew (owned by the Caster Board)
@@ -3531,9 +3532,12 @@ func HandleGetMatch(w http.ResponseWriter, r *http.Request) {
 	// Response
 	// ------------------------------------------------------------
 	respondJSON(w, map[string]any{
-		"match":      match,
-		"teams":      map[string]any{"a": teamA, "b": teamB},
-		"standings":  map[string]any{"a": buildStanding(ranks, teamA), "b": buildStanding(ranks, teamB)},
+		"match": match,
+		"teams": map[string]any{"a": teamA, "b": teamB},
+		"standings": map[string]any{
+			"a": buildStanding(ranks, teamA, siteBase),
+			"b": buildStanding(ranks, teamB, siteBase),
+		},
 		"map_scores": mapScores,
 		"crew": map[string]any{
 			"casters":  crewCasters,

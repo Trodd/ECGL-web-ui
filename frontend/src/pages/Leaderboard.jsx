@@ -44,8 +44,7 @@ export default function Leaderboard() {
 
   return (
     <div
-      className="card bg-dark border-secondary p-4 shadow-sm mx-auto"
-      style={{ maxWidth: 900 }}
+      className="card bg-dark border-secondary p-4 shadow-sm"
     >
       {/* ================= HEADER ================= */}
       <div className="d-flex justify-content-between align-items-center mb-3">

@@ -22,8 +22,9 @@ import PlayerSettings from "./pages/PlayerSettings";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import "./styles.css";
+import "./panel-theme.css";
 import { getApiUrl } from "./config";
-import { LEAGUES, getLeague, setLeague, leagueLink } from "./league";
+import { LEAGUES, getLeague, setLeague, leagueLink, leagueLabel } from "./league";
 import ToastHost from "./components/ToastHost";
 import { toast } from "./toast";
 import DevToolbar from "./components/DevToolbar";
@@ -493,8 +494,8 @@ function App() {
       {/* Main content */}
       <div className="app-content">
         {/* === Header === */}
-        <header className="ecgl-header text-center">
-          <div className="d-flex align-items-center justify-content-between">
+        <header className="ecgl-header">
+          <div className="ecgl-brand">
             <button
               type="button"
               className="btn btn-outline-light btn-sm d-md-none ecgl-mobile-nav-trigger"
@@ -504,14 +505,14 @@ function App() {
             >
               <E n="menu" />
             </button>
-            <div className="flex-grow-1">
-              <h1 className="m-0"><E n="lightning" /> Echo Combat George League</h1>
+            <div className="ecgl-brand-text">
+              <h1><E n="lightning" /> Echo Combat George League</h1>
+              <p className="season-text">
+                {season !== "" ? `Season ${season}` : "Loading…"}
+              </p>
             </div>
-            <div style={{ width: 44 }} className="d-md-none" />
+            <span className="ecgl-header-chip d-none d-sm-inline">{leagueLabel()}</span>
           </div>
-          <p className="season-text">
-            <E n="calendar" /> {season !== "" ? `Season ${season}` : "Loading..."}
-          </p>
         </header>
 
         {/* === Mobile slide-out nav === */}

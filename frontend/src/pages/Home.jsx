@@ -160,7 +160,7 @@ export default function Home({ user }) {
   }
 
   return (
-    <div className="container text-light py-4" style={{ maxWidth: "1100px" }}>
+    <div className="container text-light py-4">
 
       {/* =====================================================
           HERO
@@ -254,7 +254,7 @@ export default function Home({ user }) {
 
           {/* UPCOMING MATCHES */}
           <div
-            className="p-3 rounded mb-4"
+            className="card bg-dark border-secondary p-4 mb-4"
             style={{ background: "#151515", border: "1px solid #2a2a2a" }}
           >
             <h4><E n="calendar" /> Upcoming Matches</h4>
@@ -322,7 +322,7 @@ export default function Home({ user }) {
 
           {/* LEAGUE SNAPSHOT */}
           <div
-            className="p-3 rounded mb-4"
+            className="card bg-dark border-secondary p-4 mb-4"
             style={{ background: "#151515", border: "1px solid #2a2a2a" }}
           >
             <h4><E n="leaderboard" /> League Snapshot</h4>

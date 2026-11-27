@@ -129,7 +129,7 @@ export default function Players() {
 
   return (
     <div className="d-flex justify-content-center">
-      <div style={{ width: "100%", maxWidth: 760 }}>
+      <div className="ecgl-page-wide">
         <div className="card bg-dark border-secondary p-3 shadow-sm">
           <h2 className="text-light mb-2">👥 Registered Players</h2>
 

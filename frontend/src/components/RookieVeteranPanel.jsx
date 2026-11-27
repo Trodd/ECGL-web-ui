@@ -20,6 +20,8 @@ export default function RookieVeteranPanel({ urlBase }) {
   const [busyId, setBusyId] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
+  // player_id -> { loading, stats, message }
+  const [statsById, setStatsById] = useState({});
 
   async function load() {
     try {
@@ -96,8 +98,7 @@ export default function RookieVeteranPanel({ urlBase }) {
       }.`
     );
 
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
+  const visible = useMemo(() => {    const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       if (filter === "veterans" && !r.is_veteran) return false;
       if (filter === "new" && r.is_veteran) return false;
@@ -114,6 +115,32 @@ export default function RookieVeteranPanel({ urlBase }) {
   const vetCount = rows.filter((r) => r.is_veteran).length;
   const allowedCount = rows.filter((r) => r.play_override).length;
   const forcedCount = rows.filter((r) => r.force_veteran).length;
+
+  // ── Echo Combat stats (echocombat.com) ──────────────────────────────
+  // Fetched on demand — the upstream API allows 30 requests a minute, so we
+  // never auto-load a whole list.
+  async function loadStats(row) {
+    if (!row || statsById[row.player_id]?.loading) return;
+    setStatsById((p) => ({ ...p, [row.player_id]: { loading: true } }));
+    try {
+      const res = await axios.get(`${urlBase}/api/mod/rookie/echo-stats`, {
+        withCredentials: true,
+        params: { player_id: row.player_id, period: "all" },
+      });
+      setStatsById((p) => ({
+        ...p,
+        [row.player_id]: res.data?.success
+          ? { stats: res.data.stats }
+          : { message: res.data?.message || "No stats found" },
+      }));
+    } catch (err) {
+      const detail =
+        typeof err.response?.data === "string"
+          ? err.response.data.trim()
+          : err.response?.data?.error || "Failed to load stats";
+      setStatsById((p) => ({ ...p, [row.player_id]: { message: detail } }));
+    }
+  }
 
   return (
     <div>
@@ -237,7 +264,65 @@ export default function RookieVeteranPanel({ urlBase }) {
                   : "No team yet"}
               </span>
 
+              {(() => {
+                const s = statsById[r.player_id];
+                if (!s) return null;
+                if (s.loading) {
+                  return (
+                    <span className="d-inline-flex align-items-center gap-2 text-info small">
+                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+                      Fetching from echocombat.com…
+                    </span>
+                  );
+                }
+                if (s.message) {
+                  return (
+                    <span className="text-danger small" title={s.message}>
+                      📊 {s.message === "no stats found" ? "not found on echocombat.com" : s.message}
+                    </span>
+                  );
+                }
+                const st = s.stats || {};
+                const tierColor =
+                  st.tier === "Veteran"
+                    ? "bg-danger"
+                    : st.tier === "Seasoned"
+                      ? "bg-warning text-dark"
+                      : st.tier === "Developing"
+                        ? "bg-info text-dark"
+                        : "bg-success";
+                return (
+                  <span className="d-inline-flex flex-wrap align-items-center gap-2">
+                    <span className={`badge ${tierColor}`} title={st.verdict || ""}>
+                      {st.tier} · {st.eligibility}/100
+                    </span>
+                    <span className="text-secondary small">
+                      {st.games ?? 0} games · {Number(st.hours_played ?? 0).toFixed(1)}h ·{" "}
+                      {st.win_rate_known
+                        ? `${Math.round((st.win_rate ?? 0) * 100)}% win`
+                        : "win rate n/a"}{" "}
+                      · Lv{st.level ?? 0}
+                    </span>
+                  </span>
+                );
+              })()}
+
               <div className="ms-auto d-flex gap-2">
+                <button
+                  className="btn btn-sm btn-outline-light"
+                  disabled={statsById[r.player_id]?.loading}
+                  title="Pull this player's real Echo Combat stats from echocombat.com"
+                  onClick={() => loadStats(r)}
+                >
+                  {statsById[r.player_id]?.loading ? (
+                    <>
+                      <span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true" />
+                      Fetching…
+                    </>
+                  ) : (
+                    "📊 Stats"
+                  )}
+                </button>
                 {r.is_veteran && (
                   <button
                     className={`btn btn-sm ${r.play_override ? "btn-outline-secondary" : "btn-outline-info"}`}

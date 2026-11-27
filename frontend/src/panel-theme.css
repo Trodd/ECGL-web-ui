@@ -1,0 +1,338 @@
+
+/* ═══════════════════════════════════════════════════════════════
+   PANEL DESIGN SYSTEM  (echovrce.com-style dashboard)
+
+   Flat slate panels on a neutral grey canvas; translucent 1px borders;
+   square corners; 24px panel padding; 16–24px gutters; small uppercase
+   letter-spaced section labels; a single green accent.
+
+   Deliberately applied through the existing Bootstrap classes (.card,
+   .card-header, badges) so every page picks it up without markup churn.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── ECGL palette (unchanged look) ── */
+  --bg-base: #080a0f;
+  --bg-surface: #0d1117;
+  --bg-elevated: #141a24;
+  --bg-card: #111820;
+  --border-default: #1e2a3a;
+  --border-subtle: #162030;
+
+  --text-primary: #e8ecf0;
+  --text-secondary: #8b99a8;
+  --text-tertiary: #5c6b7a;
+
+  --accent: #3b6ea5;
+  --accent-bright: #5a9fd4;
+  --accent-glow: rgba(59, 110, 165, 0.3);
+  --accent-ink: #eaf4ff;
+
+  /* ── Layout geometry (echovrce-style) ── */
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+}
+
+body {
+  background: radial-gradient(1200px 620px at 50% -180px, #0f1a29 0%, #080b10 55%) no-repeat,
+    var(--bg-base);
+  background-attachment: fixed;
+}
+
+/* ─── Panels ─── */
+.card {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border-default) !important;
+  border-radius: 0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.card-header {
+  background: transparent !important;
+  border-bottom: 1px solid var(--border-default) !important;
+  padding: 1rem 1.5rem;
+}
+
+.card-body {
+  padding: 1.5rem;
+}
+
+.card-footer {
+  background: transparent !important;
+  border-top: 1px solid var(--border-default) !important;
+}
+
+/* Section labels inside panels — the "GETTING STARTED" look. */
+.card h4,
+.card h5 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-primary) !important;
+}
+
+/* Keep inline badges readable inside those labels. */
+.card h4 .badge,
+.card h5 .badge {
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 600;
+}
+
+/* ─── App header bar ─── */
+.ecgl-header {
+  background: var(--bg-surface) !important;
+  border-bottom: 1px solid var(--border-default) !important;
+  border-top: none !important;
+  text-align: left !important;
+  display: flex;
+  align-items: center;
+  padding: 0 20px !important;
+}
+
+.ecgl-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+}
+
+.ecgl-brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ecgl-header h1 {
+  font-size: 0.95rem !important;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-primary) !important;
+  text-shadow: none !important;
+  margin: 0;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ecgl-header .season-text {
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-tertiary) !important;
+  margin: 0;
+}
+
+.ecgl-header-chip {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  white-space: nowrap;
+}
+
+/* ─── Side nav ─── */
+.ecgl-side-nav {
+  background: var(--bg-surface) !important;
+  border-right: 1px solid var(--border-default) !important;
+}
+
+.ecgl-side-link {
+  border-radius: 4px !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--text-secondary) !important;
+  font-size: 0.86rem;
+  letter-spacing: 0.02em;
+}
+
+.ecgl-side-link:hover {
+  background: var(--bg-elevated) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-default) !important;
+}
+
+.ecgl-side-link.active {
+  background: var(--bg-elevated) !important;
+  border-color: var(--border-default) !important;
+  color: var(--text-primary) !important;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* ─── Accents ─── */
+.ecgl-accent {
+  color: var(--accent) !important;
+}
+
+.btn-accent {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-ink) !important;
+  font-weight: 600;
+}
+
+.btn-accent:hover,
+.btn-accent:focus {
+  background: var(--accent-bright) !important;
+  border-color: var(--accent-bright) !important;
+  color: #06131f !important;
+}
+
+.ecgl-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* ─── Tables / lists inside panels ─── */
+.table > :not(caption) > * > * {
+  background-color: transparent !important;
+  border-color: var(--border-subtle) !important;
+}
+
+.list-group-item {
+  background: transparent !important;
+  border-color: var(--border-subtle) !important;
+}
+
+/* ─── Inputs ─── */
+.form-control,
+.form-select {
+  background-color: var(--bg-elevated) !important;
+  border: 1px solid var(--border-default) !important;
+  border-radius: 4px;
+  color: var(--text-primary) !important;
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-glow) !important;
+}
+
+/* ─── Popovers/modals keep the panel surface ─── */
+.modal-content,
+.offcanvas {
+  background: var(--bg-surface) !important;
+  border: 1px solid var(--border-default) !important;
+  border-radius: 0 !important;
+}
+
+/* ═══ Dashboard tiles ═══
+   Wrap a page's panels in .ecgl-dash to get the reference's tiled layout:
+   single column on narrow screens, two columns from 1200px, with any child
+   marked .ecgl-span-2 stretching across the full width. */
+.ecgl-dash {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.ecgl-dash > .ecgl-span-2,
+.ecgl-dash > .ecgl-span-all {
+  grid-column: 1 / -1;
+}
+
+/* Panels that carry a wide table or a long scrolling list need the whole
+   width — squeezing them into a half tile is what made them hard to read. */
+.ecgl-dash > .card:has(table),
+.ecgl-dash > .card:has(.table-responsive),
+.ecgl-dash > .ecgl-wide {
+  grid-column: 1 / -1;
+}
+
+/* The grid gap owns the spacing, so the cards' own bottom margins would
+   double up. */
+.ecgl-dash > * {
+  margin-bottom: 0 !important;
+}
+
+@media (min-width: 1200px) {
+  .ecgl-dash {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+  }
+
+  /* Two columns can't fit roster + stats + availability in one row, so the
+     roster stretches and the stats/availability pair stays together. */
+  .ecgl-dash > .ecgl-roster {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1750px) {
+  .ecgl-dash {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ecgl-dash > .ecgl-roster {
+    grid-column: auto / span 1;
+  }
+}
+
+/* Three-across variant: roster | availability | requests column. */
+.ecgl-dash.ecgl-dash-3 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 1200px) {
+  .ecgl-dash.ecgl-dash-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ─── Full-width layout ───────────────────────────────────────────────
+   Use every pixel of the viewport: no centred max-width column, no
+   Bootstrap container caps. Sidebar + header still frame the content. */
+.page-content {
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 18px 20px 44px;
+}
+
+.app-content .container,
+.app-content .container-fluid,
+.app-content .container-sm,
+.app-content .container-md,
+.app-content .container-lg,
+.app-content .container-xl,
+.app-content .container-xxl,
+.ecgl-content .container,
+.ecgl-content .container-fluid {
+  max-width: 100% !important;
+  width: 100% !important;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* Wrapper used by list pages that previously capped their width. */
+.ecgl-page-wide {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (min-width: 1200px) {
+  .page-content {
+    padding: 20px 28px 52px;
+  }
+}
+
+@media (min-width: 1700px) {
+  .page-content {
+    padding: 22px 40px 60px;
+  }
+}

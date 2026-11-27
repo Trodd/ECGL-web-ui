@@ -45,14 +45,7 @@ export default function MyTeam() {
     margin: "0 auto 1.5rem auto",
   };
 
-  const [accordionOpen, setAccordionOpen] = useState(
-    localStorage.getItem("accordion_team_settings_open") === "true"
-  );
-
-  useEffect(() => {
-    const saved = localStorage.getItem("accordion_team_settings_open");
-    if (saved === "true") setAccordionOpen(true);
-  }, []);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [rosterLocked, setRosterLocked] = useState(false);
   const [rosterModal, setRosterModal] = useState(null); // player object or null
@@ -380,9 +373,9 @@ export default function MyTeam() {
   }
 
   return (
-    <div className="container text-light py-4" style={{ maxWidth: 1100 }}>
+    <div className="container text-light py-4 ecgl-dash ecgl-dash-3">
       {/* ================= TEAM HEADER ================= */}
-      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm ecgl-span-2">
         <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
           <div className="d-flex align-items-center gap-3">
             <TeamLogo
@@ -406,28 +399,39 @@ export default function MyTeam() {
             </div>
           </div>
 
-          {team?.id && (
-            !confirmLeave ? (
+          <div className="d-flex flex-wrap align-items-center gap-2">
+            {(myRole === "Captain" || myRole === "Co-Captain") && (
               <button
-                className="btn btn-outline-danger btn-sm"
-                onClick={() => setConfirmLeave(true)}
+                className="btn btn-outline-info btn-sm"
+                onClick={() => setSettingsOpen(true)}
               >
-                <E n="door" /> Leave Team
+                <E n="gear" /> Team Settings
               </button>
-            ) : (
-              <div className="d-flex gap-2">
-                <button className="btn btn-danger btn-sm" onClick={handleLeaveTeam}>
-                  <E n="check" /> Confirm
-                </button>
+            )}
+
+            {team?.id && (
+              !confirmLeave ? (
                 <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setConfirmLeave(false)}
+                  className="btn btn-outline-danger btn-sm"
+                  onClick={() => setConfirmLeave(true)}
                 >
-                  <E n="error" /> Cancel
+                  <E n="door" /> Leave Team
                 </button>
-              </div>
-            )
-          )}
+              ) : (
+                <div className="d-flex gap-2">
+                  <button className="btn btn-danger btn-sm" onClick={handleLeaveTeam}>
+                    <E n="check" /> Confirm
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setConfirmLeave(false)}
+                  >
+                    <E n="error" /> Cancel
+                  </button>
+                </div>
+              )
+            )}
+          </div>
         </div>
 
         {/* COOLDOWN BANNER (dark readable text on yellow) */}
@@ -442,27 +446,26 @@ export default function MyTeam() {
       </div>
 
 
-      {/* ================= TEAM SETTINGS ================= */}
-      {(myRole === "Captain" || myRole === "Co-Captain") && (
-        <div className="accordion mb-4" id="teamSettingsAccordion">
-          <div className="accordion-item bg-dark border-secondary rounded shadow-sm overflow-hidden">
-            <h2 className="accordion-header">
-              <button
-                className={`accordion-button bg-dark text-light fw-semibold ${accordionOpen ? "" : "collapsed"
-                  }`}
-                type="button"
-                onClick={() => {
-                  const next = !accordionOpen;
-                  setAccordionOpen(next);
-                  localStorage.setItem("accordion_team_settings_open", next ? "true" : "false");
-                }}
-              >
-                <E n="gear" /> Team Settings
-              </button>
-            </h2>
+      {/* ================= TEAM SETTINGS MODAL ================= */}
+      {settingsOpen && (myRole === "Captain" || myRole === "Co-Captain") && (
+        <div
+          className="modal d-block"
+          tabIndex="-1"
+          style={{ background: "rgba(0,0,0,0.6)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setSettingsOpen(false); }}
+        >
+          <div className="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+            <div className="modal-content bg-dark text-light border-secondary">
+              <div className="modal-header border-secondary">
+                <h5 className="modal-title"><E n="gear" /> Team Settings</h5>
+                <button
+                  className="btn-close btn-close-white"
+                  onClick={() => setSettingsOpen(false)}
+                />
+              </div>
 
-            <div className={`accordion-collapse collapse ${accordionOpen ? "show" : ""}`}>
-              <div className="accordion-body bg-black text-light">
+              <div className="modal-body">
+
                 {/* TEAM LOGO */}
                 <div className="mb-4 border-bottom border-secondary pb-3">
                   <h6 className="text-info mb-2"><E n="image" /> Team Logo</h6>
@@ -705,6 +708,15 @@ export default function MyTeam() {
                   )}
                 </div>
               </div>
+
+              <div className="modal-footer border-secondary">
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setSettingsOpen(false)}
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -754,6 +766,83 @@ export default function MyTeam() {
 
       {/* ================= TEAM AVAILABILITY ================= */}
       <TeamAvailability teamId={team?.id} />
+
+      {/* ================= REQUESTS (stacked right column) ================= */}
+      {(myRole === "Captain" || myRole === "Co-Captain") && (
+        <div className="d-flex flex-column gap-3">
+          {/* JOIN REQUESTS */}
+          <div className="card bg-dark border-secondary p-4 shadow-sm">
+            <h4 className="mb-3"><E n="signup" /> Join Requests</h4>
+
+            {requests.length === 0 ? (
+              <p className="text-secondary mb-0">No join requests.</p>
+            ) : (
+              requests.map((req) => (
+                <div
+                  key={req.id}
+                  className="border rounded p-3 mb-3"
+                  style={{ borderColor: "#444" }}
+                >
+                  <PlayerIdentity player={{ id: req.player_id, display_name: req.display_name, username: req.username, avatar: req.avatar }} size={26} />
+
+                  <div className="d-flex gap-2 mt-2">
+                    <button
+                      className="btn btn-success btn-sm"
+                      onClick={() => handleDecision(req.id, "accept")}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => handleDecision(req.id, "deny")}
+                    >
+                      Deny
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* CHALLENGE REQUESTS */}
+          <div className="card bg-dark border-secondary p-4 shadow-sm">
+            <h4 className="mb-3"><E n="swords" /> Challenge Requests</h4>
+
+            {challengeRequests.length === 0 ? (
+              <p className="text-secondary mb-0">No challenge requests.</p>
+            ) : (
+              challengeRequests.map((req) => (
+                <div
+                  key={req.id}
+                  className="border rounded p-3 mb-3"
+                  style={{ borderColor: "#444" }}
+                >
+                  <p className="mb-2">
+                    <strong className="text-info">{req.requester_team_name}</strong>{" "}
+                    challenged your team
+                    <span className="text-secondary"> (Week {req.week})</span>
+                  </p>
+
+                  <div className="d-flex gap-2">
+                    <button
+                      className="btn btn-success btn-sm"
+                      onClick={() => respondChallenge(req.id, true)}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => respondChallenge(req.id, false)}
+                    >
+                      Deny
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ================= ROSTER MANAGE MODAL ================= */}
       {rosterModal && (
@@ -876,89 +965,8 @@ export default function MyTeam() {
         </div>
       )}
 
-      {/* ================= JOIN & CHALLENGE REQUESTS ================= */}
-      {(myRole === "Captain" || myRole === "Co-Captain") && (
-        <div className="row g-4 mb-4">
-          {/* JOIN REQUESTS */}
-          <div className="col-12 col-lg-6">
-            <div className="card bg-dark border-secondary p-4 shadow-sm h-100">
-              <h4 className="mb-3"><E n="signup" /> Join Requests</h4>
-
-              {requests.length === 0 ? (
-                <p className="text-secondary mb-0">No join requests.</p>
-              ) : (
-                requests.map((req) => (
-                  <div
-                    key={req.id}
-                    className="border rounded p-3 mb-3"
-                    style={{ borderColor: "#444" }}
-                  >
-                    <PlayerIdentity player={{ id: req.player_id, display_name: req.display_name, username: req.username, avatar: req.avatar }} size={26} />
-
-                    <div className="d-flex gap-2 mt-2">
-                      <button
-                        className="btn btn-success btn-sm"
-                        onClick={() => handleDecision(req.id, "accept")}
-                      >
-                        Accept
-                      </button>
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => handleDecision(req.id, "deny")}
-                      >
-                        Deny
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* CHALLENGE REQUESTS */}
-          <div className="col-12 col-lg-6">
-            <div className="card bg-dark border-secondary p-4 shadow-sm h-100">
-              <h4 className="mb-3"><E n="swords" /> Challenge Requests</h4>
-
-              {challengeRequests.length === 0 ? (
-                <p className="text-secondary mb-0">No challenge requests.</p>
-              ) : (
-                challengeRequests.map((req) => (
-                  <div
-                    key={req.id}
-                    className="border rounded p-3 mb-3"
-                    style={{ borderColor: "#444" }}
-                  >
-                    <p className="mb-2">
-                      <strong className="text-info">{req.requester_team_name}</strong>{" "}
-                      challenged your team
-                      <span className="text-secondary"> (Week {req.week})</span>
-                    </p>
-
-                    <div className="d-flex gap-2">
-                      <button
-                        className="btn btn-success btn-sm"
-                        onClick={() => respondChallenge(req.id, true)}
-                      >
-                        Accept
-                      </button>
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => respondChallenge(req.id, false)}
-                      >
-                        Deny
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ================= ACTIVE MATCHES (Scheduled ONLY) ================= */}
-      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm ecgl-span-all">
         <h4 className="mb-3"><E n="calendar" /> Active Matches</h4>
 
         {(() => {
@@ -1003,7 +1011,7 @@ export default function MyTeam() {
       </div>
 
       {/* ================= PAST MATCHES (Card style like Active) ================= */}
-      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm ecgl-span-all">
         <h4 className="mb-3"><E n="flag" /> Past Matches</h4>
 
         {/* Season Filter */}

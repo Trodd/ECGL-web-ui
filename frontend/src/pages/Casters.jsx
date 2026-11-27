@@ -815,8 +815,10 @@ export default function Casters() {
                                                     {st.matches != null && ` · ${st.matches} played`}
                                                 </div>
                                                 <div className="small text-secondary">
-                                                    {st.division || "Placement"}
-                                                    {st.tier ? ` ${st.tier}` : ""}
+                                                    {st.tier_text ||
+                                                        [st.division, st.tier].filter(Boolean).join(" ") ||
+                                                        "Unranked"}
+                                                    {st.placement ? " · Placement" : ""}
                                                 </div>
                                             </div>
                                         ))}

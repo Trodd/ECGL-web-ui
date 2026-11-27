@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "../toast";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import axios from "axios";
 import { getApiUrl } from "../config";
 import { E } from "../components/CustomEmoji";
@@ -32,6 +32,21 @@ export default function TeamDetail() {
   const [archive, setArchive] = useState([]);
   const [me, setMe] = useState(null);
   const [copiedLogo, setCopiedLogo] = useState(false);
+  const [teamStats, setTeamStats] = useState(null);
+
+  // Team rank / rating / division / tier come from the league team board, so
+  // the numbers here always match the Leaderboard page.
+  useEffect(() => {
+    if (!id) return;
+    axios
+      .get(`${urlBase}/api/leaderboard/teams`, { withCredentials: true })
+      .then((res) => {
+        const list = Array.isArray(res.data) ? res.data : res.data?.teams || [];
+        const idx = list.findIndex((t) => Number(t.id) === Number(id));
+        setTeamStats(idx >= 0 ? { ...list[idx], rank: idx + 1, total: list.length } : null);
+      })
+      .catch(() => setTeamStats(null));
+  }, [id, urlBase]);
 
   useEffect(() => {
     if (!id) return;
@@ -155,6 +170,19 @@ export default function TeamDetail() {
     });
   }, [matches, selectedSeason]);
 
+  // Current streak of decided games (matches arrive newest first).
+  const streak = useMemo(() => {
+    let kind = null;
+    let count = 0;
+    for (const m of matches) {
+      if (m.result !== "Win" && m.result !== "Loss") continue;
+      if (kind === null) kind = m.result;
+      if (m.result !== kind) break;
+      count += 1;
+    }
+    return kind ? { kind, count } : null;
+  }, [matches]);
+
   // ───────────────────────────────────────────────
   // 🔸 SEND CHALLENGE REQUEST
   // ───────────────────────────────────────────────
@@ -226,11 +254,17 @@ export default function TeamDetail() {
   // ───────────────────────────────────────────────
   return (
     <div
-      className="container text-light py-4"
-      style={{ maxWidth: 960 }}
+      className="container text-light py-4 ecgl-dash"
     >
+      {/* ================= BACK (top) ================= */}
+      <div className="ecgl-span-all">
+        <Link to="/teams" className="btn btn-secondary btn-sm">
+          ← Back to Teams
+        </Link>
+      </div>
+
       {/* ================= TEAM HEADER ================= */}
-      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm ecgl-span-2">
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
           <div className="d-flex align-items-center gap-3">
             <TeamLogo
@@ -305,7 +339,7 @@ export default function TeamDetail() {
       </div>
 
       {/* ================= ROSTER ================= */}
-      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm ecgl-roster">
         <h4 className="mb-3">👥 Roster</h4>
 
         {roster.some(p => p.on_cooldown) && (
@@ -349,11 +383,76 @@ export default function TeamDetail() {
         )}
       </div>
 
+      {/* ================= TEAM STATS ================= */}
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+        <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+          <h4 className="mb-0"><E n="trophy" className="emoji-gold" /> Team Stats</h4>
+          {teamStats?.division ? (
+            <span className="badge bg-secondary">
+              {teamStats.division}
+              {teamStats.tier ? ` ${teamStats.tier}` : ""}
+            </span>
+          ) : null}
+          {teamStats?.in_placement ? (
+            <span className="badge bg-info text-dark">In placement</span>
+          ) : null}
+        </div>
+
+        {(() => {
+          const wins = teamStats?.wins;
+          const losses = teamStats?.losses;
+          const games = teamStats?.matches;
+          const decided = (wins ?? 0) + (losses ?? 0);
+          const pct = decided > 0 ? Math.round((wins / decided) * 100) : null;
+
+          return (
+            <>
+              <div className="row text-center">
+                <div className="col-6 col-md-3">
+                  <div className="fw-bold fs-4">
+                    {teamStats?.rank ? `#${teamStats.rank}` : "—"}
+                  </div>
+                  <div className="text-secondary small">
+                    Rank{teamStats?.total ? ` (of ${teamStats.total})` : ""}
+                  </div>
+                </div>
+                <div className="col-6 col-md-3">
+                  <div className="fw-bold fs-4">{teamStats?.rating ?? "—"}</div>
+                  <div className="text-secondary small">Rating</div>
+                </div>
+                <div className="col-6 col-md-3 mt-3 mt-md-0">
+                  <div className="fw-bold fs-4">
+                    <span className="text-success">{wins ?? "—"}</span>
+                    <span className="text-secondary"> – </span>
+                    <span className="text-danger">{losses ?? "—"}</span>
+                  </div>
+                  <div className="text-secondary small">Wins – Losses</div>
+                </div>
+                <div className="col-6 col-md-3 mt-3 mt-md-0">
+                  <div className="fw-bold fs-4">{pct === null ? "—" : `${pct}%`}</div>
+                  <div className="text-secondary small">
+                    Win rate · {games ?? 0} game{games === 1 ? "" : "s"}
+                  </div>
+                </div>
+              </div>
+
+              {streak && (
+                <p className="text-secondary small mb-0 mt-3">
+                  🔥 Current streak: {streak.count} {streak.kind === "Win" ? "win" : "loss"}
+                  {streak.count === 1 ? "" : "es"}
+                  {team.status ? ` · ${team.status}` : ""}
+                </p>
+              )}
+            </>
+          );
+        })()}
+      </div>
+
       {/* ================= TEAM AVAILABILITY ================= */}
       <TeamAvailability teamId={team?.id} />
 
       {/* ================= MATCH HISTORY ================= */}
-      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm">
+      <div className="card bg-dark border-secondary p-4 mb-4 shadow-sm ecgl-span-all">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h4 className="mb-0">📜 Match History</h4>
 
@@ -425,7 +524,7 @@ export default function TeamDetail() {
 
       {/* ================= ARCHIVE ================= */}
       {archive.length > 0 && (
-        <div className="card bg-dark border-secondary p-4 shadow-sm">
+        <div className="card bg-dark border-secondary p-4 shadow-sm ecgl-span-all">
           <h4 className="mb-3">📦 Archived Team Stats</h4>
 
           <div className="table-responsive">
@@ -457,7 +556,7 @@ export default function TeamDetail() {
 
       {/* ================= FORMER MEMBERS (bottom) ================= */}
       {(formerRoster.length > 0 || team.status === "Disbanded") && (
-        <div className="card bg-dark border-secondary p-4 shadow-sm">
+        <div className="card bg-dark border-secondary p-4 shadow-sm ecgl-span-all">
           <h4 className="mb-3">🕓 Former Members</h4>
 
           {formerRoster.length === 0 ? (
@@ -492,6 +591,13 @@ export default function TeamDetail() {
           )}
         </div>
       )}
+
+      {/* ================= BACK (bottom) ================= */}
+      <div className="ecgl-span-all">
+        <Link to="/teams" className="btn btn-secondary">
+          ← Back to Teams
+        </Link>
+      </div>
     </div>
   );
 }
